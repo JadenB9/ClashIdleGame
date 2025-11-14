@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏰 Clash Idle Game</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="gameContainer">
+        <!-- Header UI -->
+        <div id="header">
+            <div class="resource-bar">
+                <div class="resource gold">
+                    <span class="resource-icon">🪙</span>
+                    <span id="goldCount">1000</span>
+                </div>
+                <div class="resource elixir">
+                    <span class="resource-icon">💜</span>
+                    <span id="elixirCount">500</span>
+                </div>
+                <div class="resource dark-elixir">
+                    <span class="resource-icon">🖤</span>
+                    <span id="darkElixirCount">50</span>
+                </div>
+                <div class="resource gems">
+                    <span class="resource-icon">💎</span>
+                    <span id="gemCount">100</span>
+                </div>
+            </div>
+            <div class="player-info">
+                <span id="playerLevel">Level 1</span>
+                <span id="playerName">Chief</span>
+            </div>
+        </div>
+
+        <!-- Main Game Canvas -->
+        <canvas id="gameCanvas" width="1200" height="800"></canvas>
+        
+        <!-- Controls Info -->
+        <div id="controlsInfo">
+            <div>Left Click: Collect Resources 💰</div>
+            <div>Right Click: Building Info 🏠</div>
+        </div>
+
+        <!-- Side Panel -->
+        <div id="sidePanel">
+            <div class="panel-section">
+                <h3>🏗️ Buildings</h3>
+                <div id="buildingMenu" class="building-grid">
+                    <!-- Building options will be populated by JavaScript -->
+                </div>
+            </div>
+            
+            <div class="panel-section">
+                <h3>⚔️ Army</h3>
+                <div id="armyInfo">
+                    <div class="troop-count">Barbarians: <span id="barbarianCount">0</span></div>
+                    <div class="troop-count">Archers: <span id="archerCount">0</span></div>
+                    <div class="troop-count">Giants: <span id="giantCount">0</span></div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3>🔬 Research</h3>
+                <div id="researchMenu">
+                    <!-- Research options will be populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3>🏆 Achievements</h3>
+                <div id="achievementsList">
+                    <!-- Achievements will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div id="bottomControls">
+            <button id="shopBtn" class="control-btn">🛒 Shop</button>
+            <button id="attackBtn" class="control-btn">⚔️ Attack</button>
+            <button id="clanBtn" class="control-btn">🏴 Clan</button>
+            <button id="settingsBtn" class="control-btn">⚙️ Settings</button>
+        </div>
+
+        <!-- Modal for building info/upgrades -->
+        <div id="buildingModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2 id="buildingTitle">Building Name</h2>
+                <div id="buildingStats"></div>
+                <div id="upgradeSection">
+                    <button id="upgradeBtn">Upgrade</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load Scripts -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/buildings.js"></script>
+    <script src="js/resources.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
