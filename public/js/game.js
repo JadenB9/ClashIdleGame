@@ -578,8 +578,20 @@
             };
 
             c.addEventListener('mousedown', onDown);
-            window.addEventListener('mousemove', onMove);
+            // Listen on canvas for hover work (saves events when mouse is over side/top bars),
+            // but also listen on window so we can keep tracking a drag once it has started.
+            c.addEventListener('mousemove', onMove);
+            window.addEventListener('mousemove', (e) => {
+                // Only forward while actively dragging (otherwise canvas handler covers it)
+                if (this.input.down && this.input.drag) onMove(e);
+            });
             window.addEventListener('mouseup', onUp);
+            c.addEventListener('mouseleave', () => {
+                // Clear hover state when the mouse leaves the canvas so the tip hides
+                this.hoverTile = null;
+                this.hoverBuilding = null;
+                this.rebuildHoverTip();
+            });
             c.addEventListener('touchstart', (e) => { e.preventDefault(); onDown(e); }, { passive: false });
             c.addEventListener('touchmove',  (e) => { e.preventDefault(); onMove(e); }, { passive: false });
             c.addEventListener('touchend',   (e) => { e.preventDefault(); onUp(); }, { passive: false });
@@ -664,12 +676,20 @@
             } else {
                 this.hoverTile = null;
             }
+            const prev = this.hoverBuilding;
             this.hoverBuilding = this.buildingAt(t.tx, t.ty);
-            this.showHoverTip();
+
+            // Only regenerate the hover-tip HTML when the hovered building IDENTITY
+            // or LEVEL changes. Position is updated cheaply below.
+            const changed = prev !== this.hoverBuilding
+                || (this.hoverBuilding && this._hoverLevel !== this.hoverBuilding.level);
+            if (changed) this.rebuildHoverTip();
+            this.positionHoverTip();
         }
 
-        showHoverTip() {
-            const tip = document.getElementById('hoverTip');
+        rebuildHoverTip() {
+            const tip = this._hoverTipEl || (this._hoverTipEl = document.getElementById('hoverTip'));
+            if (!tip) return;
             if (this.hoverBuilding && !this.buildMode && !this.spellMode && !this.moveMode) {
                 const b = this.hoverBuilding;
                 const def = BLD[b.type];
@@ -691,14 +711,21 @@
                     if (p.rallyMult) parts.push(`+${(p.rallyMult*100).toFixed(0)}% rally heal`);
                     if (p.waveGems) parts.push(`+${p.waveGems} gem/wave`);
                 }
-                parts.push(`<span style="color:#6b6854">Right-click or Shift+Click to upgrade</span>`);
+                parts.push(`<span style="color:#6b6854">Single-click = menu · Double-click = move</span>`);
                 tip.innerHTML = parts.join('<br>');
-                tip.style.left = (this.input.x + 18) + 'px';
-                tip.style.top = (this.input.y + 18) + 'px';
                 tip.classList.add('visible');
+                this._hoverLevel = b.level;
             } else {
                 tip.classList.remove('visible');
+                this._hoverLevel = -1;
             }
+        }
+
+        positionHoverTip() {
+            const tip = this._hoverTipEl;
+            if (!tip || !tip.classList.contains('visible')) return;
+            tip.style.left = (this.input.x + 18) + 'px';
+            tip.style.top = (this.input.y + 18) + 'px';
         }
 
         handleTap(sx, sy, shift = false, right = false) {
@@ -2434,10 +2461,18 @@
             document.getElementById('btnSave').addEventListener('click', () => { this.save(); this.toast('Game saved', 'success'); this.audio.click(); });
             document.getElementById('btnExport').addEventListener('click', () => { this.exportSave(); });
             document.getElementById('btnReset').addEventListener('click', () => {
-                if (confirm('Erase all progress and start over?')) {
-                    localStorage.removeItem(CFG.saveKey);
-                    location.reload();
-                }
+                this.showConfirm({
+                    title: 'Reset Kingdom',
+                    icon: '⚠',
+                    body: 'Erase all progress and start a new kingdom?<br><br><span style="color:#ff9a6b">This cannot be undone.</span>',
+                    yesText: 'Erase Everything',
+                    noText: 'Keep Playing',
+                    danger: true,
+                    onYes: () => {
+                        localStorage.removeItem(CFG.saveKey);
+                        location.reload();
+                    },
+                });
             });
 
             // Zoom controls
@@ -2674,12 +2709,15 @@
                 }
             }
 
-            this.updateArmyTab();
-            this.updateStatsTab();
+            // Only rebuild inner tab content when that tab is actually visible.
+            // updateUI runs at 10Hz, so skipping hidden tabs saves a LOT of DOM work.
+            const activeTab = document.querySelector('.tab.active')?.dataset.tab;
+            if (activeTab === 'army')  this.updateArmyTab();
+            if (activeTab === 'stats') this.updateStatsTab();
 
             if (!this._menuAcc) this._menuAcc = 0;
             this._menuAcc++;
-            if (this._menuAcc % 5 === 0) this.buildMenu();
+            if (activeTab === 'build' && this._menuAcc % 5 === 0) this.buildMenu();
         }
 
         updateArmyTab() {
@@ -2787,12 +2825,91 @@
         // ---------- Game Over ----------
         gameOver() {
             this.showAlert('☠ KINGDOM FALLEN ☠', 4);
+            // Pause wave escalation so the ruined kingdom is calm behind the modal
+            this.wave.active = false;
+            this.wave.spawnLeft = 0;
+            this.wave.timer = 999999;
+            this.enemies = [];
+            this.projectiles = [];
+            this.gameOverShown = true;
             setTimeout(() => {
-                if (confirm(`Your Town Hall was destroyed on day ${this.dayCount}, wave ${this.wave.number}.\n\nRestart?`)) {
-                    localStorage.removeItem(CFG.saveKey);
-                    location.reload();
-                }
-            }, 2000);
+                this.showConfirm({
+                    title: 'KINGDOM FALLEN',
+                    icon: '☠',
+                    body: `Your Town Hall fell on <b>Day ${this.dayCount}</b>, <b>Wave ${this.wave.number}</b>.<br><br>Raise a new banner and rebuild from the ashes?`,
+                    yesText: '⚔ Rebuild',
+                    noText: 'Not yet',
+                    danger: true,
+                    onYes: () => {
+                        localStorage.removeItem(CFG.saveKey);
+                        location.reload();
+                    },
+                    onNo: () => {
+                        // Declined: give them a 60s grace period to rebuild, then waves resume
+                        this.wave.timer = 60;
+                        this.gameOverShown = false;
+                        this.toast('60s grace — rebuild your Town Hall', 'warn');
+                        this.buildMenu(); // refresh so TH card reappears
+                    },
+                });
+            }, 1800);
+        }
+
+        /**
+         * Custom themed confirm dialog.
+         * opts: { title, body (html), icon, yesText, noText, danger, onYes, onNo }
+         */
+        showConfirm(opts = {}) {
+            // Create once, reuse
+            let el = document.getElementById('confirmDialog');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'confirmDialog';
+                el.className = 'confirm-dialog';
+                el.innerHTML = `
+                    <div class="confirm-backdrop"></div>
+                    <div class="confirm-panel">
+                        <div class="confirm-icon"></div>
+                        <h2 class="confirm-title"></h2>
+                        <div class="confirm-body"></div>
+                        <div class="confirm-actions">
+                            <button class="btn small" data-act="no"></button>
+                            <button class="btn primary" data-act="yes"></button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(el);
+            }
+            const panel = el.querySelector('.confirm-panel');
+            el.querySelector('.confirm-icon').textContent = opts.icon || '⚔';
+            el.querySelector('.confirm-title').textContent = opts.title || 'Confirm';
+            el.querySelector('.confirm-body').innerHTML = opts.body || '';
+            const yesBtn = el.querySelector('[data-act="yes"]');
+            const noBtn  = el.querySelector('[data-act="no"]');
+            yesBtn.textContent = opts.yesText || 'Confirm';
+            noBtn.textContent  = opts.noText || 'Cancel';
+            panel.classList.toggle('danger', !!opts.danger);
+
+            const close = () => {
+                el.classList.remove('open');
+                yesBtn.removeEventListener('click', onYes);
+                noBtn.removeEventListener('click', onNo);
+                el.querySelector('.confirm-backdrop').removeEventListener('click', onNo);
+                document.removeEventListener('keydown', onKey);
+            };
+            const onYes = () => { close(); if (opts.onYes) opts.onYes(); };
+            const onNo  = () => { close(); if (opts.onNo) opts.onNo(); };
+            const onKey = (e) => {
+                if (e.key === 'Escape') onNo();
+                if (e.key === 'Enter')  onYes();
+            };
+            yesBtn.addEventListener('click', onYes);
+            noBtn.addEventListener('click', onNo);
+            el.querySelector('.confirm-backdrop').addEventListener('click', onNo);
+            document.addEventListener('keydown', onKey);
+            // Force reflow to restart animation
+            void el.offsetWidth;
+            el.classList.add('open');
         }
 
         // ---------- Save / Load ----------
