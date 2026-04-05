@@ -492,6 +492,17 @@
         }
 
         init() {
+            // Emergency escape hatch: ?reset=1 in the URL wipes the save before
+            // we even try to load it. Use this when the game is in a broken
+            // state you can't click out of.
+            try {
+                if (window.location.search.indexOf('reset=1') >= 0) {
+                    localStorage.removeItem(CFG.saveKey);
+                    // Strip the query string so reloads don't keep wiping
+                    window.history.replaceState({}, '', window.location.pathname);
+                }
+            } catch (e) { /* ignore */ }
+
             this.resize();
             window.addEventListener('resize', () => this.resize());
             this.bindInput();
@@ -3210,6 +3221,14 @@
         }
 
         setBuildMode(type) {
+            // Hard guard: only ONE Town Hall per kingdom. Refuse the mode even
+            // if a stale card somehow makes it into the DOM.
+            if (type === 'townhall' && this.buildings.some(b => b.type === 'townhall')) {
+                this.audio.error();
+                this.toast('You already have a Town Hall', 'warn');
+                this.buildMenu(true); // force-rebuild so the card is removed
+                return;
+            }
             this.buildMode = type;
             this.moveMode = null;
             this.spellMode = false;
@@ -3792,8 +3811,15 @@
                 if (d.cam && d.cam.zoom) this.cam.zoom = d.cam.zoom;
 
                 if (Array.isArray(d.buildings)) {
+                    let townHallSeen = false;
                     for (const s of d.buildings) {
                         if (!BLD[s.type]) continue; // unknown type (save migration)
+                        // Dedupe town halls on load — only keep the first one.
+                        // Guards against corrupt saves with duplicates.
+                        if (s.type === 'townhall') {
+                            if (townHallSeen) continue;
+                            townHallSeen = true;
+                        }
                         this.buildings.push({
                             id: s.id || Math.random().toString(36).slice(2,9),
                             type: s.type, tx: s.tx, ty: s.ty,
