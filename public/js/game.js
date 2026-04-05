@@ -1052,16 +1052,28 @@
         }
 
         /**
-         * Visual hit test: returns the topmost building whose drawn footprint
-         * contains the given screen point. Unlike `buildingAt(tx, ty)` this checks
-         * the full visual bounds of the building (including the raised top), so
-         * clicking anywhere on a tall tower — not just its base tile — selects it.
+         * Hit test: resolve which building the player is clicking on.
          *
-         * When multiple buildings overlap visually, the one drawn last (highest
-         * depth) wins, which matches what the player actually sees on screen.
+         * Strategy (critical for dense layouts where the Town Hall visually
+         * overlaps buildings behind it):
+         *   1. FIRST check the base tile under the cursor — if that tile is
+         *      inside a building's footprint, that building wins. This is what
+         *      the player sees on the ground, so it should always take priority.
+         *   2. Only if the base tile is empty do we fall back to visual bounds
+         *      testing — that handles the case where the player clicks the
+         *      raised part of a tall tower that sits above an empty tile.
+         *
+         * Previous order was reversed, which let the Town Hall's big bounding
+         * rect swallow clicks aimed at buildings behind it.
          */
         buildingAtScreen(sx, sy) {
-            // Convert screen point → world point (inverse of render transform)
+            // 1) Tile-based lookup — definitive for clicks on the ground plane.
+            const t = this.screenToTile(sx, sy);
+            const byTile = this.buildingAt(t.tx, t.ty);
+            if (byTile) return byTile;
+
+            // 2) Visual bounds fallback — for clicks on the raised part of a
+            // tall tower whose base tile isn't under the cursor.
             const wx = (sx - this.cam.x) / this.cam.zoom;
             const wy = (sy - this.cam.y) / this.cam.zoom;
             let best = null;
@@ -1073,26 +1085,19 @@
                 const fw = CFG.tileW * size / 2;
                 const fh = CFG.tileH * size / 2;
                 const h = this.buildHeight(b.type);
-                // Visual bounding rect: from top of roof down to bottom of base
+                // Only test the raised region (above the base diamond) so the
+                // bounding box doesn't swallow clicks on buildings behind this one.
                 const left   = center.x - fw;
                 const right  = center.x + fw;
                 const top    = center.y - fh - h;
-                const bottom = center.y + fh;
+                const bottom = center.y - fh * 0.2; // just above the base plane
                 if (wx >= left && wx <= right && wy >= top && wy <= bottom) {
-                    // Prefer the frontmost building when clicks overlap
                     const depth = b.tx + b.ty + size;
                     if (depth > bestDepth) {
                         bestDepth = depth;
                         best = b;
                     }
                 }
-            }
-            // Fall back to tile-based lookup if nothing hit visually — this keeps
-            // clicking the base tile of a 1-tile building working even when the
-            // visual bounds are tight.
-            if (!best) {
-                const t = this.screenToTile(sx, sy);
-                return this.buildingAt(t.tx, t.ty);
             }
             return best;
         }
@@ -2167,16 +2172,21 @@
             const ok = this.canPlace(this.moveMode.type, tx, ty);
             this.moveMode.tx = origTx; this.moveMode.ty = origTy;
             const color = ok ? '#5cd8ff' : '#ff5d5d';
+            // Thick pulsing snap indicator on the target tile(s) — the pulse
+            // amplitude is driven by tnow so it's always visible even at low zoom.
+            const pulse = 0.5 + 0.5 * Math.sin(this.tnow * 6);
+            const fillAlpha = ok ? (0x55 + Math.floor(pulse * 0x55)) : 0x66;
+            const fillHex = color + fillAlpha.toString(16).padStart(2, '0');
             for (let dy = 0; dy < def.size; dy++) {
                 for (let dx = 0; dx < def.size; dx++) {
-                    this.drawTileAt(ctx, tx + dx, ty + dy, color + '44', color + 'cc', 2);
+                    this.drawTileAt(ctx, tx + dx, ty + dy, fillHex, color, 3);
                 }
             }
             // Draw a translucent ghost of the building at the target tile so you see
             // exactly what/where it'll land. Only while canPlace is ok.
             if (ok) {
                 ctx.save();
-                ctx.globalAlpha = 0.55;
+                ctx.globalAlpha = 0.7;
                 this.drawBuilding(ctx, {
                     tx, ty, type: this.moveMode.type,
                     level: this.moveMode.level,
@@ -2209,9 +2219,19 @@
             // If this building is currently being drag-moved AND we're rendering the
             // original (not the ghost), dim it heavily so the ghost is the focus.
             const isDraggedSource = this.input?.dragMove && this.moveMode === b && !b.ghost;
+            // During any drag-move operation, fade ALL other buildings so the
+            // player can see open tiles through the crowd — solves the "I can't
+            // tell where I'm dropping behind the town hall" problem.
+            const anyDragging = this.input?.dragMove && !b.ghost;
+            let savedAlpha = false;
             if (isDraggedSource) {
                 ctx.save();
-                ctx.globalAlpha = 0.25;
+                ctx.globalAlpha = 0.2;
+                savedAlpha = true;
+            } else if (anyDragging && this.moveMode !== b) {
+                ctx.save();
+                ctx.globalAlpha = 0.45;
+                savedAlpha = true;
             }
             // Per-building idle bob so the village doesn't feel static
             if (b._seed === undefined) b._seed = Math.random() * Math.PI * 2;
@@ -2442,7 +2462,7 @@
                 ctx.restore();
             }
 
-            if (isDraggedSource) ctx.restore();
+            if (savedAlpha) ctx.restore();
         }
 
         buildHeight(type) {
