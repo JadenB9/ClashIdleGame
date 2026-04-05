@@ -365,6 +365,18 @@
         const h = (v) => Math.round(v).toString(16).padStart(2,'0');
         return '#' + h(r1+(r2-r1)*t) + h(g1+(g2-g1)*t) + h(b1+(b2-b1)*t);
     };
+    // Standard ray-cast point-in-polygon. poly is [[x,y], ...] in any order.
+    const pointInPolygon = (px, py, poly) => {
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const xi = poly[i][0], yi = poly[i][1];
+            const xj = poly[j][0], yj = poly[j][1];
+            const intersect = ((yi > py) !== (yj > py)) &&
+                (px < (xj - xi) * (py - yi) / (yj - yi + 1e-9) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    };
 
     // ---------- AUDIO (procedural WebAudio) ----------
     class Audio {
@@ -1065,17 +1077,18 @@
         /**
          * Hit test: resolve which building the player is clicking on.
          *
-         * Strategy (critical for dense layouts where the Town Hall visually
-         * overlaps buildings behind it):
-         *   1. FIRST check the base tile under the cursor — if that tile is
-         *      inside a building's footprint, that building wins. This is what
-         *      the player sees on the ground, so it should always take priority.
-         *   2. Only if the base tile is empty do we fall back to visual bounds
-         *      testing — that handles the case where the player clicks the
-         *      raised part of a tall tower that sits above an empty tile.
+         * Strategy:
+         *   1. Check the base tile under the cursor — if that tile is inside a
+         *      building's footprint, that building is the winner (it's what's
+         *      visible on the ground plane).
+         *   2. Otherwise check each building's actual iso silhouette (a hexagon
+         *      made from the base diamond + the two side faces + the top
+         *      diamond). This matches the pixels the player actually sees.
+         *   3. Also check the level marker region drawn above each building so
+         *      clicking the floating number acts as clicking the building.
          *
-         * Previous order was reversed, which let the Town Hall's big bounding
-         * rect swallow clicks aimed at buildings behind it.
+         * Uses frontmost-depth ordering so when hexagons overlap, the building
+         * drawn on top wins.
          */
         buildingAtScreen(sx, sy) {
             // 1) Tile-based lookup — definitive for clicks on the ground plane.
@@ -1083,8 +1096,7 @@
             const byTile = this.buildingAt(t.tx, t.ty);
             if (byTile) return byTile;
 
-            // 2) Visual bounds fallback — for clicks on the raised part of a
-            // tall tower whose base tile isn't under the cursor.
+            // 2) Polygon check against the iso silhouette + level marker.
             const wx = (sx - this.cam.x) / this.cam.zoom;
             const wy = (sy - this.cam.y) / this.cam.zoom;
             let best = null;
@@ -1096,13 +1108,36 @@
                 const fw = CFG.tileW * size / 2;
                 const fh = CFG.tileH * size / 2;
                 const h = this.buildHeight(b.type);
-                // Only test the raised region (above the base diamond) so the
-                // bounding box doesn't swallow clicks on buildings behind this one.
-                const left   = center.x - fw;
-                const right  = center.x + fw;
-                const top    = center.y - fh - h;
-                const bottom = center.y - fh * 0.2; // just above the base plane
-                if (wx >= left && wx <= right && wy >= top && wy <= bottom) {
+
+                // Iso silhouette is a hexagon. Six corners:
+                //   front-bottom:  (cx, cy + fh)
+                //   right-bottom:  (cx + fw, cy)
+                //   right-top:     (cx + fw, cy - h)
+                //   back-top:      (cx, cy - fh - h)
+                //   left-top:      (cx - fw, cy - h)
+                //   left-bottom:   (cx - fw, cy)
+                const hex = [
+                    [center.x,           center.y + fh],
+                    [center.x + fw,      center.y],
+                    [center.x + fw,      center.y - h],
+                    [center.x,           center.y - fh - h],
+                    [center.x - fw,      center.y - h],
+                    [center.x - fw,      center.y],
+                ];
+                const inHex = pointInPolygon(wx, wy, hex);
+
+                // Level marker: a tile-shaped clickable area floating ABOVE the
+                // building. Always present so the player has a guaranteed click
+                // target no matter how crowded the layout.
+                const markerCx = center.x;
+                const markerCy = center.y - fh - h - 22;
+                const markerHalfW = 18;
+                const markerHalfH = 11;
+                const inMarker =
+                    wx >= markerCx - markerHalfW && wx <= markerCx + markerHalfW &&
+                    wy >= markerCy - markerHalfH && wy <= markerCy + markerHalfH;
+
+                if (inHex || inMarker) {
                     const depth = b.tx + b.ty + size;
                     if (depth > bestDepth) {
                         bestDepth = depth;
@@ -1609,23 +1644,14 @@
             // Selection ring decay (clicked non-collector pulse)
             if (this.selectHighlight > 0) this.selectHighlight = Math.max(0, this.selectHighlight - dt * 0.9);
 
-            // Auto-collect tick — every 3 seconds, silently collect from all
-            // resource buildings if the toggle is on. Doesn't feed the combo
-            // (that would trivialize the click-frenzy achievement) but does
-            // give offline-style passive collection while the game is open.
+            // Auto-collect tick — every 5 seconds, trigger the full "Collect All"
+            // action (same as the bottom-bar button) when the toggle is on.
+            // Gives the visible collect effect (particles + toast) automatically.
             if (this.autoCollect) {
                 this._autoCollectAcc = (this._autoCollectAcc || 0) + dt;
-                if (this._autoCollectAcc >= 3) {
+                if (this._autoCollectAcc >= 5) {
                     this._autoCollectAcc = 0;
-                    for (const b of this.buildings) {
-                        const def = BLD[b.type];
-                        if (def.clickBonus) {
-                            const bonus = def.clickBonus(b.level);
-                            for (const [k, v] of Object.entries(bonus)) {
-                                this.res[k] = Math.min(this.cap(), (this.res[k] || 0) + v);
-                            }
-                        }
-                    }
+                    this.collectAll();
                 }
             }
 
@@ -2183,21 +2209,33 @@
             const ok = this.canPlace(this.moveMode.type, tx, ty);
             this.moveMode.tx = origTx; this.moveMode.ty = origTy;
             const color = ok ? '#5cd8ff' : '#ff5d5d';
-            // Thick pulsing snap indicator on the target tile(s) — the pulse
-            // amplitude is driven by tnow so it's always visible even at low zoom.
+            // Thick pulsing snap indicator on the target tile(s) — very
+            // prominent so the drop target is obvious at a glance.
             const pulse = 0.5 + 0.5 * Math.sin(this.tnow * 6);
-            const fillAlpha = ok ? (0x55 + Math.floor(pulse * 0x55)) : 0x66;
-            const fillHex = color + fillAlpha.toString(16).padStart(2, '0');
+            const fillAlpha = ok ? (0x88 + Math.floor(pulse * 0x55)) : 0x88;
+            const fillHex = color + Math.min(0xff, fillAlpha).toString(16).padStart(2, '0');
             for (let dy = 0; dy < def.size; dy++) {
                 for (let dx = 0; dx < def.size; dx++) {
-                    this.drawTileAt(ctx, tx + dx, ty + dy, fillHex, color, 3);
+                    this.drawTileAt(ctx, tx + dx, ty + dy, fillHex, color, 4);
                 }
             }
-            // Draw a translucent ghost of the building at the target tile so you see
-            // exactly what/where it'll land. Only while canPlace is ok.
+            // Extra glowing outer ring around the target footprint
             if (ok) {
                 ctx.save();
-                ctx.globalAlpha = 0.7;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2 + pulse * 2;
+                ctx.globalAlpha = 0.6 + pulse * 0.4;
+                const cx = this.worldIso(tx + def.size / 2, ty + def.size / 2);
+                ctx.beginPath();
+                ctx.ellipse(cx.x, cx.y + CFG.tileH / 2, CFG.tileW * def.size * 0.65, CFG.tileH * def.size * 0.65, 0, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            }
+            // Draw a mostly-opaque ghost of the building at the target tile so
+            // the player clearly sees exactly what/where it'll land.
+            if (ok) {
+                ctx.save();
+                ctx.globalAlpha = 0.9;
                 this.drawBuilding(ctx, {
                     tx, ty, type: this.moveMode.type,
                     level: this.moveMode.level,
@@ -2228,20 +2266,20 @@
             const size = def.size;
             const scale = b.animScale ?? 1;
             // If this building is currently being drag-moved AND we're rendering the
-            // original (not the ghost), dim it heavily so the ghost is the focus.
+            // original (not the ghost), fade it almost out so the target ghost
+            // is the clear focus.
             const isDraggedSource = this.input?.dragMove && this.moveMode === b && !b.ghost;
-            // During any drag-move operation, fade ALL other buildings so the
-            // player can see open tiles through the crowd — solves the "I can't
-            // tell where I'm dropping behind the town hall" problem.
+            // During any drag-move operation, fade ALL other buildings down
+            // hard so the player can clearly see open tiles through the crowd.
             const anyDragging = this.input?.dragMove && !b.ghost;
             let savedAlpha = false;
             if (isDraggedSource) {
                 ctx.save();
-                ctx.globalAlpha = 0.2;
+                ctx.globalAlpha = 0.12;
                 savedAlpha = true;
             } else if (anyDragging && this.moveMode !== b) {
                 ctx.save();
-                ctx.globalAlpha = 0.45;
+                ctx.globalAlpha = 0.3;
                 savedAlpha = true;
             }
             // Per-building idle bob so the village doesn't feel static
@@ -2266,24 +2304,29 @@
             ctx.ellipse(centerP.x, centerP.y + fh * 0.25, fw * 0.8, fh * 0.5, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            const h = this.buildHeight(b.type) * scale;
+            // Buildings grow slightly taller as they level up — another
+            // glance-level cue that a structure has been upgraded.
+            const lvlProgress = Math.min(1, ((b.level || 1) - 1) / Math.max(1, (def.maxLevel || 20) - 1));
+            const heightMult = 1 + lvlProgress * 0.28;
+            const h = this.buildHeight(b.type) * scale * heightMult;
 
             if (isWall) {
                 this.drawWall(ctx, b, centerP, h, fw, fh);
             } else {
-                // Per-level color shift — buildings grow richer as they upgrade.
-                // Low levels look as defined; mid levels darken toward a saturated
-                // accent; high levels get a warm gold wash on the roof to hint
-                // at their max-tier status. Computed per frame but the math is
-                // trivial (3 mixColor calls).
+                // Per-level color shift — buildings evolve visibly every few levels.
+                // Low levels use their defined colors; mid levels get a strong
+                // darken + saturation boost; high levels get a brilliant gold
+                // wash on the roof. Shifts are aggressive enough that you can
+                // tell a Lv 1 from a Lv 5 at a glance.
                 const lvl = b.level || 1;
                 const maxLv = def.maxLevel || 20;
                 const progress = Math.min(1, (lvl - 1) / Math.max(1, maxLv - 1));
-                // Darken faces gradually (up to 30% darker at max)
-                const c1 = progress > 0 ? mixColor(def.color1, '#1a1018', progress * 0.32) : def.color1;
-                const c2 = progress > 0 ? mixColor(def.color2, '#3a1810', progress * 0.25) : def.color2;
-                // Roof shifts toward a warm gold tone at high levels
-                const rf = progress > 0 ? mixColor(def.roof, '#ffc857', Math.min(0.55, progress * 0.55)) : def.roof;
+                // Darken right face toward a rich shadow color (up to 55%)
+                const c1 = progress > 0 ? mixColor(def.color1, '#0a0410', progress * 0.55) : def.color1;
+                // Left face shifts toward a warm ember tone as buildings grow
+                const c2 = progress > 0 ? mixColor(def.color2, '#4a1808', progress * 0.45) : def.color2;
+                // Roof shifts toward a brilliant gold tone
+                const rf = progress > 0 ? mixColor(def.roof, '#ffc857', Math.min(0.8, progress * 0.85)) : def.roof;
 
                 // Right face
                 ctx.fillStyle = c1;
@@ -2409,19 +2452,30 @@
 
             if (b.ghost) return;
 
-            // Level badge
-            ctx.fillStyle = 'rgba(0,0,0,.85)';
-            ctx.beginPath();
-            ctx.arc(centerP.x + fw * 0.45, centerP.y - h - fh * 0.15, 11, 0, Math.PI * 2);
-            ctx.fill();
+            // Floating level marker — a fat pill ABOVE the building that
+            // always gives the player a guaranteed click target even in
+            // crowded layouts. This area is also registered as a hit target
+            // in buildingAtScreen().
+            const markerCx = centerP.x;
+            const markerCy = centerP.y - fh - h - 22;
+            const markerHalfW = 18;
+            const markerHalfH = 11;
+            // Drop shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(markerCx - markerHalfW, markerCy - markerHalfH + 2, markerHalfW * 2, markerHalfH * 2);
+            // Body
+            ctx.fillStyle = '#1a2034';
+            ctx.fillRect(markerCx - markerHalfW, markerCy - markerHalfH, markerHalfW * 2, markerHalfH * 2);
+            // Gold border
             ctx.strokeStyle = '#ffc857';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.fillStyle = '#ffc857';
-            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(markerCx - markerHalfW, markerCy - markerHalfH, markerHalfW * 2, markerHalfH * 2);
+            // Level number
+            ctx.fillStyle = '#ffe3a1';
+            ctx.font = 'bold 13px Cinzel, serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(b.level, centerP.x + fw * 0.45, centerP.y - h - fh * 0.15);
+            ctx.fillText('Lv ' + b.level, markerCx, markerCy);
 
             // HP bar
             if (b.hp < b.maxHp) {
