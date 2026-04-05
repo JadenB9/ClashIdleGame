@@ -445,8 +445,10 @@
 
             // Modes
             this.buildMode = null;    // building type string or null
-            this.moveMode = null;     // building being moved or null
+            this.moveMode = null;     // building being moved or null (also set during drag-to-move)
             this.spellMode = false;   // lightning targeting?
+            this.selectedBuilding = null;  // last left-clicked non-collector (highlight target)
+            this.selectHighlight = 0; // 0-1 decay used for the selection ring pulse
 
             // Boost
             this.boost = { mult: 1, timeLeft: 0 };
@@ -521,9 +523,15 @@
             };
 
             const onDown = (e) => {
+                // We only respond to the primary (left) mouse button for down-tracking.
+                // Right-click is handled by the contextmenu listener below.
+                if (e.button !== undefined && e.button !== 0) {
+                    return;
+                }
                 const p = getPos(e);
                 this.input.down = true;
                 this.input.drag = false;
+                this.input.dragMove = false;    // dragging-to-move a building?
                 this.input.downX = p.x;
                 this.input.downY = p.y;
                 this.input.lastX = p.x;
@@ -532,8 +540,8 @@
                 this.input.y = p.y;
                 this.input.downTime = performance.now();
                 this.input.shift = !!(e.shiftKey);
-                this.input.right = (e.button === 2);
-                // Identify what's under the press — when a building is pressed we NEVER pan
+                this.input.right = false;
+                // Identify what's under the press
                 const t = this.screenToTile(p.x, p.y);
                 this.input.downBuilding = this.buildingAt(t.tx, t.ty);
                 this.audio.ensure();
@@ -548,17 +556,24 @@
                     const totalDy = p.y - this.input.downY;
                     const dist = Math.hypot(totalDx, totalDy);
 
-                    // Never pan if the press started on a building (so we can click buildings reliably).
-                    // Never pan while in build/move/spell mode — that would be confusing.
-                    const canPan = !this.input.downBuilding
-                                && !this.buildMode
-                                && !this.moveMode
-                                && !this.spellMode;
-
-                    if (canPan && dist > DRAG_THRESH) {
+                    // Once the mouse has traveled past the threshold, commit to a drag.
+                    // Two kinds of drag:
+                    //   1. dragMove: press started on a building → drag-to-move that building
+                    //   2. pan: press started on grass → pan the camera
+                    if (!this.input.drag && dist > DRAG_THRESH) {
                         this.input.drag = true;
+                        if (this.input.downBuilding
+                                && !this.buildMode
+                                && !this.spellMode
+                                && !this.moveMode) {
+                            this.input.dragMove = true;
+                            // Enter live move mode; ghost + range preview render while dragging
+                            this.moveMode = this.input.downBuilding;
+                            this.updateCanvasCursor();
+                        }
                     }
-                    if (this.input.drag) {
+                    if (this.input.drag && !this.input.dragMove) {
+                        // Pan the world
                         this.cam.x += p.x - this.input.lastX;
                         this.cam.y += p.y - this.input.lastY;
                     }
@@ -569,11 +584,18 @@
             };
 
             const onUp = () => {
-                if (this.input.down && !this.input.drag) {
-                    this.handleTap(this.input.x, this.input.y, this.input.shift, this.input.right);
+                if (this.input.down) {
+                    if (this.input.dragMove) {
+                        // Drag-to-move release: try to place at the hovered tile
+                        this.commitDragMove();
+                    } else if (!this.input.drag) {
+                        // Pure left-click (no drag) → collect / select / place etc.
+                        this.handleTap(this.input.x, this.input.y, this.input.shift, /*right*/ false);
+                    }
                 }
                 this.input.down = false;
                 this.input.drag = false;
+                this.input.dragMove = false;
                 this.input.downBuilding = null;
             };
 
@@ -750,29 +772,7 @@
                 return;
             }
 
-            // Move mode: relocate selected building to empty tile
-            if (this.moveMode) {
-                const mb = this.moveMode;
-                // Restore for can-place test excluding the building itself
-                const originalTx = mb.tx, originalTy = mb.ty;
-                mb.tx = -999; mb.ty = -999;
-                const ok = this.canPlace(mb.type, tx, ty);
-                mb.tx = originalTx; mb.ty = originalTy;
-                if (ok) {
-                    mb.tx = tx;
-                    mb.ty = ty;
-                    this.toast('Building moved', 'success');
-                    this.audio.build();
-                    this.moveMode = null;
-                    this.updateCanvasCursor();
-                } else {
-                    this.audio.error();
-                    this.toast('Invalid move location', 'warn');
-                }
-                return;
-            }
-
-            // Build mode placement
+            // Build mode placement (first left-click places the queued building)
             if (this.buildMode) {
                 if (this.canPlace(this.buildMode, tx, ty)) {
                     this.placeBuilding(this.buildMode, tx, ty);
@@ -783,41 +783,75 @@
                 return;
             }
 
-            // Click building
+            // Click a building
             const b = this.buildingAt(tx, ty);
             if (b) {
-                // Shift+click or right-click: immediate upgrade modal
+                // Right-click OR shift-click: upgrade menu (for all buildings)
                 if (shift || right) {
                     this.openBuildingModal(b);
                     return;
                 }
-                // Double-click detection → move mode
-                const now = performance.now();
-                const dt = now - this.input.lastClickTime;
-                const sameTile = (this.input.lastClickTx === tx && this.input.lastClickTy === ty);
-                if (dt < 320 && sameTile && b.type !== 'townhall') {
-                    // Double click → select for move
-                    this.input.lastClickTime = 0;
-                    this.closeModal();
-                    this.moveMode = b;
-                    this.setBuildMode(null);
-                    this.spellMode = false;
-                    this.updateCanvasCursor();
-                    this.toast('Double-click detected — click an empty tile to move', 'warn');
-                    this.audio.click();
-                    return;
+                // Left-click: collect (for resource buildings) or select (for others)
+                const def = BLD[b.type];
+                if (def.clickBonus) {
+                    // Collect — feeds combo
+                    this.collectFrom(b);
+                } else {
+                    // Non-collector: mark as selected and flash a ring
+                    this.selectBuilding(b);
                 }
-                this.input.lastClickTime = now;
-                this.input.lastClickTx = tx;
-                this.input.lastClickTy = ty;
-
-                // Single click → open upgrade / action modal (for ALL buildings)
-                this.openBuildingModal(b);
                 return;
-            } else {
-                // Clicked empty terrain — clear last click state
-                this.input.lastClickTime = 0;
             }
+            // Clicked empty terrain — clear selection
+            this.selectedBuilding = null;
+        }
+
+        /** Apply a short highlight to a building so the player sees their click registered. */
+        selectBuilding(b) {
+            this.selectedBuilding = b;
+            this.selectHighlight = 1.0;
+            this.audio.click();
+            // Float the name once so they see what they clicked
+            const p = this.worldIso(b.tx + 0.5, b.ty + 0.5);
+            const def = BLD[b.type];
+            this.floatText(def.name, p.x, p.y - 40, '#ffe3a1');
+        }
+
+        /** Called on mouse-up when a drag-to-move was in progress. */
+        commitDragMove() {
+            const mb = this.moveMode;
+            if (!mb) { this.moveMode = null; this.updateCanvasCursor(); return; }
+            const t = this.hoverTile;
+            if (!t) {
+                this.toast('Drop on a valid tile', 'warn');
+                this.moveMode = null;
+                this.updateCanvasCursor();
+                return;
+            }
+            const originalTx = mb.tx, originalTy = mb.ty;
+            mb.tx = -999; mb.ty = -999;
+            const ok = this.canPlace(mb.type, t.tx, t.ty);
+            mb.tx = originalTx; mb.ty = originalTy;
+            if (ok) {
+                mb.tx = t.tx;
+                mb.ty = t.ty;
+                this.audio.build();
+                // Tiny dust puff on arrival
+                const p = this.worldIso(mb.tx + 0.5, mb.ty + 0.5);
+                for (let i = 0; i < 8; i++) {
+                    this.particles.push({
+                        x: p.x + rand(-10, 10), y: p.y + rand(-6, 4),
+                        vx: rand(-30, 30), vy: rand(-50, -15),
+                        life: 0.5, max: 0.5,
+                        color: '#d4c0a0', size: rand(2, 4),
+                    });
+                }
+            } else {
+                this.audio.error();
+                this.toast('Cannot place there', 'warn');
+            }
+            this.moveMode = null;
+            this.updateCanvasCursor();
         }
 
         /** Apply a click-bonus collection burst to a building (from the modal's Collect button). */
@@ -1373,6 +1407,9 @@
             // Flash decay
             if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 2);
 
+            // Selection ring decay (clicked non-collector pulse)
+            if (this.selectHighlight > 0) this.selectHighlight = Math.max(0, this.selectHighlight - dt * 0.9);
+
             // UI tick (less frequent)
             this._uiAcc = (this._uiAcc || 0) + dt;
             if (this._uiAcc >= 0.1) { this._uiAcc = 0; this.updateUI(); }
@@ -1580,7 +1617,7 @@
 
         ensureGroundCache() {
             if (this.groundCache) return;
-            // World-space bounding box of the full grid
+            // World-space bounding box of the full grid + a large scenery frame.
             const corners = [
                 this.worldIso(0, 0),
                 this.worldIso(CFG.gridW, 0),
@@ -1594,8 +1631,10 @@
                 if (p.x > maxX) maxX = p.x;
                 if (p.y > maxY) maxY = p.y;
             }
-            const pad = 40;
-            minX -= pad; minY -= pad; maxX += pad; maxY += pad + CFG.tileH;
+            // Wide scenery frame so camera pan always shows terrain + decorations
+            const padX = 760;
+            const padY = 520;
+            minX -= padX; minY -= padY; maxX += padX; maxY += padY + CFG.tileH;
             const w = Math.ceil(maxX - minX);
             const h = Math.ceil(maxY - minY);
             const cv = document.createElement('canvas');
@@ -1605,14 +1644,209 @@
             // Shift world (0,0) to (offsetX, offsetY) within the cache
             gctx.translate(-minX, -minY);
 
-            // Base terrain — painterly variation so tiles don't look algorithmic
-            // Pseudo-random per-tile without runtime cost at frame time
+            // Pseudo-random per-coord hash without runtime cost at frame time
             const hash = (x, y) => {
                 let h = (x * 374761393 ^ y * 668265263) >>> 0;
                 h = (h ^ (h >>> 13)) >>> 0;
                 h = (h * 1274126177) >>> 0;
                 return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
             };
+
+            // ===== FAR BACKGROUND — outer "sea of grass / dirt" terrain =====
+            // Base wash so there's no black outside the grid
+            const bgGrad = gctx.createLinearGradient(minX, minY, maxX, maxY);
+            bgGrad.addColorStop(0, '#1f321a');
+            bgGrad.addColorStop(0.5, '#253a1d');
+            bgGrad.addColorStop(1, '#1a2e14');
+            gctx.fillStyle = bgGrad;
+            gctx.fillRect(minX, minY, w, h);
+
+            // Sprinkled darker patches to break the wash up
+            for (let i = 0; i < 260; i++) {
+                const r = hash(i * 13, i * 29);
+                const r2 = hash(i * 17, i * 31);
+                const x = minX + r * w;
+                const y = minY + r2 * h;
+                gctx.fillStyle = `rgba(10, 20, 8, ${0.08 + r * 0.12})`;
+                gctx.beginPath();
+                gctx.ellipse(x, y, 30 + r * 60, 16 + r2 * 30, 0, 0, Math.PI * 2);
+                gctx.fill();
+            }
+
+            // ===== SCENERY OBJECTS in the frame (outside the grid) =====
+            // Determine if a world point is INSIDE the grid (diamond shape)
+            const inGrid = (wx, wy) => {
+                // Convert world point back to tile space
+                const tx = wx / CFG.tileW + wy / CFG.tileH;
+                const ty = -wx / CFG.tileW + wy / CFG.tileH;
+                return tx > -0.5 && tx < CFG.gridW + 0.5 && ty > -0.5 && ty < CFG.gridH + 0.5;
+            };
+
+            const drawTree = (x, y, scale = 1) => {
+                // Dark trunk
+                gctx.fillStyle = '#3a260e';
+                gctx.fillRect(x - 2 * scale, y - 6 * scale, 4 * scale, 10 * scale);
+                // Pine canopy — three stacked triangles
+                const layers = [
+                    { w: 22, h: 14, off: 6 },
+                    { w: 18, h: 12, off: 14 },
+                    { w: 14, h: 10, off: 21 },
+                ];
+                for (const L of layers) {
+                    gctx.fillStyle = '#2c4a1a';
+                    gctx.beginPath();
+                    gctx.moveTo(x, y - (L.off + L.h) * scale);
+                    gctx.lineTo(x + (L.w / 2) * scale, y - L.off * scale);
+                    gctx.lineTo(x - (L.w / 2) * scale, y - L.off * scale);
+                    gctx.closePath();
+                    gctx.fill();
+                    gctx.strokeStyle = 'rgba(0,0,0,0.35)';
+                    gctx.lineWidth = 1;
+                    gctx.stroke();
+                    // Highlight edge
+                    gctx.fillStyle = 'rgba(140, 180, 90, 0.25)';
+                    gctx.beginPath();
+                    gctx.moveTo(x - (L.w / 2) * scale, y - L.off * scale);
+                    gctx.lineTo(x, y - (L.off + L.h) * scale);
+                    gctx.lineTo(x - 2 * scale, y - L.off * scale);
+                    gctx.closePath();
+                    gctx.fill();
+                }
+            };
+
+            const drawRock = (x, y, scale = 1) => {
+                gctx.fillStyle = 'rgba(0,0,0,0.3)';
+                gctx.beginPath();
+                gctx.ellipse(x, y + 3 * scale, 9 * scale, 3 * scale, 0, 0, Math.PI * 2);
+                gctx.fill();
+                const g = gctx.createRadialGradient(x - 2, y - 3, 1, x, y, 10 * scale);
+                g.addColorStop(0, '#8c8890');
+                g.addColorStop(1, '#4a4850');
+                gctx.fillStyle = g;
+                gctx.beginPath();
+                gctx.moveTo(x - 8 * scale, y + 2 * scale);
+                gctx.quadraticCurveTo(x - 10 * scale, y - 6 * scale, x - 2 * scale, y - 7 * scale);
+                gctx.quadraticCurveTo(x + 7 * scale, y - 8 * scale, x + 9 * scale, y - 2 * scale);
+                gctx.quadraticCurveTo(x + 8 * scale, y + 4 * scale, x - 8 * scale, y + 2 * scale);
+                gctx.closePath();
+                gctx.fill();
+                gctx.strokeStyle = 'rgba(0,0,0,0.45)';
+                gctx.lineWidth = 1;
+                gctx.stroke();
+            };
+
+            const drawBush = (x, y) => {
+                gctx.fillStyle = '#2e4e1d';
+                gctx.beginPath();
+                gctx.arc(x, y, 6, 0, Math.PI * 2);
+                gctx.arc(x + 5, y - 2, 5, 0, Math.PI * 2);
+                gctx.arc(x - 5, y - 2, 5, 0, Math.PI * 2);
+                gctx.fill();
+                gctx.strokeStyle = 'rgba(0,0,0,0.35)';
+                gctx.lineWidth = 0.8;
+                gctx.stroke();
+                // Tiny flowers
+                gctx.fillStyle = '#f5d260';
+                gctx.beginPath();
+                gctx.arc(x + 2, y - 3, 1, 0, Math.PI * 2);
+                gctx.arc(x - 3, y - 1, 1, 0, Math.PI * 2);
+                gctx.fill();
+            };
+
+            const drawPath = (ax, ay, bx, by) => {
+                gctx.strokeStyle = 'rgba(180, 150, 90, 0.35)';
+                gctx.lineWidth = 8;
+                gctx.lineCap = 'round';
+                gctx.beginPath();
+                gctx.moveTo(ax, ay);
+                const mx = (ax + bx) / 2 + (hash(ax, by) - 0.5) * 80;
+                const my = (ay + by) / 2 + (hash(bx, ay) - 0.5) * 40;
+                gctx.quadraticCurveTo(mx, my, bx, by);
+                gctx.stroke();
+                gctx.strokeStyle = 'rgba(210, 180, 120, 0.25)';
+                gctx.lineWidth = 5;
+                gctx.stroke();
+            };
+
+            // Water pool / lake on one side
+            const drawLake = (cx, cy, rx, ry) => {
+                // Shoreline shadow
+                gctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+                gctx.beginPath();
+                gctx.ellipse(cx + 4, cy + 4, rx + 8, ry + 6, 0, 0, Math.PI * 2);
+                gctx.fill();
+                // Water
+                const wg = gctx.createRadialGradient(cx - rx * 0.3, cy - ry * 0.3, 4, cx, cy, Math.max(rx, ry));
+                wg.addColorStop(0, '#5aa9d8');
+                wg.addColorStop(0.5, '#3079b0');
+                wg.addColorStop(1, '#1b4668');
+                gctx.fillStyle = wg;
+                gctx.beginPath();
+                gctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+                gctx.fill();
+                // Reed clumps on the edge
+                for (let i = 0; i < 8; i++) {
+                    const ang = (i / 8) * Math.PI * 2;
+                    const xx = cx + Math.cos(ang) * rx * 0.95;
+                    const yy = cy + Math.sin(ang) * ry * 0.95;
+                    gctx.strokeStyle = '#486b2a';
+                    gctx.lineWidth = 1.5;
+                    gctx.beginPath();
+                    gctx.moveTo(xx - 1, yy);
+                    gctx.lineTo(xx - 1, yy - 8);
+                    gctx.moveTo(xx + 1, yy);
+                    gctx.lineTo(xx + 1, yy - 9);
+                    gctx.moveTo(xx + 3, yy);
+                    gctx.lineTo(xx + 3, yy - 6);
+                    gctx.stroke();
+                }
+                // Water highlight ripple
+                gctx.strokeStyle = 'rgba(255,255,255,0.25)';
+                gctx.lineWidth = 1;
+                gctx.beginPath();
+                gctx.ellipse(cx - rx * 0.2, cy - ry * 0.3, rx * 0.5, ry * 0.25, 0, 0, Math.PI);
+                gctx.stroke();
+            };
+
+            // Lay out scenery deterministically (looks like someone placed it)
+            // Scatter trees heavily in the frame but NEVER inside the playable grid
+            const sceneryBudget = 240;
+            for (let i = 0; i < sceneryBudget; i++) {
+                const rx = hash(i * 19 + 1, i * 5);
+                const ry = hash(i * 23 + 7, i * 11);
+                // Bias toward edges so the playable area stays visually clean
+                const tx = minX + rx * w;
+                const ty = minY + ry * h;
+                if (inGrid(tx, ty)) continue;
+                const kind = hash(i * 3, i * 7);
+                if (kind < 0.55) {
+                    drawTree(tx, ty, 0.8 + hash(i, i * 2) * 0.6);
+                } else if (kind < 0.75) {
+                    drawRock(tx, ty, 0.8 + hash(i, i + 1) * 0.5);
+                } else if (kind < 0.92) {
+                    drawBush(tx, ty);
+                } else {
+                    // Flower cluster
+                    for (let k = 0; k < 5; k++) {
+                        gctx.fillStyle = k % 2 ? '#f5d260' : '#e3a8ff';
+                        gctx.beginPath();
+                        gctx.arc(tx + (hash(i, k) - 0.5) * 14, ty + (hash(k, i) - 0.5) * 8, 1.4, 0, Math.PI * 2);
+                        gctx.fill();
+                    }
+                }
+            }
+
+            // Pond north-east of the grid
+            const gCenter = this.worldIso(CFG.gridW / 2, CFG.gridH / 2);
+            drawLake(gCenter.x + 460, gCenter.y - 340, 120, 60);
+            // Another smaller pond south-west
+            drawLake(gCenter.x - 520, gCenter.y + 220, 90, 48);
+            // A winding dirt path into the village from the east
+            const gridEastEdge = this.worldIso(CFG.gridW, CFG.gridH / 2);
+            drawPath(gridEastEdge.x + 20, gridEastEdge.y + CFG.tileH / 2,
+                     gridEastEdge.x + 420, gridEastEdge.y - 80);
+
+            // ===== PLAYABLE GRID (drawn LAST so it sits on top of the scenery wash) =====
             const palette = [
                 '#2f4b28', '#35582e', '#2a4623', '#3c5f34',
                 '#2d4a2a', '#3a5c30', '#28421f', '#40633a'
@@ -1626,19 +1860,16 @@
                     const rr = hash(x + 97, y + 31);
                     const p = this.worldIso(x + 0.5, y + 0.5);
                     if (rr < 0.07) {
-                        // Tiny flowers
                         gctx.fillStyle = rr < 0.035 ? '#f5d260' : '#e3a8ff';
                         gctx.beginPath();
                         gctx.arc(p.x + (rr - 0.035) * 40, p.y + CFG.tileH * 0.3, 1.6, 0, Math.PI * 2);
                         gctx.fill();
                     } else if (rr < 0.12) {
-                        // Small stones
                         gctx.fillStyle = '#6a6a6c';
                         gctx.beginPath();
                         gctx.ellipse(p.x - 4, p.y + CFG.tileH * 0.35, 2.2, 1.2, 0, 0, Math.PI * 2);
                         gctx.fill();
                     } else if (rr < 0.16) {
-                        // Grass tufts
                         gctx.strokeStyle = '#5a8a3a';
                         gctx.lineWidth = 1;
                         gctx.beginPath();
@@ -1653,9 +1884,9 @@
                 }
             }
 
-            // Border outline around whole grid for a crafted map feel
-            gctx.strokeStyle = 'rgba(0,0,0,0.55)';
-            gctx.lineWidth = 3;
+            // Ornate border around the playable grid
+            gctx.strokeStyle = 'rgba(255, 200, 87, 0.32)';
+            gctx.lineWidth = 4;
             gctx.beginPath();
             const p0 = this.worldIso(0, 0);
             const p1 = this.worldIso(CFG.gridW, 0);
@@ -1666,6 +1897,9 @@
             gctx.lineTo(p2.x, p2.y + CFG.tileH / 2);
             gctx.lineTo(p3.x, p3.y + CFG.tileH / 2);
             gctx.closePath();
+            gctx.stroke();
+            gctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+            gctx.lineWidth = 2;
             gctx.stroke();
 
             this.groundCache = cv;
@@ -1719,6 +1953,19 @@
                     this.drawTileAt(ctx, tx + dx, ty + dy, color + '44', color + 'cc', 2);
                 }
             }
+            // Draw a translucent ghost of the building at the target tile so you see
+            // exactly what/where it'll land. Only while canPlace is ok.
+            if (ok) {
+                ctx.save();
+                ctx.globalAlpha = 0.55;
+                this.drawBuilding(ctx, {
+                    tx, ty, type: this.moveMode.type,
+                    level: this.moveMode.level,
+                    hp: this.moveMode.hp, maxHp: this.moveMode.maxHp,
+                    animScale: 1, ghost: true,
+                });
+                ctx.restore();
+            }
         }
 
         drawSpellGhost(ctx) {
@@ -1740,6 +1987,13 @@
             const def = BLD[b.type];
             const size = def.size;
             const scale = b.animScale ?? 1;
+            // If this building is currently being drag-moved AND we're rendering the
+            // original (not the ghost), dim it heavily so the ghost is the focus.
+            const isDraggedSource = this.input?.dragMove && this.moveMode === b && !b.ghost;
+            if (isDraggedSource) {
+                ctx.save();
+                ctx.globalAlpha = 0.25;
+            }
             // Per-building idle bob so the village doesn't feel static
             if (b._seed === undefined) b._seed = Math.random() * Math.PI * 2;
             const idleBob = Math.sin(this.tnow * 1.4 + b._seed) * 0.6;
@@ -1867,6 +2121,27 @@
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
+
+            // Selection pulse ring (fades out after left-click on a non-collector)
+            if (this.selectedBuilding === b && this.selectHighlight > 0) {
+                const s = this.selectHighlight;
+                ctx.save();
+                ctx.globalAlpha = s * 0.9;
+                ctx.strokeStyle = '#ffe3a1';
+                ctx.lineWidth = 2.5 + (1 - s) * 3;
+                ctx.beginPath();
+                ctx.ellipse(
+                    centerP.x,
+                    centerP.y + fh * 0.25,
+                    fw * (0.85 + (1 - s) * 0.35),
+                    fh * (0.55 + (1 - s) * 0.25),
+                    0, 0, Math.PI * 2
+                );
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            if (isDraggedSource) ctx.restore();
         }
 
         buildHeight(type) {
