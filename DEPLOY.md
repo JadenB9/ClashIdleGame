@@ -1,51 +1,61 @@
 # Auto-deploy setup
 
-Every `git push` to `master` will redeploy the contents of `public/` to Cloudflare Pages under a project called **`clashidle`**.
+**TL;DR** — Every push to `master` mirrors `public/*` into `JadenB9/j4den@main` at `frontend/public/clashidle/`, which then auto-deploys to Cloudflare Pages (`j4den-cybersec`), which serves `j4den.com/clashidle`.
 
-## One-time setup (takes ~3 minutes)
+## How it works
 
-### 1. Create a Cloudflare API token
+```
+ClashIdleGame@master       →  (GitHub Actions mirror)  →  j4den@main
+        ↓                                                     ↓
+   public/                                        frontend/public/clashidle/
+                                                            ↓
+                                                  j4den's deploy-frontend.yml
+                                                            ↓
+                                                  Cloudflare Pages (j4den-cybersec)
+                                                            ↓
+                                                        j4den.com/clashidle
+```
 
-1. Go to https://dash.cloudflare.com/profile/api-tokens
-2. Click **Create Token** → use the **Edit Cloudflare Workers** template (it includes Pages permissions), OR create a custom token with:
-   - **Account** → **Cloudflare Pages** → **Edit**
-3. Copy the token.
+Two GitHub Actions workflows run per push:
+1. `ClashIdleGame/.github/workflows/deploy.yml` — copies `public/index.html`, `public/css/style.css`, `public/js/game.js` into the j4den repo and commits to `main`.
+2. `j4den/.github/workflows/deploy-frontend.yml` — picks up that commit, runs `cloudflare/pages-action`, Cloudflare Pages rebuilds, edge cache invalidates.
 
-### 2. Get your Account ID
+Total time from `git push` → live on `j4den.com/clashidle`: about 60–90 seconds.
 
-1. Open any page under https://dash.cloudflare.com — your Account ID is in the right sidebar (long hex string).
+## One-time setup (one GitHub secret)
 
-### 3. Add both as GitHub repository secrets
+The mirror workflow needs write access to the `JadenB9/j4den` repo. Do this once:
 
-At https://github.com/JadenB9/ClashIdleGame/settings/secrets/actions click **New repository secret** twice:
+1. **Create a Personal Access Token (classic):**
+   - https://github.com/settings/tokens → **Generate new token (classic)**
+   - Name: `clashidle-to-j4den-sync`
+   - Expiration: No expiration (or 1 year, your call)
+   - Scope: check **`repo`** (full control of private repositories)
+   - Generate, copy the token.
 
-- Name: `CLOUDFLARE_API_TOKEN` — value: the token from step 1
-- Name: `CLOUDFLARE_ACCOUNT_ID` — value: the ID from step 2
+2. **Add it as a secret in the ClashIdleGame repo:**
+   - https://github.com/JadenB9/ClashIdleGame/settings/secrets/actions
+   - **New repository secret**
+   - Name: `J4DEN_SYNC_TOKEN`
+   - Value: the PAT you just copied
 
-### 4. Create the Cloudflare Pages project
+That's it. Next push to master auto-deploys.
 
-The first `wrangler pages deploy` will create the project automatically if it doesn't exist, so you can just push and watch the Action run.
+## Why a PAT and not an SSH deploy key?
 
-If you'd rather pre-create it: https://dash.cloudflare.com → **Workers & Pages** → **Create application** → **Pages** → **Create a project** → give it the name `clashidle`. No git connection needed — the Action handles uploads.
+Both work. PAT is one less step — you don't need to paste the public key into j4den's deploy keys. If you'd rather use an SSH deploy key, tell me and I'll swap the workflow.
 
-### 5. Point `j4den.com/clashidle` at the Pages deployment
+## Why not deploy directly from ClashIdleGame to Cloudflare Pages?
 
-Your Pages project will be live at `https://clashidle.pages.dev` immediately. To serve it under `j4den.com/clashidle`, you have two options:
+Because j4den.com/clashidle is a sub-path of an existing Cloudflare Pages project (`j4den-cybersec`) that serves the rest of j4den.com. A separate Pages project would deploy to `clashidle.pages.dev` and require custom-domain routing gymnastics. Mirroring into the existing j4den repo is cleaner — one Pages project, one source of truth, zero DNS changes.
 
-**Option A — Custom domain on Pages (recommended):**
-1. In your Pages project → **Custom domains** → **Set up a custom domain** → `clashidle.j4den.com`
-2. DNS auto-updates if `j4den.com` is already on Cloudflare.
+## If you don't want automation
 
-**Option B — Keep the `/clashidle` sub-path:**
-Use a Cloudflare Worker or Page Rule to rewrite `j4den.com/clashidle/*` → `clashidle.pages.dev/*`.
-
-## After setup
-
-Every push to `master` now auto-deploys. You'll see the run at
-https://github.com/JadenB9/ClashIdleGame/actions
-
-No more `REVALIDATED` stale-cache surprises — the `_headers` file tells Cloudflare to revalidate HTML/JS/CSS on every request.
-
-## If you're NOT using Cloudflare Pages
-
-Tell me which host you're actually on (VPS via SSH, Netlify, Vercel, custom Node server, etc.) and I'll swap the workflow to target that instead.
+You can always manually sync:
+```bash
+cd ~/Library/Mobile\ Documents/com~apple~CloudDocs/Projects/j4den
+cp ../ClashIdleGame/public/index.html       frontend/public/clashidle/index.html
+cp ../ClashIdleGame/public/css/style.css    frontend/public/clashidle/css/style.css
+cp ../ClashIdleGame/public/js/game.js       frontend/public/clashidle/js/game.js
+git add frontend/public/clashidle && git commit -m "clashidle: manual sync" && git push
+```

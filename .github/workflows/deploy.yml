@@ -1,25 +1,62 @@
-name: Deploy to Cloudflare Pages
+name: Mirror to j4den → Cloudflare Pages
+
+# Every push to master mirrors public/* into the j4den repo at
+# frontend/public/clashidle/. The j4den repo's own deploy-frontend.yml then
+# publishes to Cloudflare Pages (j4den-cybersec project), which serves
+# j4den.com/clashidle.
 
 on:
   push:
     branches: [master, main]
+    paths:
+      - 'public/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  deployments: write
 
 jobs:
-  deploy:
+  mirror:
     runs-on: ubuntu-latest
-    name: Publish public/ to Cloudflare Pages
+    name: Sync public/ into j4den/frontend/public/clashidle
     steps:
-      - name: Checkout
+      - name: Checkout ClashIdleGame
         uses: actions/checkout@v4
-
-      - name: Deploy
-        uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy public --project-name=clashidle --branch=master --commit-dirty=true
+          path: src
+
+      - name: Checkout j4den (using PAT)
+        uses: actions/checkout@v4
+        with:
+          repository: JadenB9/j4den
+          ref: main
+          token: ${{ secrets.J4DEN_SYNC_TOKEN }}
+          path: dest
+          fetch-depth: 1
+
+      - name: Sync files
+        run: |
+          set -euo pipefail
+          DEST_DIR="dest/frontend/public/clashidle"
+          mkdir -p "$DEST_DIR/css" "$DEST_DIR/js"
+          # Only mirror the browser-facing files; server.js and node_modules stay out
+          cp -v src/public/index.html "$DEST_DIR/index.html"
+          cp -v src/public/css/style.css "$DEST_DIR/css/style.css"
+          cp -v src/public/js/game.js   "$DEST_DIR/js/game.js"
+
+      - name: Commit and push to j4den (if changed)
+        run: |
+          set -euo pipefail
+          cd dest
+          git config user.name  "clashidle-sync[bot]"
+          git config user.email "clashidle-sync@users.noreply.github.com"
+          if git diff --quiet --exit-code frontend/public/clashidle/; then
+            echo "No changes in clashidle files — skipping push."
+            exit 0
+          fi
+          SHORT_SHA=$(cd ../src && git rev-parse --short HEAD)
+          git add frontend/public/clashidle/
+          git commit -m "clashidle: sync from ClashIdleGame@${SHORT_SHA}"
+          git push origin main
+          echo "✅ Pushed to j4den main. Cloudflare Pages deploy will run next."
