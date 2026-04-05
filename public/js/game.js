@@ -12,7 +12,7 @@
         gridH: 18,
         tileW: 72,
         tileH: 36,
-        zoomMin: 0.55,
+        zoomMin: 0.65,
         zoomMax: 2.4,
         saveKey: 'kingdomOfEmber.v3',
         autoSaveMs: 15000,
@@ -32,7 +32,7 @@
             name: 'Town Hall',
             icon: '♔',
             size: 2,
-            maxLevel: 12,
+            maxLevel: 20,
             unlockLevel: 1,
             baseCost: { gold: 0 },
             baseHP: 2500,
@@ -47,7 +47,7 @@
             name: 'Gold Mine',
             icon: '◈',
             size: 1,
-            maxLevel: 15,
+            maxLevel: 25,
             unlockLevel: 1,
             baseCost: { gold: 300 },
             baseHP: 500,
@@ -63,7 +63,7 @@
             name: 'Elixir Well',
             icon: '❂',
             size: 1,
-            maxLevel: 15,
+            maxLevel: 25,
             unlockLevel: 2,
             baseCost: { gold: 650 },
             baseHP: 500,
@@ -79,7 +79,7 @@
             name: 'Dark Drill',
             icon: '✦',
             size: 1,
-            maxLevel: 10,
+            maxLevel: 20,
             unlockLevel: 6,
             baseCost: { gold: 4500, elixir: 1200 },
             baseHP: 700,
@@ -95,7 +95,7 @@
             name: 'Wall',
             icon: '▭',
             size: 1,
-            maxLevel: 10,
+            maxLevel: 20,
             unlockLevel: 2,
             baseCost: { gold: 180 },
             baseHP: 1800,
@@ -109,7 +109,7 @@
             name: 'Cannon',
             icon: '◉',
             size: 1,
-            maxLevel: 14,
+            maxLevel: 22,
             unlockLevel: 1,
             baseCost: { gold: 450 },
             baseHP: 450,
@@ -124,7 +124,7 @@
             name: 'Archer Tower',
             icon: '➳',
             size: 1,
-            maxLevel: 14,
+            maxLevel: 22,
             unlockLevel: 3,
             baseCost: { gold: 1200 },
             baseHP: 380,
@@ -139,7 +139,7 @@
             name: 'Mortar',
             icon: '◎',
             size: 1,
-            maxLevel: 12,
+            maxLevel: 20,
             unlockLevel: 4,
             baseCost: { gold: 2200, elixir: 400 },
             baseHP: 420,
@@ -154,7 +154,7 @@
             name: 'Air Defense',
             icon: '⇧',
             size: 1,
-            maxLevel: 12,
+            maxLevel: 20,
             unlockLevel: 5,
             baseCost: { gold: 2800, elixir: 600 },
             baseHP: 500,
@@ -169,7 +169,7 @@
             name: 'Wizard Tower',
             icon: '✺',
             size: 1,
-            maxLevel: 12,
+            maxLevel: 20,
             unlockLevel: 6,
             baseCost: { gold: 3200, elixir: 900 },
             baseHP: 420,
@@ -184,7 +184,7 @@
             name: 'Hidden Tesla',
             icon: '⚡',
             size: 1,
-            maxLevel: 12,
+            maxLevel: 20,
             unlockLevel: 7,
             baseCost: { gold: 4200, elixir: 1400 },
             baseHP: 600,
@@ -199,7 +199,7 @@
             name: 'X-Bow',
             icon: '⤭',
             size: 1,
-            maxLevel: 10,
+            maxLevel: 18,
             unlockLevel: 8,
             baseCost: { gold: 6000, elixir: 2000 },
             baseHP: 520,
@@ -214,7 +214,7 @@
             name: 'Inferno Tower',
             icon: '✶',
             size: 1,
-            maxLevel: 10,
+            maxLevel: 18,
             unlockLevel: 9,
             baseCost: { gold: 8500, elixir: 3000, dark: 50 },
             baseHP: 680,
@@ -229,7 +229,7 @@
             name: 'Vault',
             icon: '▦',
             size: 1,
-            maxLevel: 12,
+            maxLevel: 20,
             unlockLevel: 2,
             baseCost: { gold: 800 },
             baseHP: 900,
@@ -244,7 +244,7 @@
             name: 'Builder Hut',
             icon: '⚒',
             size: 1,
-            maxLevel: 8,
+            maxLevel: 15,
             unlockLevel: 2,
             baseCost: { gold: 1500 },
             baseHP: 400,
@@ -259,7 +259,7 @@
             name: 'Laboratory',
             icon: '⚗',
             size: 1,
-            maxLevel: 10,
+            maxLevel: 18,
             unlockLevel: 4,
             baseCost: { gold: 2500, elixir: 500 },
             baseHP: 480,
@@ -274,7 +274,7 @@
             name: 'Clan Castle',
             icon: '♖',
             size: 2,
-            maxLevel: 10,
+            maxLevel: 18,
             unlockLevel: 5,
             baseCost: { gold: 5500, elixir: 1200 },
             baseHP: 1600,
@@ -290,7 +290,7 @@
             name: 'Army Camp',
             icon: '⛺',
             size: 1,
-            maxLevel: 8,
+            maxLevel: 15,
             unlockLevel: 3,
             baseCost: { gold: 1800, elixir: 300 },
             baseHP: 420,
@@ -321,6 +321,27 @@
         { id: 'combo_10',     name: 'Click Frenzy',      desc: 'Reach a 10x click combo',       icon: '✱', check: (g) => g.stats.maxCombo >= 10 },
         { id: 'spellcaster',  name: 'Lightning Mage',    desc: 'Cast your first spell',         icon: '⚡', check: (g) => g.stats.spells >= 1 },
     ];
+
+    // ---------- WINDOW LAYOUTS (hoisted: reused every frame for every building) ----------
+    const WINDOW_SPEC = {
+        townhall:  [{ face: 'R', u: 0.28, v: 0.45, s: 1.6 }, { face: 'L', u: 0.28, v: 0.45, s: 1.6 }, { face: 'R', u: 0.55, v: 0.45, s: 1.3 }, { face: 'L', u: 0.55, v: 0.45, s: 1.3 }],
+        archer:    [{ face: 'R', u: 0.35, v: 0.6,  s: 1.1 }, { face: 'L', u: 0.35, v: 0.6, s: 1.1 }],
+        wizard:    [{ face: 'R', u: 0.3,  v: 0.55, s: 1.1 }, { face: 'L', u: 0.3,  v: 0.55, s: 1.1 }],
+        storage:   [{ face: 'R', u: 0.4,  v: 0.5,  s: 1.2 }],
+        lab:       [{ face: 'R', u: 0.35, v: 0.5,  s: 1.2 }],
+        builderhut:[{ face: 'R', u: 0.4,  v: 0.5,  s: 1.1 }],
+        clancastle:[{ face: 'R', u: 0.3,  v: 0.6,  s: 1.4 }, { face: 'L', u: 0.3, v: 0.6, s: 1.4 }, { face: 'R', u: 0.6, v: 0.6, s: 1.2 }, { face: 'L', u: 0.6, v: 0.6, s: 1.2 }],
+        goldmine:  [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
+        elixirwell:[{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
+        darkdrill: [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
+        tesla:     [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
+        inferno:   [{ face: 'R', u: 0.5,  v: 0.55, s: 1.0 }],
+        armycamp:  [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
+        xbow:      [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
+        airdef:    [{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
+        mortar:    [{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
+        cannon:    [{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
+    };
 
     // ---------- UTILITIES ----------
     const rand = (a, b) => a + Math.random() * (b - a);
@@ -499,8 +520,9 @@
             this.canvas.style.height = r.height + 'px';
             this.vw = r.width;
             this.vh = r.height;
-            // Invalidate gradients that depend on viewport height
+            // Invalidate gradients + ground cache that depend on viewport size
             this._skyCache = null;
+            this.groundCache = null;
         }
 
         centerCamera() {
@@ -541,9 +563,9 @@
                 this.input.downTime = performance.now();
                 this.input.shift = !!(e.shiftKey);
                 this.input.right = false;
-                // Identify what's under the press
-                const t = this.screenToTile(p.x, p.y);
-                this.input.downBuilding = this.buildingAt(t.tx, t.ty);
+                // Identify what's under the press using visual hit detection so
+                // clicking anywhere on a tall building (not just its base tile) counts.
+                this.input.downBuilding = this.buildingAtScreen(p.x, p.y);
                 this.audio.ensure();
             };
 
@@ -618,14 +640,20 @@
             c.addEventListener('touchmove',  (e) => { e.preventDefault(); onMove(e); }, { passive: false });
             c.addEventListener('touchend',   (e) => { e.preventDefault(); onUp(); }, { passive: false });
 
-            // Right click opens modal
+            // Right click: exit build/move/spell mode if active, otherwise open modal
             c.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
+                if (this.buildMode || this.moveMode || this.spellMode) {
+                    this.setBuildMode(null);
+                    this.moveMode = null;
+                    this.spellMode = false;
+                    this.updateCanvasCursor();
+                    return;
+                }
                 const rect = c.getBoundingClientRect();
                 const sx = e.clientX - rect.left;
                 const sy = e.clientY - rect.top;
-                const t = this.screenToTile(sx, sy);
-                const b = this.buildingAt(t.tx, t.ty);
+                const b = this.buildingAtScreen(sx, sy);
                 if (b) this.openBuildingModal(b);
             });
 
@@ -699,7 +727,9 @@
                 this.hoverTile = null;
             }
             const prev = this.hoverBuilding;
-            this.hoverBuilding = this.buildingAt(t.tx, t.ty);
+            // Use visual hit detection so hovering any part of a tall building
+            // shows its tooltip, not just when over the base tile.
+            this.hoverBuilding = this.buildingAtScreen(this.input.x, this.input.y);
 
             // Only regenerate the hover-tip HTML when the hovered building IDENTITY
             // or LEVEL changes. Position is updated cheaply below.
@@ -733,7 +763,7 @@
                     if (p.rallyMult) parts.push(`+${(p.rallyMult*100).toFixed(0)}% rally heal`);
                     if (p.waveGems) parts.push(`+${p.waveGems} gem/wave`);
                 }
-                parts.push(`<span style="color:#6b6854">Single-click = menu · Double-click = move</span>`);
+                parts.push(`<span style="color:#6b6854">Shift+click = upgrade · Right-click = menu · Drag = move</span>`);
                 tip.innerHTML = parts.join('<br>');
                 tip.classList.add('visible');
                 this._hoverLevel = b.level;
@@ -783,11 +813,23 @@
                 return;
             }
 
-            // Click a building
-            const b = this.buildingAt(tx, ty);
+            // Click a building — use visual hit detection so clicks anywhere on
+            // the drawn shape register, not just the base tile footprint.
+            const b = this.buildingAtScreen(sx, sy);
             if (b) {
-                // Right-click OR shift-click: upgrade menu (for all buildings)
-                if (shift || right) {
+                // Shift-click → instant upgrade (power-user shortcut). Falls back to
+                // the modal if already max level so the player still gets feedback.
+                if (shift) {
+                    const def = BLD[b.type];
+                    if (b.level >= def.maxLevel) {
+                        this.openBuildingModal(b);
+                        return;
+                    }
+                    this.upgradeBuilding(b);
+                    return;
+                }
+                // Right-click: open the full stats/upgrade modal
+                if (right) {
                     this.openBuildingModal(b);
                     return;
                 }
@@ -946,6 +988,52 @@
             return null;
         }
 
+        /**
+         * Visual hit test: returns the topmost building whose drawn footprint
+         * contains the given screen point. Unlike `buildingAt(tx, ty)` this checks
+         * the full visual bounds of the building (including the raised top), so
+         * clicking anywhere on a tall tower — not just its base tile — selects it.
+         *
+         * When multiple buildings overlap visually, the one drawn last (highest
+         * depth) wins, which matches what the player actually sees on screen.
+         */
+        buildingAtScreen(sx, sy) {
+            // Convert screen point → world point (inverse of render transform)
+            const wx = (sx - this.cam.x) / this.cam.zoom;
+            const wy = (sy - this.cam.y) / this.cam.zoom;
+            let best = null;
+            let bestDepth = -Infinity;
+            for (const b of this.buildings) {
+                const def = BLD[b.type];
+                const size = def.size;
+                const center = this.worldIso(b.tx + size / 2, b.ty + size / 2);
+                const fw = CFG.tileW * size / 2;
+                const fh = CFG.tileH * size / 2;
+                const h = this.buildHeight(b.type);
+                // Visual bounding rect: from top of roof down to bottom of base
+                const left   = center.x - fw;
+                const right  = center.x + fw;
+                const top    = center.y - fh - h;
+                const bottom = center.y + fh;
+                if (wx >= left && wx <= right && wy >= top && wy <= bottom) {
+                    // Prefer the frontmost building when clicks overlap
+                    const depth = b.tx + b.ty + size;
+                    if (depth > bestDepth) {
+                        bestDepth = depth;
+                        best = b;
+                    }
+                }
+            }
+            // Fall back to tile-based lookup if nothing hit visually — this keeps
+            // clicking the base tile of a 1-tile building working even when the
+            // visual bounds are tight.
+            if (!best) {
+                const t = this.screenToTile(sx, sy);
+                return this.buildingAt(t.tx, t.ty);
+            }
+            return best;
+        }
+
         placeBuilding(type, tx, ty) {
             const def = BLD[type];
             // Only one Town Hall allowed per kingdom
@@ -976,7 +1064,22 @@
             this.gainXp(15);
             this.audio.build();
             this.toast(`${def.name} built!`, 'success');
-            this.setBuildMode(null);
+            // Sticky build mode — stay in placement mode after placing one so you
+            // can drop multiple walls/towers in a row. Escape / right-click / Cancel
+            // button all still exit. Automatically exits when the player can no
+            // longer afford another, or (for singletons like townhall) after one.
+            const singleton = (type === 'townhall');
+            const stillAffordable = this.canAfford(def.baseCost);
+            if (singleton || !stillAffordable) {
+                this.setBuildMode(null);
+                if (!stillAffordable && !singleton) {
+                    this.toast('Not enough for another — tap a card to keep building', 'warn');
+                }
+            } else {
+                // Refresh the sidebar so greyed-out cards update, and keep the
+                // same build tool selected for the next placement.
+                this.buildMenu();
+            }
             this.recomputeRates();
             this.updateUI();
             this.checkAchievements();
@@ -1631,9 +1734,18 @@
                 if (p.x > maxX) maxX = p.x;
                 if (p.y > maxY) maxY = p.y;
             }
-            // Wide scenery frame so camera pan always shows terrain + decorations
-            const padX = 760;
-            const padY = 520;
+            // Wide scenery frame so camera pan always shows terrain + decorations.
+            // Computed dynamically so the cache always covers the full viewport at
+            // CFG.zoomMin — this prevents the sky from peeking through when the player
+            // zooms out to the limit.
+            const basePadX = 760;
+            const basePadY = 520;
+            const vwW = this.vw || 1600;
+            const vhH = this.vh || 900;
+            const needPadX = (vwW / CFG.zoomMin) / 2 + 240;
+            const needPadY = (vhH / CFG.zoomMin) / 2 + 240;
+            const padX = Math.max(basePadX, needPadX);
+            const padY = Math.max(basePadY, needPadY);
             minX -= padX; minY -= padY; maxX += padX; maxY += padY + CFG.tileH;
             const w = Math.ceil(maxX - minX);
             const h = Math.ceil(maxY - minY);
@@ -1753,21 +1865,6 @@
                 gctx.fill();
             };
 
-            const drawPath = (ax, ay, bx, by) => {
-                gctx.strokeStyle = 'rgba(180, 150, 90, 0.35)';
-                gctx.lineWidth = 8;
-                gctx.lineCap = 'round';
-                gctx.beginPath();
-                gctx.moveTo(ax, ay);
-                const mx = (ax + bx) / 2 + (hash(ax, by) - 0.5) * 80;
-                const my = (ay + by) / 2 + (hash(bx, ay) - 0.5) * 40;
-                gctx.quadraticCurveTo(mx, my, bx, by);
-                gctx.stroke();
-                gctx.strokeStyle = 'rgba(210, 180, 120, 0.25)';
-                gctx.lineWidth = 5;
-                gctx.stroke();
-            };
-
             // Water pool / lake on one side
             const drawLake = (cx, cy, rx, ry) => {
                 // Shoreline shadow
@@ -1841,10 +1938,6 @@
             drawLake(gCenter.x + 460, gCenter.y - 340, 120, 60);
             // Another smaller pond south-west
             drawLake(gCenter.x - 520, gCenter.y + 220, 90, 48);
-            // A winding dirt path into the village from the east
-            const gridEastEdge = this.worldIso(CFG.gridW, CFG.gridH / 2);
-            drawPath(gridEastEdge.x + 20, gridEastEdge.y + CFG.tileH / 2,
-                     gridEastEdge.x + 420, gridEastEdge.y - 80);
 
             // ===== PLAYABLE GRID (drawn LAST so it sits on top of the scenery wash) =====
             const palette = [
@@ -2002,7 +2095,8 @@
             const fw = CFG.tileW * size / 2;
             const fh = CFG.tileH * size / 2;
 
-            // Walls are drawn short and flat
+            // Walls get their own dedicated rendering — proper stone block faces
+            // with crenellations on top instead of the generic building shape.
             const isWall = b.type === 'wall';
 
             // Layered shadow (softer inner + harder outer for depth)
@@ -2017,58 +2111,125 @@
 
             const h = this.buildHeight(b.type) * scale;
 
-            // Right face
-            ctx.fillStyle = def.color1;
-            ctx.beginPath();
-            ctx.moveTo(centerP.x, centerP.y + fh);
-            ctx.lineTo(centerP.x + fw, centerP.y);
-            ctx.lineTo(centerP.x + fw, centerP.y - h);
-            ctx.lineTo(centerP.x, centerP.y + fh - h);
-            ctx.closePath();
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(0,0,0,.35)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
+            if (isWall) {
+                this.drawWall(ctx, b, centerP, h, fw, fh);
+            } else {
+                // Right face
+                ctx.fillStyle = def.color1;
+                ctx.beginPath();
+                ctx.moveTo(centerP.x, centerP.y + fh);
+                ctx.lineTo(centerP.x + fw, centerP.y);
+                ctx.lineTo(centerP.x + fw, centerP.y - h);
+                ctx.lineTo(centerP.x, centerP.y + fh - h);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(0,0,0,.35)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
 
-            // Left face
-            ctx.fillStyle = def.color2;
-            ctx.beginPath();
-            ctx.moveTo(centerP.x, centerP.y + fh);
-            ctx.lineTo(centerP.x - fw, centerP.y);
-            ctx.lineTo(centerP.x - fw, centerP.y - h);
-            ctx.lineTo(centerP.x, centerP.y + fh - h);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
+                // Left face
+                ctx.fillStyle = def.color2;
+                ctx.beginPath();
+                ctx.moveTo(centerP.x, centerP.y + fh);
+                ctx.lineTo(centerP.x - fw, centerP.y);
+                ctx.lineTo(centerP.x - fw, centerP.y - h);
+                ctx.lineTo(centerP.x, centerP.y + fh - h);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
 
-            // Top diamond
-            ctx.fillStyle = def.roof;
-            ctx.beginPath();
-            ctx.moveTo(centerP.x, centerP.y - fh - h);
-            ctx.lineTo(centerP.x + fw, centerP.y - h);
-            ctx.lineTo(centerP.x, centerP.y + fh - h);
-            ctx.lineTo(centerP.x - fw, centerP.y - h);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
+                // Top diamond
+                ctx.fillStyle = def.roof;
+                ctx.beginPath();
+                ctx.moveTo(centerP.x, centerP.y - fh - h);
+                ctx.lineTo(centerP.x + fw, centerP.y - h);
+                ctx.lineTo(centerP.x, centerP.y + fh - h);
+                ctx.lineTo(centerP.x - fw, centerP.y - h);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
 
-            // Roof shine line (hand-painted highlight)
-            ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-            ctx.lineWidth = 1.2;
-            ctx.beginPath();
-            ctx.moveTo(centerP.x - fw * 0.6, centerP.y - h - fh * 0.3);
-            ctx.lineTo(centerP.x, centerP.y - fh - h + 2);
-            ctx.stroke();
+                // Roof shine line (hand-painted highlight)
+                ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.moveTo(centerP.x - fw * 0.6, centerP.y - h - fh * 0.3);
+                ctx.lineTo(centerP.x, centerP.y - fh - h + 2);
+                ctx.stroke();
 
-            // Shared wall decorations — plank/brick lines + windows that glow at night.
-            // Skip for walls (their own detail) and ghosts (simpler preview).
-            if (!isWall && !b.ghost) {
-                this.drawBuildingBody(ctx, b, centerP, h, fw, fh);
+                // Shared wall decorations — plank/brick lines + windows that glow at night.
+                if (!b.ghost) {
+                    this.drawBuildingBody(ctx, b, centerP, h, fw, fh);
+                }
+
+                // Type-specific details
+                this.drawBuildingDetail(ctx, b, centerP, h, fw, fh);
+
+                // ---------- LEVEL MILESTONE ACCENTS ----------
+                // Every 5 levels the building earns a visible upgrade accent so
+                // progression is readable at a glance without opening the modal.
+                if (!b.ghost) {
+                    const lv = b.level || 1;
+                    // Gold trim line on the roof seam at level 5+
+                    if (lv >= 5) {
+                        ctx.strokeStyle = '#ffc857';
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.moveTo(centerP.x - fw, centerP.y - h);
+                        ctx.lineTo(centerP.x, centerP.y - fh - h);
+                        ctx.lineTo(centerP.x + fw, centerP.y - h);
+                        ctx.stroke();
+                    }
+                    // Pair of pennant flags at level 10+
+                    if (lv >= 10) {
+                        const flagY = centerP.y - h - fh - 10;
+                        // Left flag
+                        ctx.strokeStyle = '#c0a060';
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.moveTo(centerP.x - fw * 0.45, centerP.y - h - fh * 0.3);
+                        ctx.lineTo(centerP.x - fw * 0.45, flagY);
+                        ctx.stroke();
+                        ctx.fillStyle = '#c73535';
+                        ctx.beginPath();
+                        ctx.moveTo(centerP.x - fw * 0.45, flagY);
+                        ctx.lineTo(centerP.x - fw * 0.45 + 8, flagY + 3);
+                        ctx.lineTo(centerP.x - fw * 0.45, flagY + 6);
+                        ctx.closePath();
+                        ctx.fill();
+                        // Right flag
+                        ctx.strokeStyle = '#c0a060';
+                        ctx.beginPath();
+                        ctx.moveTo(centerP.x + fw * 0.45, centerP.y - h - fh * 0.3);
+                        ctx.lineTo(centerP.x + fw * 0.45, flagY);
+                        ctx.stroke();
+                        ctx.fillStyle = '#c73535';
+                        ctx.beginPath();
+                        ctx.moveTo(centerP.x + fw * 0.45, flagY);
+                        ctx.lineTo(centerP.x + fw * 0.45 - 8, flagY + 3);
+                        ctx.lineTo(centerP.x + fw * 0.45, flagY + 6);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    // Golden crown marker at level 15+
+                    if (lv >= 15) {
+                        ctx.fillStyle = '#ffe3a1';
+                        ctx.font = 'bold 12px Cinzel, serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('♛', centerP.x, centerP.y - h - fh - 20);
+                    }
+                    // Ember halo pulse at level 20+ (max-tier aesthetic)
+                    if (lv >= 20) {
+                        const pulse = 0.5 + 0.5 * Math.sin(this.tnow * 2 + (b._seed || 0));
+                        ctx.strokeStyle = `rgba(255, 107, 53, ${0.3 + pulse * 0.3})`;
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.ellipse(centerP.x, centerP.y + fh * 0.2, fw * 1.1, fh * 0.65, 0, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                }
             }
-
-            // Type-specific details
-            if (!isWall) this.drawBuildingDetail(ctx, b, centerP, h, fw, fh);
-            else this.drawWallDetail(ctx, centerP, h, fw, fh);
 
             // Chimney smoke for buildings with clickBonus / production — rises continuously
             if (!b.ghost && (def.production || b.type === 'builderhut' || b.type === 'lab')) {
@@ -2154,28 +2315,193 @@
             })[type] || 40;
         }
 
-        drawWallDetail(ctx, c, h, fw) {
-            // Stone block lines
-            ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+        /**
+         * Dedicated wall renderer — replaces the generic building shape with a
+         * chunky stone rampart: two-tone stone block faces, mortared seams, and
+         * proper merlon crenellations along the top back edges.
+         */
+        drawWall(ctx, b, c, h, fw, fh) {
+            // Stone palette — slight level-based tint (walls look stronger as they level)
+            const level = Math.max(1, b.level || 1);
+            const tint = Math.min(0.25, (level - 1) * 0.03);
+            const lerp = (a, t) => Math.round(a + (90 - a) * t);
+            const rightR = lerp(0x6a, tint), rightG = lerp(0x6a, tint), rightB = lerp(0x74, tint);
+            const leftR  = lerp(0x3c, tint), leftG  = lerp(0x3c, tint), leftB  = lerp(0x46, tint);
+            const topR   = lerp(0x84, tint), topG   = lerp(0x84, tint), topB   = lerp(0x90, tint);
+            const rightFill = `rgb(${rightR},${rightG},${rightB})`;
+            const leftFill  = `rgb(${leftR},${leftG},${leftB})`;
+            const topFill   = `rgb(${topR},${topG},${topB})`;
+            const mortar    = 'rgba(12,12,16,0.75)';
+            const edge      = 'rgba(0,0,0,0.6)';
+
+            // ---------- RIGHT FACE (lit side) ----------
+            ctx.fillStyle = rightFill;
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y + fh);
+            ctx.lineTo(c.x + fw, c.y);
+            ctx.lineTo(c.x + fw, c.y - h);
+            ctx.lineTo(c.x, c.y + fh - h);
+            ctx.closePath();
+            ctx.fill();
+
+            // Stone block seams on right face — one horizontal mid-seam + staggered
+            // verticals to imply bricks without drawing every block individually
+            ctx.strokeStyle = mortar;
             ctx.lineWidth = 1;
-            const topY = c.y - h;
-            for (let i = -1; i <= 1; i++) {
+            // Horizontal mid-seam: from (c.x, c.y+fh-h*0.5) to (c.x+fw, c.y-h*0.5)
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y + fh - h * 0.5);
+            ctx.lineTo(c.x + fw, c.y - h * 0.5);
+            ctx.stroke();
+            // Top-row vertical seam at ~1/3 across
+            ctx.beginPath();
+            let tx = 0.38;
+            ctx.moveTo(c.x + fw * tx, c.y + fh * (1 - tx));
+            ctx.lineTo(c.x + fw * tx, c.y + fh * (1 - tx) - h * 0.5);
+            ctx.stroke();
+            // Top-row vertical seam at ~2/3 across
+            ctx.beginPath();
+            tx = 0.72;
+            ctx.moveTo(c.x + fw * tx, c.y + fh * (1 - tx));
+            ctx.lineTo(c.x + fw * tx, c.y + fh * (1 - tx) - h * 0.5);
+            ctx.stroke();
+            // Bottom-row verticals staggered for brick offset
+            ctx.beginPath();
+            tx = 0.22;
+            ctx.moveTo(c.x + fw * tx, c.y + fh * (1 - tx) - h * 0.5);
+            ctx.lineTo(c.x + fw * tx, c.y + fh * (1 - tx) - h);
+            ctx.stroke();
+            ctx.beginPath();
+            tx = 0.55;
+            ctx.moveTo(c.x + fw * tx, c.y + fh * (1 - tx) - h * 0.5);
+            ctx.lineTo(c.x + fw * tx, c.y + fh * (1 - tx) - h);
+            ctx.stroke();
+
+            // Right face outline
+            ctx.strokeStyle = edge;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y + fh);
+            ctx.lineTo(c.x + fw, c.y);
+            ctx.lineTo(c.x + fw, c.y - h);
+            ctx.lineTo(c.x, c.y + fh - h);
+            ctx.closePath();
+            ctx.stroke();
+
+            // ---------- LEFT FACE (shadow side) ----------
+            ctx.fillStyle = leftFill;
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y + fh);
+            ctx.lineTo(c.x - fw, c.y);
+            ctx.lineTo(c.x - fw, c.y - h);
+            ctx.lineTo(c.x, c.y + fh - h);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.strokeStyle = mortar;
+            ctx.lineWidth = 1;
+            // Horizontal mid-seam
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y + fh - h * 0.5);
+            ctx.lineTo(c.x - fw, c.y - h * 0.5);
+            ctx.stroke();
+            // Top-row vertical seams
+            ctx.beginPath();
+            tx = 0.38;
+            ctx.moveTo(c.x - fw * tx, c.y + fh * (1 - tx));
+            ctx.lineTo(c.x - fw * tx, c.y + fh * (1 - tx) - h * 0.5);
+            ctx.stroke();
+            ctx.beginPath();
+            tx = 0.72;
+            ctx.moveTo(c.x - fw * tx, c.y + fh * (1 - tx));
+            ctx.lineTo(c.x - fw * tx, c.y + fh * (1 - tx) - h * 0.5);
+            ctx.stroke();
+            // Bottom-row verticals
+            ctx.beginPath();
+            tx = 0.22;
+            ctx.moveTo(c.x - fw * tx, c.y + fh * (1 - tx) - h * 0.5);
+            ctx.lineTo(c.x - fw * tx, c.y + fh * (1 - tx) - h);
+            ctx.stroke();
+            ctx.beginPath();
+            tx = 0.55;
+            ctx.moveTo(c.x - fw * tx, c.y + fh * (1 - tx) - h * 0.5);
+            ctx.lineTo(c.x - fw * tx, c.y + fh * (1 - tx) - h);
+            ctx.stroke();
+
+            ctx.strokeStyle = edge;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y + fh);
+            ctx.lineTo(c.x - fw, c.y);
+            ctx.lineTo(c.x - fw, c.y - h);
+            ctx.lineTo(c.x, c.y + fh - h);
+            ctx.closePath();
+            ctx.stroke();
+
+            // ---------- TOP WALKWAY ----------
+            ctx.fillStyle = topFill;
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y - fh - h);
+            ctx.lineTo(c.x + fw, c.y - h);
+            ctx.lineTo(c.x, c.y + fh - h);
+            ctx.lineTo(c.x - fw, c.y - h);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = edge;
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            // Subtle inner highlight on the top so it reads as a walkway
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(c.x - fw * 0.85, c.y - h - fh * 0.1);
+            ctx.lineTo(c.x, c.y - fh - h + 2);
+            ctx.stroke();
+
+            // ---------- CRENELLATIONS (merlons) ----------
+            // A row of chunky merlons along the two back edges of the top diamond.
+            // Back-right edge: from back point (c.x, c.y-fh-h) → right point (c.x+fw, c.y-h)
+            // Back-left edge:  from back point (c.x, c.y-fh-h) → left point (c.x-fw, c.y-h)
+            const merlonH = 6;
+            const merlonHalfW = 4;
+            const drawMerlon = (mx, my) => {
+                // Front face (facing camera)
+                ctx.fillStyle = rightFill;
                 ctx.beginPath();
-                ctx.moveTo(c.x - fw * 0.85, topY + i * 6 + 4);
-                ctx.lineTo(c.x + fw * 0.85, topY + i * 6 + 4);
+                ctx.moveTo(mx - merlonHalfW, my - merlonH);
+                ctx.lineTo(mx + merlonHalfW, my - merlonH);
+                ctx.lineTo(mx + merlonHalfW, my);
+                ctx.lineTo(mx - merlonHalfW, my);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = edge;
                 ctx.stroke();
+                // Tiny top highlight
+                ctx.fillStyle = topFill;
+                ctx.fillRect(mx - merlonHalfW, my - merlonH - 1, merlonHalfW * 2, 1.5);
+            };
+
+            // Back-right edge merlons
+            for (let k = 0; k < 3; k++) {
+                const t = 0.2 + k * 0.3;
+                const mx = c.x + fw * t;
+                const my = c.y - h - fh * (1 - t);
+                drawMerlon(mx, my);
             }
-            // Crenellations on top
-            ctx.fillStyle = '#4a4a52';
-            for (let i = -2; i <= 2; i++) {
-                const bx = c.x + i * (fw / 3) - 3;
-                ctx.fillRect(bx, c.y - h - 6, 6, 6);
+            // Back-left edge merlons
+            for (let k = 0; k < 3; k++) {
+                const t = 0.2 + k * 0.3;
+                const mx = c.x - fw * t;
+                const my = c.y - h - fh * (1 - t);
+                drawMerlon(mx, my);
             }
-            // Moss tufts
+
+            // Small moss tuft on the base for character
             ctx.fillStyle = '#5a8a3a';
             ctx.beginPath();
-            ctx.arc(c.x - fw * 0.55, topY + 10, 1.5, 0, Math.PI * 2);
-            ctx.arc(c.x + fw * 0.5, topY + 14, 1.5, 0, Math.PI * 2);
+            ctx.arc(c.x - fw * 0.5, c.y - h * 0.2, 1.3, 0, Math.PI * 2);
+            ctx.arc(c.x + fw * 0.45, c.y - h * 0.75, 1.3, 0, Math.PI * 2);
             ctx.fill();
         }
 
@@ -2204,27 +2530,8 @@
             const isNight = this.dayTime < 0.25 || this.dayTime > 0.78;
             const winFill = isNight ? '#ffcc6a' : '#1a140a';
             const glow = isNight ? 'rgba(255, 204, 106, 0.45)' : 'rgba(0,0,0,0.2)';
-            // How many windows based on building type / size
-            const winSpec = {
-                townhall:  [{ face: 'R', u: 0.28, v: 0.45, s: 1.6 }, { face: 'L', u: 0.28, v: 0.45, s: 1.6 }, { face: 'R', u: 0.55, v: 0.45, s: 1.3 }, { face: 'L', u: 0.55, v: 0.45, s: 1.3 }],
-                archer:    [{ face: 'R', u: 0.35, v: 0.6,  s: 1.1 }, { face: 'L', u: 0.35, v: 0.6, s: 1.1 }],
-                wizard:    [{ face: 'R', u: 0.3,  v: 0.55, s: 1.1 }, { face: 'L', u: 0.3,  v: 0.55, s: 1.1 }],
-                storage:   [{ face: 'R', u: 0.4,  v: 0.5,  s: 1.2 }],
-                lab:       [{ face: 'R', u: 0.35, v: 0.5,  s: 1.2 }],
-                builderhut:[{ face: 'R', u: 0.4,  v: 0.5,  s: 1.1 }],
-                clancastle:[{ face: 'R', u: 0.3,  v: 0.6,  s: 1.4 }, { face: 'L', u: 0.3, v: 0.6, s: 1.4 }, { face: 'R', u: 0.6, v: 0.6, s: 1.2 }, { face: 'L', u: 0.6, v: 0.6, s: 1.2 }],
-                goldmine:  [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-                elixirwell:[{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
-                darkdrill: [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-                tesla:     [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-                inferno:   [{ face: 'R', u: 0.5,  v: 0.55, s: 1.0 }],
-                armycamp:  [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-                xbow:      [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-                airdef:    [{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
-                mortar:    [{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
-                cannon:    [{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
-            };
-            const spec = winSpec[b.type] || [];
+            // Lookup from hoisted module-level WINDOW_SPEC (see top of file)
+            const spec = WINDOW_SPEC[b.type] || [];
             for (const w of spec) {
                 // Compute window center on the given face
                 // Right face parametric: from (c.x + fw, c.y) along to (c.x, c.y + fh), lifted by -h*v
@@ -2321,7 +2628,7 @@
                     for (let i = 0; i < 3; i++) {
                         ctx.fillStyle = '#f5d5ff';
                         ctx.beginPath();
-                        ctx.arc(c.x - 6 + i * 6 + Math.sin(Date.now()/300 + i)*2, c.y - h - fh * 0.3 - (i*2), 2, 0, Math.PI * 2);
+                        ctx.arc(c.x - 6 + i * 6 + Math.sin(this.tnow * 3.3 + i) * 2, c.y - h - fh * 0.3 - (i * 2), 2, 0, Math.PI * 2);
                         ctx.fill();
                     }
                     break;
@@ -2394,15 +2701,17 @@
                     break;
                 }
                 case 'wizard': {
-                    const t = Date.now() / 400;
+                    const t = this.tnow * 2.5;
                     const r = 8 + Math.sin(t) * 2;
-                    const g = ctx.createRadialGradient(c.x, c.y - h - fh * 0.4, 0, c.x, c.y - h - fh * 0.4, r + 4);
-                    g.addColorStop(0, '#a6ecff');
-                    g.addColorStop(0.6, '#5cd8ff');
-                    g.addColorStop(1, 'rgba(92,216,255,0)');
-                    ctx.fillStyle = g;
+                    // Use a solid fill instead of a per-frame radial gradient — cheaper
+                    // and visually nearly identical once layered with the white core.
+                    ctx.fillStyle = 'rgba(92, 216, 255, 0.55)';
                     ctx.beginPath();
                     ctx.arc(c.x, c.y - h - fh * 0.4, r + 4, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = 'rgba(166, 236, 255, 0.85)';
+                    ctx.beginPath();
+                    ctx.arc(c.x, c.y - h - fh * 0.4, r + 1, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.fillStyle = '#ffffff';
                     ctx.beginPath();
@@ -2412,7 +2721,7 @@
                 }
                 case 'tesla': {
                     // Crackling lightning coil
-                    const t = Date.now() / 120;
+                    const t = this.tnow * 8.3;
                     ctx.strokeStyle = '#a6c8ff';
                     ctx.lineWidth = 2;
                     ctx.beginPath();
@@ -2449,16 +2758,22 @@
                     break;
                 }
                 case 'inferno': {
-                    // Glowing core
-                    const t = Date.now() / 200;
+                    // Glowing core — layered solid fills instead of per-frame radial
+                    // gradient (gradients are expensive; this version is visually
+                    // nearly identical and runs ~10× faster.)
+                    const t = this.tnow * 5;
                     const r = 7 + Math.sin(t) * 2;
-                    const g = ctx.createRadialGradient(c.x, c.y - h - fh * 0.5, 0, c.x, c.y - h - fh * 0.5, r + 6);
-                    g.addColorStop(0, '#ffee99');
-                    g.addColorStop(0.3, '#ff6b35');
-                    g.addColorStop(1, 'rgba(255,20,0,0)');
-                    ctx.fillStyle = g;
+                    ctx.fillStyle = 'rgba(255, 107, 53, 0.45)';
                     ctx.beginPath();
                     ctx.arc(c.x, c.y - h - fh * 0.5, r + 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = 'rgba(255, 180, 70, 0.75)';
+                    ctx.beginPath();
+                    ctx.arc(c.x, c.y - h - fh * 0.5, r + 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#ffee99';
+                    ctx.beginPath();
+                    ctx.arc(c.x, c.y - h - fh * 0.5, r - 1, 0, Math.PI * 2);
                     ctx.fill();
                     break;
                 }
@@ -2494,7 +2809,7 @@
                     ctx.fillStyle = '#ffffff';
                     ctx.fillRect(c.x - 3, c.y - h - fh * 0.65, 6, 4);
                     // Bubbles
-                    const t = Date.now() / 200;
+                    const t = this.tnow * 5;
                     for (let i = 0; i < 3; i++) {
                         ctx.fillStyle = '#a8e5d0';
                         ctx.beginPath();
@@ -2549,15 +2864,22 @@
             ctx.ellipse(e.x, e.y + e.size + 4, e.size * 0.9, e.size * 0.3, 0, 0, Math.PI * 2);
             ctx.fill();
 
-            const grad = ctx.createRadialGradient(e.x - e.size * 0.3, e.y - e.size * 0.3 + bob, 2, e.x, e.y + bob, e.size);
-            grad.addColorStop(0, mixColor(e.color, '#ffffff', 0.3));
-            grad.addColorStop(1, e.color);
-            ctx.fillStyle = grad;
+            // Cache the highlight color per-enemy — avoids an expensive
+            // createRadialGradient + mixColor call on every frame for every enemy.
+            if (!e._hi) e._hi = mixColor(e.color, '#ffffff', 0.3);
+            ctx.fillStyle = e.color;
             ctx.beginPath();
             ctx.arc(e.x, e.y + bob, e.size, 0, Math.PI * 2);
             ctx.fill();
+            // Fake the gradient with a second smaller highlight circle — much cheaper.
+            ctx.fillStyle = e._hi;
+            ctx.beginPath();
+            ctx.arc(e.x - e.size * 0.3, e.y - e.size * 0.3 + bob, e.size * 0.55, 0, Math.PI * 2);
+            ctx.fill();
             ctx.strokeStyle = 'rgba(0,0,0,.6)';
             ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y + bob, e.size, 0, Math.PI * 2);
             ctx.stroke();
 
             // Eyes
@@ -2654,36 +2976,76 @@
         }
 
         // ---------- UI ----------
-        buildMenu() {
+        /**
+         * Render (or refresh) the build shop. The cards are kept in place across
+         * refreshes — we only update class names for affordability / selection
+         * state rather than wiping innerHTML. This eliminates the 500ms flicker
+         * that was happening because updateUI calls buildMenu() on a timer.
+         *
+         * `forceRebuild` is true when the card set itself changes (e.g. town hall
+         * placed → its card disappears, or player level unlocks a new card).
+         */
+        buildMenu(forceRebuild = false) {
             const menu = document.getElementById('buildMenu');
-            menu.innerHTML = '';
+            if (!menu) return;
             const hasTownHall = this.buildings.some(b => b.type === 'townhall');
-            for (const [type, def] of Object.entries(BLD)) {
-                // Hide Town Hall card if one already exists (only one allowed)
-                if (type === 'townhall' && hasTownHall) continue;
+
+            // Compute the stable key of which cards should exist right now
+            const entries = Object.entries(BLD).filter(([type]) => {
+                if (type === 'townhall' && hasTownHall) return false;
+                return true;
+            });
+            const setKey = entries.map(([type, def]) => {
+                const locked = this.player.level < def.unlockLevel;
+                return type + (locked ? 'L' : '');
+            }).join('|');
+
+            // Only rebuild DOM if the card set changed (or first render)
+            if (forceRebuild || this._buildMenuKey !== setKey) {
+                this._buildMenuKey = setKey;
+                menu.innerHTML = '';
+                for (const [type, def] of entries) {
+                    const locked = this.player.level < def.unlockLevel;
+                    const afford = this.canAfford(def.baseCost);
+                    const card = document.createElement('div');
+                    card.className = 'build-card' + (locked ? ' locked' : '') + (!afford && !locked ? ' cannot-afford' : '');
+                    card.dataset.type = type;
+                    const cost = Object.entries(def.baseCost).map(([k,v]) => `${fmt(v)} ${this.resSymbol(k)}`).join(' · ') || 'Free';
+                    card.innerHTML = `
+                        <div class="build-icon">${def.icon}</div>
+                        <div class="build-name">${def.name}</div>
+                        ${locked
+                            ? `<div class="build-lock">Unlocks Lv ${def.unlockLevel}</div>`
+                            : `<div class="build-cost ${!afford ? 'red' : ''}">${cost}</div>`}
+                    `;
+                    card.addEventListener('click', () => {
+                        // Re-evaluate affordability at click time — state may have changed
+                        const curLocked = this.player.level < def.unlockLevel;
+                        const curAfford = this.canAfford(def.baseCost);
+                        if (curLocked) { this.audio.error(); this.toast(`Requires player level ${def.unlockLevel}`, 'warn'); return; }
+                        if (!curAfford) { this.audio.error(); this.toast('Not enough resources', 'warn'); return; }
+                        this.setBuildMode(type);
+                    });
+                    menu.appendChild(card);
+                }
+            }
+
+            // Cheap refresh: just update per-card class state in place. No reflow,
+            // no flicker, no re-binding event listeners.
+            const cards = menu.children;
+            for (let i = 0; i < cards.length; i++) {
+                const card = cards[i];
+                const type = card.dataset.type;
+                if (!type) continue;
+                const def = BLD[type];
                 const locked = this.player.level < def.unlockLevel;
                 const afford = this.canAfford(def.baseCost);
-                const card = document.createElement('div');
-                card.className = 'build-card' + (locked ? ' locked' : '') + (!afford && !locked ? ' cannot-afford' : '');
-                const cost = Object.entries(def.baseCost).map(([k,v]) => `${fmt(v)} ${this.resSymbol(k)}`).join(' · ') || 'Free';
-                card.innerHTML = `
-                    <div class="build-icon">${def.icon}</div>
-                    <div class="build-name">${def.name}</div>
-                    ${locked
-                        ? `<div class="build-lock">Unlocks Lv ${def.unlockLevel}</div>`
-                        : `<div class="build-cost ${!afford ? 'red' : ''}">${cost}</div>`}
-                `;
-                card.addEventListener('click', () => {
-                    if (locked) { this.audio.error(); this.toast(`Requires player level ${def.unlockLevel}`, 'warn'); return; }
-                    if (!afford) { this.audio.error(); this.toast('Not enough resources', 'warn'); return; }
-                    this.setBuildMode(type);
-                });
-                menu.appendChild(card);
-            }
-            if (this.buildMode) {
-                const cards = menu.querySelectorAll('.build-card');
-                const idx = Object.keys(BLD).indexOf(this.buildMode);
-                if (cards[idx]) cards[idx].classList.add('selected');
+                card.classList.toggle('locked', locked);
+                card.classList.toggle('cannot-afford', !afford && !locked);
+                card.classList.toggle('selected', this.buildMode === type);
+                // Also refresh the red-cost color on the cost line
+                const costEl = card.querySelector('.build-cost');
+                if (costEl) costEl.classList.toggle('red', !afford);
             }
         }
 
