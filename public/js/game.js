@@ -22,8 +22,8 @@
         xpToLevel: (lv) => Math.floor(100 * Math.pow(1.4, lv - 1)),
         comboWindow: 1.3,
         spellCost: { gold: 0, gems: 1 },
-        spellRadius: 1.8,
-        spellBaseDmg: 180,
+        spellRadius: 3.2,
+        spellBaseDmg: 260,
     };
 
     // ---------- BUILDING TYPES ----------
@@ -470,6 +470,9 @@
             this.spellMode = false;   // lightning targeting?
             this.selectedBuilding = null;  // last left-clicked non-collector (highlight target)
             this.selectHighlight = 0; // 0-1 decay used for the selection ring pulse
+            this.paused = false;      // global freeze (manual pause, tab hidden, or game over)
+            this.autoCollect = false; // auto-collect toggle — periodically taps all collectors
+            this._autoCollectAcc = 0;
 
             // Boost
             this.boost = { mult: 1, timeLeft: 0 };
@@ -523,6 +526,8 @@
             // Invalidate gradients + ground cache that depend on viewport size
             this._skyCache = null;
             this.groundCache = null;
+            this.cacheMinX = undefined;
+            this.clampCamera();
         }
 
         centerCamera() {
@@ -530,6 +535,7 @@
             const midWorld = this.worldIso(CFG.gridW / 2, CFG.gridH / 2);
             this.cam.x = this.vw / 2 - midWorld.x * this.cam.zoom;
             this.cam.y = this.vh / 2 - midWorld.y * this.cam.zoom - 60;
+            this.clampCamera();
         }
 
         // ---------- Input ----------
@@ -598,6 +604,7 @@
                         // Pan the world
                         this.cam.x += p.x - this.input.lastX;
                         this.cam.y += p.y - this.input.lastY;
+                        this.clampCamera();
                     }
                     this.input.lastX = p.x;
                     this.input.lastY = p.y;
@@ -689,6 +696,9 @@
                         this.toast('⚡ Click a tile to strike', 'warn');
                     }
                 }
+                if (e.key === 'p' || e.key === 'P') {
+                    this.togglePause();
+                }
             });
         }
 
@@ -700,6 +710,42 @@
             this.cam.zoom = newZoom;
             this.cam.x = ax - wx * newZoom;
             this.cam.y = ay - wy * newZoom;
+            this.clampCamera();
+        }
+
+        /**
+         * Clamp the camera so the ground cache always fully covers the viewport.
+         * This is what keeps the player from panning far enough that the dark
+         * sky peeks in on the sides or top. Called after every pan / zoom /
+         * resize. No-op before the cache has been built (init phase).
+         */
+        clampCamera() {
+            if (this.cacheMinX === undefined) return;
+            const z = this.cam.zoom;
+            // The viewport in world space goes from
+            //   (-cam.x/z, -cam.y/z)  to  ((vw-cam.x)/z, (vh-cam.y)/z)
+            // We need this rectangle to sit inside the cache rectangle
+            //   [cacheMinX, cacheMaxX] × [cacheMinY, cacheMaxY]
+            // Solving for cam.x:
+            //   -cam.x/z       >= cacheMinX  → cam.x <= -cacheMinX * z
+            //   (vw-cam.x)/z  <= cacheMaxX  → cam.x >= vw - cacheMaxX * z
+            const minCamX = this.vw - this.cacheMaxX * z;
+            const maxCamX = -this.cacheMinX * z;
+            const minCamY = this.vh - this.cacheMaxY * z;
+            const maxCamY = -this.cacheMinY * z;
+            // If the cache is wider/taller than the viewport, clamp normally;
+            // otherwise just center (shouldn't happen with our pad logic, but
+            // be safe).
+            if (minCamX <= maxCamX) {
+                this.cam.x = clamp(this.cam.x, minCamX, maxCamX);
+            } else {
+                this.cam.x = (minCamX + maxCamX) / 2;
+            }
+            if (minCamY <= maxCamY) {
+                this.cam.y = clamp(this.cam.y, minCamY, maxCamY);
+            } else {
+                this.cam.y = (minCamY + maxCamY) / 2;
+            }
         }
 
         // ---------- Iso helpers (world space) ----------
@@ -930,39 +976,56 @@
 
         castLightning(tx, ty) {
             this.stats.spells++;
-            this.flash = 0.45;
+            this.flash = 0.55;
             this.audio.spell();
-            const dmg = CFG.spellBaseDmg + this.player.level * 60;
+            const dmg = CFG.spellBaseDmg + this.player.level * 80;
             // Big burst of particles
             const center = this.worldIso(tx, ty);
-            for (let i = 0; i < 40; i++) {
+            for (let i = 0; i < 60; i++) {
                 const ang = Math.random() * Math.PI * 2;
-                const sp = rand(60, 360);
+                const sp = rand(80, 420);
                 this.particles.push({
                     x: center.x, y: center.y,
-                    vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 60,
+                    vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 80,
                     life: rand(0.4, 1.1), max: 1.1,
                     color: i % 2 ? '#a6ecff' : '#ffffff', size: rand(2, 5),
                 });
             }
             // Lightning bolt jagged line from sky
-            for (let j = 0; j < 4; j++) {
+            for (let j = 0; j < 6; j++) {
                 this.particles.push({
-                    x: center.x + rand(-20, 20), y: center.y - 300,
-                    vx: rand(-10, 10), vy: 1200,
+                    x: center.x + rand(-25, 25), y: center.y - 340,
+                    vx: rand(-10, 10), vy: 1400,
                     life: 0.12, max: 0.12,
-                    color: '#ffffff', size: 4,
+                    color: '#ffffff', size: 5,
                 });
             }
-            // Damage enemies in radius
+            // Damage enemies in radius. Use both tile-space and screen-space
+            // distance checks — tile coords for logic, screen coords as a
+            // fallback so fast-moving enemies near the strike still get hit.
+            let hits = 0;
             for (const e of this.enemies) {
                 if (e.hp <= 0) continue;
                 const d = Math.hypot(e.tx - tx, e.ty - ty);
                 if (d <= CFG.spellRadius) {
                     this.hitEnemy(e, dmg);
+                    hits++;
+                    // Per-hit spark burst so the player sees the damage land
+                    for (let k = 0; k < 6; k++) {
+                        this.particles.push({
+                            x: e.x, y: e.y,
+                            vx: rand(-120, 120), vy: rand(-140, -40),
+                            life: rand(0.3, 0.6), max: 0.6,
+                            color: '#ffe3a1', size: rand(2, 4),
+                        });
+                    }
                 }
             }
-            this.toast('⚡ Lightning strike!', 'success');
+            if (hits > 0) {
+                this.toast(`⚡ Lightning struck ${hits} raider${hits > 1 ? 's' : ''}!`, 'success');
+            } else {
+                this.toast('⚡ Lightning strike — no targets in range', 'warn');
+            }
             this.checkAchievements();
         }
 
@@ -1405,11 +1468,28 @@
             }
         }
 
+        // ---------- Pause ----------
+        togglePause() {
+            if (this.gameOverShown) return;
+            this.paused = !this.paused;
+            const btn = document.getElementById('actPause');
+            if (btn) {
+                const lbl = btn.querySelector('.action-label');
+                if (lbl) lbl.textContent = this.paused ? 'Resume' : 'Pause';
+                btn.classList.toggle('on', this.paused);
+            }
+            // Reset dt so the first post-resume tick doesn't jump.
+            if (!this.paused) this.lastTime = performance.now();
+            this.toast(this.paused ? '⏸ Paused' : '▶ Resumed', 'warn');
+        }
+
         // ---------- Main loop ----------
         loop(ts) {
             const dt = Math.min((ts - this.lastTime) / 1000, 0.1);
             this.lastTime = ts;
-            this.update(dt);
+            // When paused (manual, tab hidden, or game-over), skip sim tick but
+            // keep rendering so the UI stays responsive to the user.
+            if (!this.paused) this.update(dt);
             this.render();
             requestAnimationFrame((t) => this.loop(t));
         }
@@ -1513,6 +1593,26 @@
             // Selection ring decay (clicked non-collector pulse)
             if (this.selectHighlight > 0) this.selectHighlight = Math.max(0, this.selectHighlight - dt * 0.9);
 
+            // Auto-collect tick — every 3 seconds, silently collect from all
+            // resource buildings if the toggle is on. Doesn't feed the combo
+            // (that would trivialize the click-frenzy achievement) but does
+            // give offline-style passive collection while the game is open.
+            if (this.autoCollect) {
+                this._autoCollectAcc = (this._autoCollectAcc || 0) + dt;
+                if (this._autoCollectAcc >= 3) {
+                    this._autoCollectAcc = 0;
+                    for (const b of this.buildings) {
+                        const def = BLD[b.type];
+                        if (def.clickBonus) {
+                            const bonus = def.clickBonus(b.level);
+                            for (const [k, v] of Object.entries(bonus)) {
+                                this.res[k] = Math.min(this.cap(), (this.res[k] || 0) + v);
+                            }
+                        }
+                    }
+                }
+            }
+
             // UI tick (less frequent)
             this._uiAcc = (this._uiAcc || 0) + dt;
             if (this._uiAcc >= 0.1) { this._uiAcc = 0; this.updateUI(); }
@@ -1610,6 +1710,22 @@
             if (this.flash > 0) {
                 ctx.fillStyle = `rgba(255,255,255,${this.flash})`;
                 ctx.fillRect(0, 0, this.vw, this.vh);
+            }
+
+            // Paused overlay — dimmed backdrop + label in the center of the
+            // canvas. Only shown for user-initiated pauses (not game over,
+            // which has its own modal).
+            if (this.paused && !this.gameOverShown) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+                ctx.fillRect(0, 0, this.vw, this.vh);
+                ctx.fillStyle = '#ffe3a1';
+                ctx.font = 'bold 42px Cinzel, serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('⏸ PAUSED', this.vw / 2, this.vh / 2 - 14);
+                ctx.font = '14px Inter, sans-serif';
+                ctx.fillStyle = '#a7a08a';
+                ctx.fillText('Press P or the Pause button to resume', this.vw / 2, this.vh / 2 + 22);
             }
 
             ctx.restore();
@@ -1749,6 +1865,13 @@
             minX -= padX; minY -= padY; maxX += padX; maxY += padY + CFG.tileH;
             const w = Math.ceil(maxX - minX);
             const h = Math.ceil(maxY - minY);
+            // Remember the world-space bounds of the cache so camera pan can be
+            // clamped to them — this is what prevents the sky from peeking in
+            // when the user drags the view to the edge on a wide screen.
+            this.cacheMinX = minX;
+            this.cacheMinY = minY;
+            this.cacheMaxX = maxX;
+            this.cacheMaxY = maxY;
             const cv = document.createElement('canvas');
             cv.width = w;
             cv.height = h;
@@ -1998,6 +2121,9 @@
             this.groundCache = cv;
             this.groundCacheOffsetX = minX;
             this.groundCacheOffsetY = minY;
+            // Now that we know the cache bounds, clamp the camera so any stale
+            // pan from before the cache was (re)built is brought back in range.
+            this.clampCamera();
         }
 
         // Draws the diamond for tile (tx, ty) in world coords
@@ -2114,8 +2240,22 @@
             if (isWall) {
                 this.drawWall(ctx, b, centerP, h, fw, fh);
             } else {
+                // Per-level color shift — buildings grow richer as they upgrade.
+                // Low levels look as defined; mid levels darken toward a saturated
+                // accent; high levels get a warm gold wash on the roof to hint
+                // at their max-tier status. Computed per frame but the math is
+                // trivial (3 mixColor calls).
+                const lvl = b.level || 1;
+                const maxLv = def.maxLevel || 20;
+                const progress = Math.min(1, (lvl - 1) / Math.max(1, maxLv - 1));
+                // Darken faces gradually (up to 30% darker at max)
+                const c1 = progress > 0 ? mixColor(def.color1, '#1a1018', progress * 0.32) : def.color1;
+                const c2 = progress > 0 ? mixColor(def.color2, '#3a1810', progress * 0.25) : def.color2;
+                // Roof shifts toward a warm gold tone at high levels
+                const rf = progress > 0 ? mixColor(def.roof, '#ffc857', Math.min(0.55, progress * 0.55)) : def.roof;
+
                 // Right face
-                ctx.fillStyle = def.color1;
+                ctx.fillStyle = c1;
                 ctx.beginPath();
                 ctx.moveTo(centerP.x, centerP.y + fh);
                 ctx.lineTo(centerP.x + fw, centerP.y);
@@ -2128,7 +2268,7 @@
                 ctx.stroke();
 
                 // Left face
-                ctx.fillStyle = def.color2;
+                ctx.fillStyle = c2;
                 ctx.beginPath();
                 ctx.moveTo(centerP.x, centerP.y + fh);
                 ctx.lineTo(centerP.x - fw, centerP.y);
@@ -2139,7 +2279,7 @@
                 ctx.stroke();
 
                 // Top diamond
-                ctx.fillStyle = def.roof;
+                ctx.fillStyle = rf;
                 ctx.beginPath();
                 ctx.moveTo(centerP.x, centerP.y - fh - h);
                 ctx.lineTo(centerP.x + fw, centerP.y - h);
@@ -3079,6 +3219,33 @@
             document.getElementById('actBoost').addEventListener('click', () => { this.audio.click(); this.activateBoost(); });
             document.getElementById('actCancel').addEventListener('click', () => { this.audio.click(); this.setBuildMode(null); this.moveMode = null; this.spellMode = false; this.updateCanvasCursor(); });
 
+            const pauseBtn = document.getElementById('actPause');
+            if (pauseBtn) pauseBtn.addEventListener('click', () => { this.audio.click(); this.togglePause(); });
+
+            const autoBtn = document.getElementById('actAutoCollect');
+            if (autoBtn) autoBtn.addEventListener('click', () => {
+                this.audio.click();
+                this.autoCollect = !this.autoCollect;
+                const label = autoBtn.querySelector('.action-label');
+                if (label) label.textContent = this.autoCollect ? 'Auto: On' : 'Auto: Off';
+                autoBtn.classList.toggle('on', this.autoCollect);
+                this.toast(this.autoCollect ? 'Auto-collect enabled' : 'Auto-collect disabled', 'success');
+            });
+
+            // Auto-pause when the tab becomes hidden so raiders don't attack
+            // the kingdom while the player has the app closed or backgrounded.
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    this._wasPausedBeforeHide = this.paused;
+                    this.paused = true;
+                } else if (!this._wasPausedBeforeHide && !this.gameOverShown) {
+                    this.paused = false;
+                    // Reset frame delta so the first post-resume tick doesn't
+                    // jump forward by the entire hidden duration.
+                    this.lastTime = performance.now();
+                }
+            });
+
             const spellBtn = document.getElementById('actSpell');
             if (spellBtn) spellBtn.addEventListener('click', () => {
                 this.audio.click();
@@ -3461,14 +3628,17 @@
 
         // ---------- Game Over ----------
         gameOver() {
+            if (this.gameOverShown) return; // don't re-queue if already showing
             this.showAlert('☠ KINGDOM FALLEN ☠', 4);
-            // Pause wave escalation so the ruined kingdom is calm behind the modal
+            // Freeze the world during game-over via the pause flag — no more
+            // sentinel values on wave.timer that could leak into saves.
             this.wave.active = false;
             this.wave.spawnLeft = 0;
-            this.wave.timer = 999999;
+            this.wave.timer = CFG.waveBaseSec;
             this.enemies = [];
             this.projectiles = [];
             this.gameOverShown = true;
+            this.paused = true;
             setTimeout(() => {
                 this.showConfirm({
                     title: 'KINGDOM FALLEN',
@@ -3485,8 +3655,9 @@
                         // Declined: give them a 60s grace period to rebuild, then waves resume
                         this.wave.timer = 60;
                         this.gameOverShown = false;
+                        this.paused = false;
                         this.toast('60s grace — rebuild your Town Hall', 'warn');
-                        this.buildMenu(); // refresh so TH card reappears
+                        this.buildMenu(true); // refresh so TH card reappears
                     },
                 });
             }, 1800);
@@ -3552,6 +3723,13 @@
         // ---------- Save / Load ----------
         save() {
             try {
+                // Sanitize wave timer on write so the game-over sentinel never
+                // leaks into persisted state. If the value is wild (destroyed
+                // game over path), clamp it back to a normal range.
+                const sanitizedTimer = Math.max(
+                    5,
+                    Math.min(this.wave.timer || CFG.waveBaseSec, Math.max(CFG.waveBaseSec, 120))
+                );
                 const data = {
                     v: 3,
                     res: this.res,
@@ -3559,7 +3737,7 @@
                     buildings: this.buildings.map(b => ({ id: b.id, type: b.type, tx: b.tx, ty: b.ty, level: b.level, hp: b.hp, maxHp: b.maxHp })),
                     stats: this.stats,
                     achievements: this.achievements,
-                    wave: { number: this.wave.number, timer: this.wave.timer },
+                    wave: { number: this.wave.number, timer: sanitizedTimer },
                     dayTime: this.dayTime,
                     dayCount: this.dayCount,
                     cam: { zoom: this.cam.zoom },
@@ -3582,7 +3760,13 @@
                 if (d.stats) this.stats = { ...this.stats, ...d.stats };
                 if (d.achievements) this.achievements = d.achievements;
                 if (d.wave) this.wave.number = d.wave.number;
-                if (d.wave && typeof d.wave.timer === 'number') this.wave.timer = d.wave.timer;
+                // Sanitize the wave timer — old saves could get corrupted values
+                // (e.g. 999999 from the game-over sentinel). Clamp to a sane range
+                // so the "next raid in 16656:53" bug can't survive a reload.
+                if (d.wave && typeof d.wave.timer === 'number') {
+                    const maxSane = Math.max(CFG.waveBaseSec, 120);
+                    this.wave.timer = Math.max(5, Math.min(d.wave.timer, maxSane));
+                }
                 if (typeof d.dayTime === 'number') this.dayTime = d.dayTime;
                 if (typeof d.dayCount === 'number') this.dayCount = d.dayCount;
                 if (d.cam && d.cam.zoom) this.cam.zoom = d.cam.zoom;
@@ -3618,6 +3802,16 @@
                 }
 
                 this.recomputeRates();
+
+                // Safety net: if the save somehow lost the Town Hall (destroyed
+                // mid-wave, user dismissed the modal, etc.), auto-show the
+                // Kingdom Fallen prompt so the player always has a way back in.
+                const hasTH = this.buildings.some(b => b.type === 'townhall');
+                if (!hasTH) {
+                    // Defer until after init finishes so the confirm dialog
+                    // and audio are both ready.
+                    setTimeout(() => this.gameOver(), 400);
+                }
             } catch (e) {
                 console.error('Load failed', e);
                 this.placeInitial();

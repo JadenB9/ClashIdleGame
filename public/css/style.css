@@ -653,6 +653,14 @@ html, body {
 #actCancel .action-ico { color: var(--danger); }
 #actCancel:hover { background: #3a1010; border-color: var(--danger); }
 
+/* Toggle buttons — highlight when active */
+.action.on {
+    background: #2a3456;
+    border-color: var(--gold-hi);
+    color: var(--gold-hi);
+}
+.action.on .action-ico { color: var(--gold-hi); }
+
 /* ================= MODAL ================= */
 
 .modal {
