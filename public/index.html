@@ -2,107 +2,186 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏰 Clash Idle Game</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0b0f1a">
+    <title>Clash Idle — Kingdom of Ember</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div id="gameContainer">
-        <!-- Header UI -->
-        <div id="header">
-            <div class="resource-bar">
-                <div class="resource gold">
-                    <span class="resource-icon">🪙</span>
-                    <span id="goldCount">1000</span>
-                </div>
-                <div class="resource elixir">
-                    <span class="resource-icon">💜</span>
-                    <span id="elixirCount">500</span>
-                </div>
-                <div class="resource dark-elixir">
-                    <span class="resource-icon">🖤</span>
-                    <span id="darkElixirCount">50</span>
-                </div>
-                <div class="resource gems">
-                    <span class="resource-icon">💎</span>
-                    <span id="gemCount">100</span>
+    <div id="app">
+        <!-- Top Resource Bar -->
+        <header id="topBar">
+            <div class="brand">
+                <span class="brand-mark">⚔</span>
+                <div class="brand-text">
+                    <div class="brand-title">Kingdom of Ember</div>
+                    <div class="brand-sub">Clash Idle</div>
                 </div>
             </div>
-            <div class="player-info">
-                <span id="playerLevel">Level 1</span>
-                <span id="playerName">Chief</span>
+
+            <div class="resources" id="resources">
+                <div class="res" data-res="gold" title="Gold — spent on buildings & upgrades">
+                    <span class="res-ico">◈</span>
+                    <span class="res-val" id="val-gold">0</span>
+                    <span class="res-rate" id="rate-gold">+0/s</span>
+                </div>
+                <div class="res" data-res="elixir" title="Elixir — unlocks advanced structures">
+                    <span class="res-ico">❂</span>
+                    <span class="res-val" id="val-elixir">0</span>
+                    <span class="res-rate" id="rate-elixir">+0/s</span>
+                </div>
+                <div class="res" data-res="dark" title="Dark Elixir — prestige tier resource">
+                    <span class="res-ico">✦</span>
+                    <span class="res-val" id="val-dark">0</span>
+                    <span class="res-rate" id="rate-dark">+0/s</span>
+                </div>
+                <div class="res" data-res="gems" title="Gems — premium. Earned from wave rewards">
+                    <span class="res-ico">♦</span>
+                    <span class="res-val" id="val-gems">0</span>
+                </div>
+            </div>
+
+            <div class="player">
+                <div class="level-ring">
+                    <svg viewBox="0 0 40 40">
+                        <circle class="ring-bg" cx="20" cy="20" r="16"/>
+                        <circle class="ring-fg" id="xpRing" cx="20" cy="20" r="16"/>
+                    </svg>
+                    <span id="playerLevel">1</span>
+                </div>
+                <div class="player-meta">
+                    <div class="player-name">Chief Jaden</div>
+                    <div class="player-xp" id="playerXp">0 / 100 XP</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Game Area -->
+        <main id="gameArea">
+            <canvas id="gameCanvas"></canvas>
+
+            <!-- HUD overlay on canvas -->
+            <div class="hud">
+                <div class="hud-panel left" id="wavePanel">
+                    <div class="hud-label">Next Raid</div>
+                    <div class="hud-value" id="waveTimer">–</div>
+                    <div class="hud-sub" id="waveInfo">Wave 1 · Goblins</div>
+                </div>
+                <div class="hud-panel center" id="alertPanel"></div>
+                <div class="hud-panel right" id="dayPanel">
+                    <div class="hud-label" id="dayLabel">Day</div>
+                    <div class="hud-value" id="dayTime">12:00</div>
+                    <div class="hud-sub" id="dayCount">Day 1</div>
+                </div>
+            </div>
+
+            <!-- Zoom controls -->
+            <div class="zoom-controls">
+                <button class="zoom-btn" id="zoomIn" title="Zoom in (+)">+</button>
+                <div class="zoom-val" id="zoomVal">100%</div>
+                <button class="zoom-btn" id="zoomOut" title="Zoom out (-)">−</button>
+                <button class="zoom-btn reset" id="zoomReset" title="Reset (0)">⟲</button>
+            </div>
+
+            <!-- Combo indicator -->
+            <div class="combo-label" id="comboLabel">COMBO</div>
+
+            <!-- Tooltips for buildings -->
+            <div id="hoverTip" class="hover-tip"></div>
+
+            <!-- Toast notifications -->
+            <div id="toasts" class="toasts"></div>
+        </main>
+
+        <!-- Sidebar -->
+        <aside id="sidebar">
+            <div class="tabs">
+                <button class="tab active" data-tab="build">Build</button>
+                <button class="tab" data-tab="army">Army</button>
+                <button class="tab" data-tab="stats">Stats</button>
+            </div>
+
+            <!-- Build Tab -->
+            <section class="tab-content active" data-tab="build">
+                <div class="section-title">Structures</div>
+                <div id="buildMenu" class="build-grid"></div>
+                <div class="hint">Tap a card, then click an empty tile to place.</div>
+            </section>
+
+            <!-- Army Tab -->
+            <section class="tab-content" data-tab="army">
+                <div class="section-title">Defenses</div>
+                <div id="armyList" class="army-list"></div>
+                <div class="section-title">Achievements</div>
+                <div id="achievementList" class="achievement-list"></div>
+            </section>
+
+            <!-- Stats Tab -->
+            <section class="tab-content" data-tab="stats">
+                <div class="section-title">Kingdom Statistics</div>
+                <div id="statList" class="stat-list"></div>
+                <div class="section-title">Save</div>
+                <div class="save-row">
+                    <button class="btn small" id="btnSave">Save</button>
+                    <button class="btn small" id="btnExport">Export</button>
+                    <button class="btn small danger" id="btnReset">Reset</button>
+                </div>
+            </section>
+        </aside>
+
+        <!-- Bottom Action Bar -->
+        <footer id="bottomBar">
+            <button class="action" id="actCollect">
+                <span class="action-ico">◉</span>
+                <span class="action-label">Collect All</span>
+            </button>
+            <button class="action" id="actRally">
+                <span class="action-ico">⚑</span>
+                <span class="action-label">Rally Defenses</span>
+            </button>
+            <button class="action" id="actBoost">
+                <span class="action-ico">✦</span>
+                <span class="action-label">Spend Gem (x2 · 60s)</span>
+            </button>
+            <button class="action spell" id="actSpell">
+                <span class="action-ico">⚡</span>
+                <span class="action-label">Lightning (1 ♦)</span>
+            </button>
+            <button class="action" id="actCancel" style="display:none">
+                <span class="action-ico">✕</span>
+                <span class="action-label">Cancel Build</span>
+            </button>
+        </footer>
+
+        <!-- Modal -->
+        <div id="modal" class="modal">
+            <div class="modal-panel">
+                <button class="modal-close" id="modalClose">✕</button>
+                <div id="modalBody"></div>
             </div>
         </div>
 
-        <!-- Main Game Canvas -->
-        <canvas id="gameCanvas" width="1200" height="800"></canvas>
-        
-        <!-- Controls Info -->
-        <div id="controlsInfo">
-            <div>Left Click: Collect Resources 💰</div>
-            <div>Right Click: Building Info 🏠</div>
-        </div>
-
-        <!-- Side Panel -->
-        <div id="sidePanel">
-            <div class="panel-section">
-                <h3>🏗️ Buildings</h3>
-                <div id="buildingMenu" class="building-grid">
-                    <!-- Building options will be populated by JavaScript -->
-                </div>
-            </div>
-            
-            <div class="panel-section">
-                <h3>⚔️ Army</h3>
-                <div id="armyInfo">
-                    <div class="troop-count">Barbarians: <span id="barbarianCount">0</span></div>
-                    <div class="troop-count">Archers: <span id="archerCount">0</span></div>
-                    <div class="troop-count">Giants: <span id="giantCount">0</span></div>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <h3>🔬 Research</h3>
-                <div id="researchMenu">
-                    <!-- Research options will be populated by JavaScript -->
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <h3>🏆 Achievements</h3>
-                <div id="achievementsList">
-                    <!-- Achievements will be populated by JavaScript -->
-                </div>
-            </div>
-        </div>
-
-        <!-- Bottom Controls -->
-        <div id="bottomControls">
-            <button id="shopBtn" class="control-btn">🛒 Shop</button>
-            <button id="attackBtn" class="control-btn">⚔️ Attack</button>
-            <button id="clanBtn" class="control-btn">🏴 Clan</button>
-            <button id="settingsBtn" class="control-btn">⚙️ Settings</button>
-        </div>
-
-        <!-- Modal for building info/upgrades -->
-        <div id="buildingModal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <h2 id="buildingTitle">Building Name</h2>
-                <div id="buildingStats"></div>
-                <div id="upgradeSection">
-                    <button id="upgradeBtn">Upgrade</button>
-                </div>
+        <!-- Welcome screen -->
+        <div id="welcome" class="welcome">
+            <div class="welcome-panel">
+                <div class="welcome-crest">⚔</div>
+                <h1>Kingdom of Ember</h1>
+                <p class="tagline">Build. Defend. Conquer. Idle-style.</p>
+                <ul class="welcome-tips">
+                    <li>◈ Buildings generate resources over time</li>
+                    <li>◎ Tap any building to collect a click bonus</li>
+                    <li>⚔ Raiders attack every minute — build defenses</li>
+                    <li>★ Level up to unlock new structures</li>
+                </ul>
+                <button class="btn primary" id="welcomeStart">Enter the Kingdom</button>
             </div>
         </div>
     </div>
 
-    <!-- Load Scripts -->
     <script src="/socket.io/socket.io.js"></script>
     <script src="js/game.js"></script>
-    <script src="js/buildings.js"></script>
-    <script src="js/resources.js"></script>
-    <script src="js/ui.js"></script>
-    <script src="js/main.js"></script>
 </body>
 </html>
