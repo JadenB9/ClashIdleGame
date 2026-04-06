@@ -8,8 +8,8 @@
 
     // ---------- CONFIG ----------
     const CFG = {
-        gridW: 18,
-        gridH: 18,
+        gridW: 24,
+        gridH: 24,
         tileW: 72,
         tileH: 36,
         zoomMin: 0.65,
@@ -1126,18 +1126,12 @@
                 ];
                 const inHex = pointInPolygon(wx, wy, hex);
 
-                // Level marker: a tile-shaped clickable area floating ABOVE the
-                // building. Always present so the player has a guaranteed click
-                // target no matter how crowded the layout.
-                const markerCx = center.x;
-                const markerCy = center.y - fh - h - 22;
-                const markerHalfW = 18;
-                const markerHalfH = 11;
-                const inMarker =
-                    wx >= markerCx - markerHalfW && wx <= markerCx + markerHalfW &&
-                    wy >= markerCy - markerHalfH && wy <= markerCy + markerHalfH;
+                // Also check the small level badge circle on the top-right
+                const badgeX = center.x + fw * 0.42;
+                const badgeY = center.y - h - fh * 0.12;
+                const inBadge = Math.hypot(wx - badgeX, wy - badgeY) <= 10;
 
-                if (inHex || inMarker) {
+                if (inHex || inBadge) {
                     const depth = b.tx + b.ty + size;
                     if (depth > bestDepth) {
                         bestDepth = depth;
@@ -2452,30 +2446,24 @@
 
             if (b.ghost) return;
 
-            // Floating level marker — a fat pill ABOVE the building that
-            // always gives the player a guaranteed click target even in
-            // crowded layouts. This area is also registered as a hit target
-            // in buildingAtScreen().
-            const markerCx = centerP.x;
-            const markerCy = centerP.y - fh - h - 22;
-            const markerHalfW = 18;
-            const markerHalfH = 11;
-            // Drop shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(markerCx - markerHalfW, markerCy - markerHalfH + 2, markerHalfW * 2, markerHalfH * 2);
-            // Body
-            ctx.fillStyle = '#1a2034';
-            ctx.fillRect(markerCx - markerHalfW, markerCy - markerHalfH, markerHalfW * 2, markerHalfH * 2);
-            // Gold border
+            // Level badge — small circle tucked against the top-right of the
+            // building. Tiny like Clash of Clans (not a big floating tag).
+            // The polygon hex hit-test already covers the whole building shape,
+            // so this is purely visual — no need for a separate hit target.
+            const badgeX = centerP.x + fw * 0.42;
+            const badgeY = centerP.y - h - fh * 0.12;
+            ctx.fillStyle = 'rgba(0,0,0,.8)';
+            ctx.beginPath();
+            ctx.arc(badgeX, badgeY, 9, 0, Math.PI * 2);
+            ctx.fill();
             ctx.strokeStyle = '#ffc857';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(markerCx - markerHalfW, markerCy - markerHalfH, markerHalfW * 2, markerHalfH * 2);
-            // Level number
-            ctx.fillStyle = '#ffe3a1';
-            ctx.font = 'bold 13px Cinzel, serif';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.fillStyle = '#ffc857';
+            ctx.font = 'bold 9px Inter, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('Lv ' + b.level, markerCx, markerCy);
+            ctx.fillText(b.level, badgeX, badgeY);
 
             // HP bar
             if (b.hp < b.maxHp) {
