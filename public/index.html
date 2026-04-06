@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20260406e">
+    <link rel="stylesheet" href="css/style.css?v=20260406f">
 </head>
 <body>
     <div id="app">
@@ -101,6 +101,7 @@
             <div class="tabs">
                 <button class="tab active" data-tab="build">Build</button>
                 <button class="tab" data-tab="army">Army</button>
+                <button class="tab" data-tab="coop">Co-op</button>
                 <button class="tab" data-tab="stats">Stats</button>
             </div>
 
@@ -117,6 +118,44 @@
                 <div id="armyList" class="army-list"></div>
                 <div class="section-title">Achievements</div>
                 <div id="achievementList" class="achievement-list"></div>
+            </section>
+
+            <!-- Co-op Tab -->
+            <section class="tab-content" data-tab="coop">
+                <div class="section-title">Multiplayer Co-op</div>
+                <div id="coopDisconnected" class="coop-section">
+                    <div class="coop-code-block">
+                        <div class="coop-label">Your Game Code</div>
+                        <div class="coop-code" id="gameCode">------</div>
+                        <button class="btn small" id="btnCopyCode">Copy Code</button>
+                    </div>
+                    <div class="coop-connect-block">
+                        <div class="coop-label">Enter Partner's Code</div>
+                        <input type="text" id="partnerCodeInput" class="coop-input" maxlength="6" placeholder="XXXXXX" autocomplete="off" spellcheck="false">
+                        <button class="btn primary small" id="btnConnect">Connect</button>
+                    </div>
+                    <div class="coop-status offline" id="coopStatus">Not Connected</div>
+                    <div class="coop-hint">Share your code with a friend. Both players must be online.</div>
+                </div>
+                <div id="coopConnected" class="coop-section" style="display:none">
+                    <div class="partner-header">
+                        <div class="partner-name" id="partnerName">Partner</div>
+                        <div class="coop-status online" id="coopStatusOn">Connected</div>
+                    </div>
+                    <div class="partner-resources" id="partnerRes"></div>
+                    <div class="partner-wave" id="partnerWave"></div>
+                    <canvas id="partnerMap" class="partner-map" width="280" height="280"></canvas>
+                    <div class="section-title" style="margin-top:12px">Send Resources</div>
+                    <div class="gift-row">
+                        <button class="btn small gift-btn" data-gift="gold">◈ Send 10% Gold</button>
+                        <button class="btn small gift-btn" data-gift="elixir">❂ Send 10% Elixir</button>
+                    </div>
+                    <div class="gift-row">
+                        <button class="btn small gift-btn" data-gift="dark">✦ Send 10% Dark</button>
+                        <button class="btn small gift-btn" data-gift="gems">♦ Send 1 Gem</button>
+                    </div>
+                    <button class="btn small danger" id="btnDisconnect" style="margin-top:12px;width:100%">Disconnect</button>
+                </div>
             </section>
 
             <!-- Stats Tab -->
@@ -158,6 +197,10 @@
                 <span class="action-ico">⚡</span>
                 <span class="action-label">Lightning (1 ♦)</span>
             </button>
+            <button class="action warcry" id="actWarCry" title="War Cry — 50% tower damage for 15s (90s cooldown)">
+                <span class="action-ico">🔥</span>
+                <span class="action-label">War Cry</span>
+            </button>
             <button class="action" id="actCancel" style="display:none">
                 <span class="action-ico">✕</span>
                 <span class="action-label">Cancel Build</span>
@@ -169,6 +212,21 @@
             <div class="modal-panel">
                 <button class="modal-close" id="modalClose">✕</button>
                 <div id="modalBody"></div>
+            </div>
+        </div>
+
+        <!-- Co-op Invite Notification -->
+        <div id="inviteNotify" class="invite-notify">
+            <div class="invite-content">
+                <div class="invite-icon">⚔</div>
+                <div class="invite-text">
+                    <div class="invite-title">Co-op Invite</div>
+                    <div class="invite-name" id="inviteName">Player</div>
+                </div>
+                <div class="invite-actions">
+                    <button class="btn primary small" id="btnAcceptInvite">Accept</button>
+                    <button class="btn small" id="btnDeclineInvite">Decline</button>
+                </div>
             </div>
         </div>
 
@@ -189,6 +247,7 @@
         </div>
     </div>
 
-    <script src="js/game.js?v=20260406e"></script>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="js/game.js?v=20260406f"></script>
 </body>
 </html>

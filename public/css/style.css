@@ -1080,6 +1080,235 @@ html, body {
     padding: 12px 28px;
 }
 
+/* ================= CO-OP MULTIPLAYER ================= */
+
+.coop-section { padding: 8px 0; }
+
+.coop-code-block {
+    text-align: center;
+    padding: 14px;
+    background: var(--panel-2);
+    border: 2px solid var(--panel-border-dim);
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+
+.coop-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+.coop-code {
+    font-family: 'Cinzel', serif;
+    font-size: 28px;
+    font-weight: 900;
+    color: var(--gold-hi);
+    letter-spacing: 6px;
+    margin: 8px 0;
+}
+
+.coop-connect-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.coop-input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--panel-2);
+    border: 2px solid var(--panel-border-dim);
+    border-radius: 6px;
+    color: var(--gold-hi);
+    font-family: 'Cinzel', serif;
+    font-size: 20px;
+    font-weight: 700;
+    text-align: center;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    outline: none;
+}
+
+.coop-input:focus { border-color: var(--gold); }
+
+.coop-input::placeholder {
+    color: var(--text-mute);
+    font-weight: 400;
+}
+
+.coop-status {
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    padding: 4px 10px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.coop-status.online {
+    color: var(--good);
+    background: rgba(107, 255, 149, 0.1);
+}
+
+.coop-status.offline {
+    color: var(--text-mute);
+    background: rgba(107, 104, 84, 0.1);
+}
+
+.coop-hint {
+    font-size: 11px;
+    color: var(--text-mute);
+    text-align: center;
+    margin-top: 10px;
+    line-height: 1.4;
+}
+
+.partner-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.partner-name {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--gold-hi);
+}
+
+.partner-resources {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+}
+
+.p-res {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--panel-2);
+}
+
+.p-res.gold { color: var(--gold); }
+.p-res.elixir { color: var(--elixir); }
+.p-res.dark { color: var(--dark); }
+.p-res.gem { color: var(--gem); }
+
+.partner-wave {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+}
+
+.partner-map {
+    width: 100%;
+    height: 280px;
+    border: 2px solid var(--panel-border-dim);
+    border-radius: 6px;
+    background: var(--panel-2);
+    display: block;
+}
+
+.gift-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.gift-btn {
+    flex: 1;
+    font-size: 11px !important;
+    padding: 8px 6px !important;
+}
+
+/* ================= INVITE NOTIFICATION ================= */
+
+.invite-notify {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-120px);
+    z-index: 2500;
+    transition: transform .3s ease-out;
+    pointer-events: none;
+}
+
+.invite-notify.show {
+    transform: translateX(-50%) translateY(0);
+    pointer-events: auto;
+}
+
+.invite-content {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 20px;
+    background: var(--panel);
+    border: 3px solid var(--gold);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.invite-icon {
+    font-size: 28px;
+    color: var(--gold);
+}
+
+.invite-title {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--gold-hi);
+}
+
+.invite-name {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.invite-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* ================= WAR CRY ================= */
+
+.action.warcry {
+    border-color: var(--ember);
+    color: var(--ember-hi);
+}
+
+.action.warcry .action-ico { color: var(--ember); }
+
+.action.warcry:hover {
+    background: #2a1a0a;
+    border-color: var(--ember-hi);
+}
+
+.action.warcry.on-cooldown {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.action.warcry.active {
+    border-color: var(--ember-hi);
+    background: rgba(255, 107, 53, 0.15);
+    animation: warCryPulse 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes warCryPulse {
+    from { border-color: var(--ember); }
+    to { border-color: var(--ember-hi); box-shadow: 0 0 12px rgba(255, 107, 53, 0.3); }
+}
+
 /* ================= RESPONSIVE ================= */
 
 @media (max-width: 900px) {

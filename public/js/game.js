@@ -495,6 +495,21 @@
             // Flash effect (screen flash for spells)
             this.flash = 0;
 
+            // War Cry (free cooldown ability)
+            this.warCry = { active: false, timeLeft: 0, cooldown: 0 };
+
+            // Co-op multiplayer
+            this.coop = {
+                peer: null,
+                conn: null,
+                code: '',
+                partnerCode: '',
+                connected: false,
+                partnerState: null,
+                syncInterval: null,
+                pendingInvite: null,
+            };
+
             this.lastTime = 0;
             this.alertTimer = 0;
 
@@ -527,6 +542,7 @@
             requestAnimationFrame((t) => this.loop(t));
 
             setInterval(() => this.save(), CFG.autoSaveMs);
+            this.initCoop();
 
             const welcome = document.getElementById('welcome');
             document.getElementById('welcomeStart').addEventListener('click', () => {
@@ -710,6 +726,7 @@
                 if (e.key === '+' || e.key === '=') this.zoomBy(1.15, this.vw/2, this.vh/2);
                 if (e.key === '-' || e.key === '_') this.zoomBy(1/1.15, this.vw/2, this.vh/2);
                 if (e.key === '0') { this.cam.zoom = 1; this.centerCamera(); }
+                if (e.key === 'w' || e.key === 'W') this.activateWarCry();
                 if (e.key === 'l' || e.key === 'L') {
                     if (this.res.gems >= CFG.spellCost.gems) {
                         this.spellMode = true;
@@ -1423,7 +1440,7 @@
             this.projectiles.push({
                 x: sx.x, y: sx.y - 25,
                 target,
-                dmg: d.dmg,
+                dmg: d.dmg * (this.warCry.active ? 1.5 : 1),
                 splash: d.splash || 0,
                 speed: 640,
                 ttl: 2,
@@ -1600,12 +1617,14 @@
             this.dayTime += dt / CFG.dayLengthSec;
             if (this.dayTime >= 1) { this.dayTime -= 1; this.dayCount++; }
 
-            // Resources
+            // Resources (night bonus: +25% during night hours)
             const mult = this.boost.mult;
-            this.res.gold   = Math.min(this.cap(), this.res.gold   + this.rates.gold   * dt * mult);
-            this.res.elixir = Math.min(this.cap(), this.res.elixir + this.rates.elixir * dt * mult);
-            this.res.dark   = Math.min(this.cap() * 0.3, this.res.dark + this.rates.dark * dt * mult);
-            this.stats.goldEarned += this.rates.gold * dt * mult;
+            const nightMult = (this.dayTime < 0.2 || this.dayTime > 0.8) ? 1.25 : 1;
+            const rm = mult * nightMult;
+            this.res.gold   = Math.min(this.cap(), this.res.gold   + this.rates.gold   * dt * rm);
+            this.res.elixir = Math.min(this.cap(), this.res.elixir + this.rates.elixir * dt * rm);
+            this.res.dark   = Math.min(this.cap() * 0.3, this.res.dark + this.rates.dark * dt * rm);
+            this.stats.goldEarned += this.rates.gold * dt * rm;
 
             // Boost timer
             if (this.boost.timeLeft > 0) {
@@ -1615,6 +1634,16 @@
                     this.toast('Boost expired', 'warn');
                 }
             }
+
+            // War Cry timer
+            if (this.warCry.active) {
+                this.warCry.timeLeft -= dt;
+                if (this.warCry.timeLeft <= 0) {
+                    this.warCry.active = false;
+                    this.toast('War Cry ended', 'warn');
+                }
+            }
+            if (this.warCry.cooldown > 0) this.warCry.cooldown -= dt;
 
             // Combo decay
             if (this.combo.time > 0) {
@@ -3383,6 +3412,9 @@
             document.getElementById('actBoost').addEventListener('click', () => { this.audio.click(); this.activateBoost(); });
             document.getElementById('actCancel').addEventListener('click', () => { this.audio.click(); this.setBuildMode(null); this.moveMode = null; this.spellMode = false; this.updateCanvasCursor(); });
 
+            const warCryBtn = document.getElementById('actWarCry');
+            if (warCryBtn) warCryBtn.addEventListener('click', () => { this.audio.click(); this.activateWarCry(); });
+
             const pauseBtn = document.getElementById('actPause');
             if (pauseBtn) pauseBtn.addEventListener('click', () => { this.audio.click(); this.togglePause(); });
 
@@ -3677,6 +3709,31 @@
                 }
             }
 
+            // War Cry button state
+            const wcBtn = document.getElementById('actWarCry');
+            if (wcBtn) {
+                const wcLabel = wcBtn.querySelector('.action-label');
+                if (this.warCry.active) {
+                    wcBtn.classList.add('active');
+                    wcBtn.classList.remove('on-cooldown');
+                    if (wcLabel) wcLabel.textContent = `War Cry ${Math.ceil(this.warCry.timeLeft)}s`;
+                } else if (this.warCry.cooldown > 0) {
+                    wcBtn.classList.remove('active');
+                    wcBtn.classList.add('on-cooldown');
+                    if (wcLabel) wcLabel.textContent = `Cooldown ${Math.ceil(this.warCry.cooldown)}s`;
+                } else {
+                    wcBtn.classList.remove('active', 'on-cooldown');
+                    if (wcLabel) wcLabel.textContent = 'War Cry';
+                }
+            }
+
+            // Night bonus indicator on rate display
+            const isNightNow = this.dayTime < 0.2 || this.dayTime > 0.8;
+            const rateGold = document.getElementById('rate-gold');
+            if (rateGold && isNightNow) {
+                rateGold.textContent += ' 🌙';
+            }
+
             // Only rebuild inner tab content when that tab is actually visible.
             // updateUI runs at 10Hz, so skipping hidden tabs saves a LOT of DOM work.
             const activeTab = document.querySelector('.tab.active')?.dataset.tab;
@@ -3882,6 +3939,486 @@
             // Force reflow to restart animation
             void el.offsetWidth;
             el.classList.add('open');
+        }
+
+        // ---------- War Cry ----------
+        activateWarCry() {
+            if (this.warCry.active) {
+                this.toast('War Cry already active!', 'warn');
+                return;
+            }
+            if (this.warCry.cooldown > 0) {
+                this.toast(`War Cry on cooldown (${Math.ceil(this.warCry.cooldown)}s)`, 'warn');
+                this.audio.error();
+                return;
+            }
+            this.warCry.active = true;
+            this.warCry.timeLeft = 15;
+            this.warCry.cooldown = 90;
+            this.audio.spell();
+            this.toast('🔥 War Cry! Tower damage +50% for 15s', 'success');
+            this.showAlert('🔥 WAR CRY 🔥', 2);
+        }
+
+        // ---------- Co-op Multiplayer ----------
+        initCoop() {
+            if (typeof Peer === 'undefined') {
+                console.warn('PeerJS not loaded, co-op disabled');
+                const codeEl = document.getElementById('gameCode');
+                if (codeEl) codeEl.textContent = 'OFFLINE';
+                return;
+            }
+
+            const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+            const genCode = () => Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+            this.coop.code = genCode();
+
+            const codeEl = document.getElementById('gameCode');
+            if (codeEl) codeEl.textContent = this.coop.code;
+
+            const createPeer = (code) => {
+                const peer = new Peer('ember_' + code, { debug: 0 });
+
+                peer.on('open', () => {
+                    console.log('Co-op ready, code:', code);
+                });
+
+                peer.on('connection', (conn) => {
+                    this.handleIncomingConnection(conn);
+                });
+
+                peer.on('error', (err) => {
+                    if (err.type === 'unavailable-id') {
+                        this.coop.code = genCode();
+                        if (codeEl) codeEl.textContent = this.coop.code;
+                        peer.destroy();
+                        this.coop.peer = createPeer(this.coop.code);
+                    } else {
+                        console.warn('Peer error:', err.type, err.message);
+                    }
+                });
+
+                return peer;
+            };
+
+            try {
+                this.coop.peer = createPeer(this.coop.code);
+            } catch (e) {
+                console.warn('Co-op init failed:', e);
+            }
+
+            this.bindCoopUI();
+        }
+
+        bindCoopUI() {
+            const copyBtn = document.getElementById('btnCopyCode');
+            if (copyBtn) copyBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(this.coop.code).then(() => {
+                    this.toast('Code copied!', 'success');
+                    this.audio.click();
+                }).catch(() => {
+                    this.toast(this.coop.code, 'success');
+                    this.audio.click();
+                });
+            });
+
+            const connectBtn = document.getElementById('btnConnect');
+            const codeInput = document.getElementById('partnerCodeInput');
+            if (connectBtn && codeInput) {
+                connectBtn.addEventListener('click', () => {
+                    const code = codeInput.value.trim().toUpperCase();
+                    if (code.length !== 6) {
+                        this.toast('Enter a 6-character code', 'warn');
+                        this.audio.error();
+                        return;
+                    }
+                    if (code === this.coop.code) {
+                        this.toast("That's your own code!", 'warn');
+                        this.audio.error();
+                        return;
+                    }
+                    this.audio.click();
+                    this.connectToPartner(code);
+                });
+                codeInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') connectBtn.click();
+                });
+            }
+
+            const disconnectBtn = document.getElementById('btnDisconnect');
+            if (disconnectBtn) disconnectBtn.addEventListener('click', () => {
+                this.audio.click();
+                this.disconnectCoop();
+            });
+
+            const acceptBtn = document.getElementById('btnAcceptInvite');
+            if (acceptBtn) acceptBtn.addEventListener('click', () => {
+                this.audio.click();
+                this.acceptInvite();
+            });
+
+            const declineBtn = document.getElementById('btnDeclineInvite');
+            if (declineBtn) declineBtn.addEventListener('click', () => {
+                this.audio.click();
+                this.declineInvite();
+            });
+
+            document.querySelectorAll('.gift-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    this.audio.click();
+                    this.sendGift(btn.dataset.gift);
+                });
+            });
+        }
+
+        connectToPartner(code) {
+            if (!this.coop.peer) { this.toast('Co-op not available', 'error'); return; }
+            if (this.coop.connected) { this.toast('Already connected', 'warn'); return; }
+
+            this.toast('Connecting...', 'warn');
+            const conn = this.coop.peer.connect('ember_' + code, {
+                metadata: { name: this.player.name, level: this.player.level, code: this.coop.code }
+            });
+
+            const timeout = setTimeout(() => {
+                if (!this.coop.connected) {
+                    this.toast('Connection timed out — is partner online?', 'error');
+                    conn.close();
+                }
+            }, 12000);
+
+            conn.on('open', () => {
+                clearTimeout(timeout);
+                this.setupConnection(conn);
+                conn.send({ type: 'hello', name: this.player.name, level: this.player.level });
+            });
+
+            conn.on('error', () => {
+                clearTimeout(timeout);
+                this.toast('Connection failed — check the code', 'error');
+            });
+        }
+
+        handleIncomingConnection(conn) {
+            if (this.coop.connected) {
+                conn.send({ type: 'busy' });
+                conn.close();
+                return;
+            }
+            const meta = conn.metadata || {};
+            this.coop.pendingInvite = conn;
+
+            conn.on('open', () => {
+                this.showInviteNotification(meta.name || 'A player', meta.level || 1);
+            });
+
+            // Auto-decline after 30 seconds
+            setTimeout(() => {
+                if (this.coop.pendingInvite === conn && !this.coop.connected) {
+                    this.declineInvite();
+                }
+            }, 30000);
+        }
+
+        acceptInvite() {
+            if (!this.coop.pendingInvite) return;
+            const conn = this.coop.pendingInvite;
+            this.coop.pendingInvite = null;
+            this.hideInviteNotification();
+            this.setupConnection(conn);
+            conn.send({ type: 'hello', name: this.player.name, level: this.player.level });
+        }
+
+        declineInvite() {
+            if (!this.coop.pendingInvite) {
+                this.hideInviteNotification();
+                return;
+            }
+            try { this.coop.pendingInvite.send({ type: 'declined' }); } catch (_) {}
+            try { this.coop.pendingInvite.close(); } catch (_) {}
+            this.coop.pendingInvite = null;
+            this.hideInviteNotification();
+            this.toast('Invite declined', 'warn');
+        }
+
+        setupConnection(conn) {
+            this.coop.conn = conn;
+            this.coop.connected = true;
+            this.coop.partnerCode = (conn.peer || '').replace('ember_', '');
+
+            conn.on('data', (data) => this.handleCoopData(data));
+            conn.on('close', () => this.handleCoopDisconnect());
+            conn.on('error', () => this.handleCoopDisconnect());
+
+            // Sync state every 2 seconds
+            this.coop.syncInterval = setInterval(() => {
+                if (this.coop.connected && this.coop.conn && this.coop.conn.open) {
+                    try { this.coop.conn.send({ type: 'state', state: this.getCoopState() }); } catch (_) {}
+                }
+            }, 2000);
+
+            this.audio.levelup();
+            this.toast('Co-op connected!', 'success');
+            this.showAlert('⚔ ALLY JOINED ⚔', 2);
+            this.updateCoopUI();
+
+            // Send initial state immediately
+            try { conn.send({ type: 'state', state: this.getCoopState() }); } catch (_) {}
+
+            // Switch to co-op tab
+            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'coop'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.dataset.tab === 'coop'));
+        }
+
+        handleCoopDisconnect() {
+            const wasConnected = this.coop.connected;
+            this.coop.connected = false;
+            this.coop.conn = null;
+            this.coop.partnerState = null;
+            this.coop.partnerCode = '';
+            if (this.coop.syncInterval) {
+                clearInterval(this.coop.syncInterval);
+                this.coop.syncInterval = null;
+            }
+            if (wasConnected) {
+                this.toast('Partner disconnected', 'warn');
+                this.showAlert('ALLY LEFT', 2);
+            }
+            this.updateCoopUI();
+        }
+
+        disconnectCoop() {
+            if (this.coop.conn) {
+                try { this.coop.conn.send({ type: 'goodbye' }); } catch (_) {}
+                try { this.coop.conn.close(); } catch (_) {}
+            }
+            this.handleCoopDisconnect();
+        }
+
+        handleCoopData(data) {
+            if (!data || !data.type) return;
+
+            switch (data.type) {
+                case 'hello':
+                    this.toast(`${data.name} (Lv ${data.level}) joined!`, 'success');
+                    break;
+                case 'declined':
+                    this.toast('Invite was declined', 'warn');
+                    this.handleCoopDisconnect();
+                    break;
+                case 'busy':
+                    this.toast('Player is already in a co-op session', 'warn');
+                    this.handleCoopDisconnect();
+                    break;
+                case 'goodbye':
+                    this.handleCoopDisconnect();
+                    break;
+                case 'state':
+                    this.coop.partnerState = data.state;
+                    this.updatePartnerPanel();
+                    break;
+                case 'gift':
+                    this.receiveGift(data.resource, data.amount, data.from);
+                    break;
+            }
+        }
+
+        getCoopState() {
+            return {
+                name: this.player.name,
+                level: this.player.level,
+                res: { gold: this.res.gold, elixir: this.res.elixir, dark: this.res.dark, gems: this.res.gems },
+                rates: { gold: this.rates.gold, elixir: this.rates.elixir, dark: this.rates.dark },
+                buildings: this.buildings.map(b => ({
+                    type: b.type, tx: b.tx, ty: b.ty, level: b.level,
+                    hp: b.hp, maxHp: b.maxHp,
+                })),
+                wave: { number: this.wave.number, active: this.wave.active, timer: this.wave.timer },
+                enemies: this.enemies.length,
+                dayTime: this.dayTime,
+                dayCount: this.dayCount,
+                stats: { built: this.stats.built, kills: this.stats.kills },
+                boost: this.boost.mult > 1,
+                warCry: this.warCry.active,
+            };
+        }
+
+        sendGift(resource) {
+            if (!this.coop.connected || !this.coop.conn || !this.coop.conn.open) {
+                this.toast('Not connected to a partner', 'warn');
+                return;
+            }
+            let amount;
+            if (resource === 'gems') {
+                amount = 1;
+                if (this.res.gems < 1) {
+                    this.toast('Not enough gems', 'warn');
+                    this.audio.error();
+                    return;
+                }
+            } else {
+                amount = Math.floor((this.res[resource] || 0) * 0.1);
+                if (amount < 1) {
+                    this.toast(`Not enough ${resource} to send`, 'warn');
+                    this.audio.error();
+                    return;
+                }
+            }
+            this.res[resource] -= amount;
+            try {
+                this.coop.conn.send({
+                    type: 'gift',
+                    resource,
+                    amount,
+                    from: this.player.name,
+                });
+            } catch (_) {
+                // Refund on send failure
+                this.res[resource] += amount;
+                this.toast('Send failed', 'error');
+                return;
+            }
+            this.audio.coin();
+            this.toast(`Sent ${fmt(amount)} ${this.resSymbol(resource)} to partner`, 'success');
+            this.pulseRes(resource);
+            this.updateUI();
+        }
+
+        receiveGift(resource, amount, from) {
+            if (resource === 'gems') {
+                this.res.gems += amount;
+            } else {
+                this.res[resource] = Math.min(this.cap(), (this.res[resource] || 0) + amount);
+            }
+            this.audio.levelup();
+            this.toast(`${from} sent you ${fmt(amount)} ${this.resSymbol(resource)}!`, 'success');
+            this.pulseRes(resource);
+            this.showAlert(`♦ GIFT: +${fmt(amount)} ${resource.toUpperCase()} ♦`, 2);
+            this.updateUI();
+        }
+
+        updateCoopUI() {
+            const connected = this.coop.connected;
+            const panel = document.getElementById('coopConnected');
+            const disconnected = document.getElementById('coopDisconnected');
+            if (panel) panel.style.display = connected ? 'block' : 'none';
+            if (disconnected) disconnected.style.display = connected ? 'none' : 'block';
+
+            const codeEl = document.getElementById('gameCode');
+            if (codeEl) codeEl.textContent = this.coop.code;
+
+            const statusEl = document.getElementById('coopStatus');
+            if (statusEl) {
+                statusEl.textContent = connected ? 'Connected' : 'Not Connected';
+                statusEl.className = 'coop-status ' + (connected ? 'online' : 'offline');
+            }
+        }
+
+        updatePartnerPanel() {
+            const s = this.coop.partnerState;
+            if (!s) return;
+
+            const nameEl = document.getElementById('partnerName');
+            if (nameEl) nameEl.textContent = `${s.name} · Lv ${s.level}`;
+
+            const resEl = document.getElementById('partnerRes');
+            if (resEl) resEl.innerHTML = `
+                <span class="p-res gold">◈ ${fmt(s.res.gold)}</span>
+                <span class="p-res elixir">❂ ${fmt(s.res.elixir)}</span>
+                <span class="p-res dark">✦ ${fmt(s.res.dark)}</span>
+                <span class="p-res gem">♦ ${s.res.gems}</span>
+            `;
+
+            const waveEl = document.getElementById('partnerWave');
+            if (waveEl) {
+                if (s.wave.active) {
+                    waveEl.textContent = `Wave ${s.wave.number} · ${s.enemies} enemies · ${s.boost ? '⚡BOOSTED' : ''} ${s.warCry ? '🔥WAR CRY' : ''}`;
+                } else {
+                    waveEl.textContent = `Wave ${s.wave.number} · Next in ${fmtTime(s.wave.timer)} · Day ${s.dayCount}`;
+                }
+            }
+
+            this.renderPartnerMinimap(s);
+        }
+
+        renderPartnerMinimap(state) {
+            const canvas = document.getElementById('partnerMap');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const cellW = w / CFG.gridW;
+            const cellH = h / CFG.gridH;
+
+            // Background
+            ctx.fillStyle = '#0f1525';
+            ctx.fillRect(0, 0, w, h);
+
+            // Grid lines
+            ctx.strokeStyle = 'rgba(255, 200, 87, 0.06)';
+            ctx.lineWidth = 0.5;
+            for (let x = 0; x <= CFG.gridW; x++) {
+                ctx.beginPath(); ctx.moveTo(x * cellW, 0); ctx.lineTo(x * cellW, h); ctx.stroke();
+            }
+            for (let y = 0; y <= CFG.gridH; y++) {
+                ctx.beginPath(); ctx.moveTo(0, y * cellH); ctx.lineTo(w, y * cellH); ctx.stroke();
+            }
+
+            // Buildings
+            if (state.buildings) {
+                for (const b of state.buildings) {
+                    const def = BLD[b.type];
+                    if (!def) continue;
+                    const size = def.size || 1;
+                    const x = b.tx * cellW;
+                    const y = b.ty * cellH;
+                    const bw = size * cellW - 1;
+                    const bh = size * cellH - 1;
+
+                    // Level-based brightness
+                    const bright = Math.min(1, 0.5 + (b.level / (def.maxLevel || 20)) * 0.5);
+                    ctx.globalAlpha = bright;
+                    ctx.fillStyle = def.roof || def.color2 || '#888';
+                    ctx.fillRect(x + 0.5, y + 0.5, bw, bh);
+                    ctx.globalAlpha = 1;
+
+                    // HP bar if damaged
+                    if (b.hp < b.maxHp * 0.95) {
+                        const hpFrac = b.hp / b.maxHp;
+                        ctx.fillStyle = hpFrac > 0.5 ? '#6bff95' : '#ff5d5d';
+                        ctx.fillRect(x + 0.5, y + bh - 1, bw * hpFrac, 1.5);
+                    }
+
+                    // Town hall golden border
+                    if (b.type === 'townhall') {
+                        ctx.strokeStyle = '#ffc857';
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeRect(x + 0.5, y + 0.5, bw, bh);
+                    }
+                }
+            }
+
+            // Enemy count indicator
+            if (state.enemies > 0) {
+                ctx.fillStyle = 'rgba(255, 93, 93, 0.85)';
+                ctx.font = 'bold 12px Inter, sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(`⚔ ${state.enemies} enemies`, w - 6, 14);
+            }
+        }
+
+        showInviteNotification(name, level) {
+            const el = document.getElementById('inviteNotify');
+            if (!el) return;
+            const nameEl = document.getElementById('inviteName');
+            if (nameEl) nameEl.textContent = `${name} (Lv ${level}) wants to co-op`;
+            el.classList.add('show');
+            this.audio.wave();
+        }
+
+        hideInviteNotification() {
+            const el = document.getElementById('inviteNotify');
+            if (el) el.classList.remove('show');
         }
 
         // ---------- Save / Load ----------
