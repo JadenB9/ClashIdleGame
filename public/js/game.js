@@ -1316,17 +1316,30 @@
             else if (edge === 2) { tx = randi(0, CFG.gridW); ty = CFG.gridH; }
             else                 { tx = -1; ty = randi(0, CFG.gridH); }
             const tier = Math.min(Math.floor(this.wave.number / 4), 3);
-            const types = [
+            const groundTypes = [
                 { kind: 'goblin', hp: 40, dmg: 8, spd: 1.4, gold: 18, xp: 3, color: '#6a8e3a', size: 10 },
                 { kind: 'orc',    hp: 110, dmg: 16, spd: 1.1, gold: 40, xp: 6, color: '#8a3a3a', size: 14 },
                 { kind: 'troll',  hp: 280, dmg: 32, spd: 0.8, gold: 85, xp: 12, color: '#6a2c8a', size: 18 },
                 { kind: 'ogre',   hp: 620, dmg: 55, spd: 0.6, gold: 180, xp: 24, color: '#3a2c6a', size: 22 },
             ];
-            const t = types[Math.min(tier, types.length - 1)];
+            const flyingTypes = [
+                { kind: 'bat',    hp: 30,  dmg: 6,  spd: 2.0, gold: 25,  xp: 5,  color: '#5a2a4a', size: 9 },
+                { kind: 'dragon', hp: 200, dmg: 28, spd: 1.2, gold: 100, xp: 15, color: '#c93535', size: 17 },
+            ];
+            // From wave 6+, 30% chance of a flying enemy
+            const isFlying = this.wave.number >= 6 && Math.random() < 0.3;
+            let t;
+            if (isFlying) {
+                const flyTier = this.wave.number >= 12 ? 1 : 0;
+                t = flyingTypes[flyTier];
+            } else {
+                t = groundTypes[Math.min(tier, groundTypes.length - 1)];
+            }
             const hpScale = 1 + this.wave.number * 0.12;
             const sp = this.worldIso(tx + 0.5, ty + 0.5);
             this.enemies.push({
                 kind: t.kind,
+                flying: isFlying,
                 tx: tx + 0.5, ty: ty + 0.5,
                 x: sp.x, y: sp.y,
                 hp: t.hp * hpScale, maxHp: t.hp * hpScale,
@@ -1340,24 +1353,46 @@
         }
 
         pickTarget(enemy) {
-            // Goblins prefer resource buildings; others target walls first (aggro)
+            // Flying enemies ignore walls entirely — they fly over.
+            // Ground enemies hit the nearest wall that stands between them and
+            // their ideal target, forcing them to break through.
             let best = null;
             let bestD = Infinity;
             for (const b of this.buildings) {
                 if (b.hp <= 0) continue;
                 const def = BLD[b.type];
+                // Flying troops skip walls
+                if (enemy.flying && b.type === 'wall') continue;
                 const cx = b.tx + def.size / 2;
                 const cy = b.ty + def.size / 2;
                 const d = Math.hypot(cx - enemy.tx, cy - enemy.ty);
-                // Lower = more preferred
                 let prio = 1;
                 if (b.type === 'townhall') prio = 0.4;
-                if (b.type === 'wall')     prio = 0.8;
                 if (def.production)        prio = 0.6;
+                // Ground enemies prioritize nearby walls so they break through
+                // instead of walking past them
+                if (b.type === 'wall' && !enemy.flying) prio = 0.3;
                 const score = d * prio;
                 if (score < bestD) { bestD = score; best = b; }
             }
             return best;
+        }
+
+        /**
+         * Check if a wall tile blocks the line between two tile positions.
+         * Returns the wall building if one is in the way, null otherwise.
+         */
+        wallBetween(fromTx, fromTy, _toTx, _toTy) {
+            // Simple: check each wall building to see if the enemy's movement
+            // vector passes within 0.8 tiles of the wall center
+            for (const b of this.buildings) {
+                if (b.type !== 'wall' || b.hp <= 0) continue;
+                const wx = b.tx + 0.5, wy = b.ty + 0.5;
+                // Point-to-segment distance approximation
+                const d = Math.hypot(wx - fromTx, wy - fromTy);
+                if (d < 1.0) return b; // standing on/next to wall → attack it
+            }
+            return null;
         }
 
         defenseTick(dt) {
@@ -1458,6 +1493,20 @@
                     const ty = e.target.ty + def.size / 2;
                     const dx = tx - e.tx, dy = ty - e.ty;
                     const d = Math.hypot(dx, dy);
+
+                    // Ground troops check for wall collision — if a wall is
+                    // adjacent, stop and attack it instead of walking through.
+                    if (!e.flying && d > 0.6 && e.target.type !== 'wall') {
+                        const blocker = this.wallBetween(e.tx, e.ty, tx, ty);
+                        if (blocker && blocker.hp > 0) {
+                            // Re-target the blocking wall
+                            e.target = blocker;
+                            // Fall through to the attack/move logic below with
+                            // the new target on next tick
+                            continue;
+                        }
+                    }
+
                     if (d > 0.6) {
                         e.tx += (dx / d) * e.spd * dt;
                         e.ty += (dy / d) * e.spd * dt;
@@ -1474,7 +1523,8 @@
                 }
                 const p = this.worldIso(e.tx, e.ty);
                 e.x = p.x;
-                e.y = p.y - 10;
+                // Flying enemies float much higher above the ground + bob
+                e.y = p.y - (e.flying ? 40 + Math.sin(e.wobble * 0.5) * 6 : 10);
             }
             this.enemies = this.enemies.filter(e => e.hp > 0);
         }
@@ -3076,19 +3126,48 @@
 
         drawEnemy(ctx, e) {
             const bob = Math.sin(e.wobble) * 3;
-            ctx.fillStyle = 'rgba(0,0,0,.45)';
-            ctx.beginPath();
-            ctx.ellipse(e.x, e.y + e.size + 4, e.size * 0.9, e.size * 0.3, 0, 0, Math.PI * 2);
-            ctx.fill();
 
-            // Cache the highlight color per-enemy — avoids an expensive
-            // createRadialGradient + mixColor call on every frame for every enemy.
+            // Flying enemies: draw a ground shadow far below and wings
+            if (e.flying) {
+                // Ground shadow (on the "real" ground plane, ~30px below)
+                ctx.fillStyle = 'rgba(0,0,0,.25)';
+                ctx.beginPath();
+                ctx.ellipse(e.x, e.y + 38, e.size * 0.7, e.size * 0.2, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Wings — triangle flaps that animate with wobble
+                const wingAngle = Math.sin(e.wobble * 0.8) * 0.5;
+                ctx.fillStyle = e.color;
+                ctx.globalAlpha = 0.6;
+                // Left wing
+                ctx.beginPath();
+                ctx.moveTo(e.x - e.size * 0.4, e.y + bob);
+                ctx.lineTo(e.x - e.size * 2.2, e.y - e.size * 0.3 + bob - wingAngle * 14);
+                ctx.lineTo(e.x - e.size * 0.2, e.y - e.size * 0.5 + bob);
+                ctx.closePath();
+                ctx.fill();
+                // Right wing
+                ctx.beginPath();
+                ctx.moveTo(e.x + e.size * 0.4, e.y + bob);
+                ctx.lineTo(e.x + e.size * 2.2, e.y - e.size * 0.3 + bob + wingAngle * 14);
+                ctx.lineTo(e.x + e.size * 0.2, e.y - e.size * 0.5 + bob);
+                ctx.closePath();
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            } else {
+                // Ground shadow for walking enemies
+                ctx.fillStyle = 'rgba(0,0,0,.45)';
+                ctx.beginPath();
+                ctx.ellipse(e.x, e.y + e.size + 4, e.size * 0.9, e.size * 0.3, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Body
             if (!e._hi) e._hi = mixColor(e.color, '#ffffff', 0.3);
             ctx.fillStyle = e.color;
             ctx.beginPath();
             ctx.arc(e.x, e.y + bob, e.size, 0, Math.PI * 2);
             ctx.fill();
-            // Fake the gradient with a second smaller highlight circle — much cheaper.
             ctx.fillStyle = e._hi;
             ctx.beginPath();
             ctx.arc(e.x - e.size * 0.3, e.y - e.size * 0.3 + bob, e.size * 0.55, 0, Math.PI * 2);
@@ -3105,7 +3184,7 @@
             ctx.arc(e.x - e.size * 0.3, e.y - e.size * 0.2 + bob, 2.2, 0, Math.PI * 2);
             ctx.arc(e.x + e.size * 0.3, e.y - e.size * 0.2 + bob, 2.2, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = '#000';
+            ctx.fillStyle = e.flying ? '#ff3333' : '#000';
             ctx.beginPath();
             ctx.arc(e.x - e.size * 0.3, e.y - e.size * 0.2 + bob, 1.1, 0, Math.PI * 2);
             ctx.arc(e.x + e.size * 0.3, e.y - e.size * 0.2 + bob, 1.1, 0, Math.PI * 2);
