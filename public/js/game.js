@@ -1091,14 +1091,16 @@
          * drawn on top wins.
          */
         buildingAtScreen(sx, sy) {
-            // 1) Tile-based lookup — definitive for clicks on the ground plane.
-            const t = this.screenToTile(sx, sy);
-            const byTile = this.buildingAt(t.tx, t.ty);
-            if (byTile) return byTile;
-
-            // 2) Polygon check against the iso silhouette + level marker.
+            // Screen → world
             const wx = (sx - this.cam.x) / this.cam.zoom;
             const wy = (sy - this.cam.y) / this.cam.zoom;
+
+            // 1) Polygon check FIRST — tests the actual iso silhouette hexagon
+            // of every building. This means hovering or clicking anywhere on a
+            // building's drawn shape (roof, sides, base, badge) hits that
+            // building, even if a different building's base tile is underneath.
+            // The FRONTMOST building by draw-depth wins when shapes overlap,
+            // which matches what the player visually sees.
             let best = null;
             let bestDepth = -Infinity;
             for (const b of this.buildings) {
@@ -1108,27 +1110,23 @@
                 const fw = CFG.tileW * size / 2;
                 const fh = CFG.tileH * size / 2;
                 const h = this.buildHeight(b.type);
+                // Account for per-level height scaling
+                const lvlProgress = Math.min(1, ((b.level || 1) - 1) / Math.max(1, (def.maxLevel || 20) - 1));
+                const hScaled = h * (1 + lvlProgress * 0.28);
 
-                // Iso silhouette is a hexagon. Six corners:
-                //   front-bottom:  (cx, cy + fh)
-                //   right-bottom:  (cx + fw, cy)
-                //   right-top:     (cx + fw, cy - h)
-                //   back-top:      (cx, cy - fh - h)
-                //   left-top:      (cx - fw, cy - h)
-                //   left-bottom:   (cx - fw, cy)
                 const hex = [
                     [center.x,           center.y + fh],
                     [center.x + fw,      center.y],
-                    [center.x + fw,      center.y - h],
-                    [center.x,           center.y - fh - h],
-                    [center.x - fw,      center.y - h],
+                    [center.x + fw,      center.y - hScaled],
+                    [center.x,           center.y - fh - hScaled],
+                    [center.x - fw,      center.y - hScaled],
                     [center.x - fw,      center.y],
                 ];
                 const inHex = pointInPolygon(wx, wy, hex);
 
-                // Also check the small level badge circle on the top-right
+                // Also check the small level badge circle
                 const badgeX = center.x + fw * 0.42;
-                const badgeY = center.y - h - fh * 0.12;
+                const badgeY = center.y - hScaled - fh * 0.12;
                 const inBadge = Math.hypot(wx - badgeX, wy - badgeY) <= 10;
 
                 if (inHex || inBadge) {
@@ -1139,7 +1137,13 @@
                     }
                 }
             }
-            return best;
+            if (best) return best;
+
+            // 2) Tile-based fallback — catches clicks on empty grass between
+            // buildings where no polygon matched but the tile belongs to a
+            // building's footprint.
+            const t = this.screenToTile(sx, sy);
+            return this.buildingAt(t.tx, t.ty);
         }
 
         placeBuilding(type, tx, ty) {
