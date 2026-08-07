@@ -1,39 +1,52 @@
-# Clash Idle Game
+# Kingdom of Ember (Clash Idle)
 
-A 2D idle game inspired by Clash of Clans featuring 3D-looking buildings. Built with real-time multiplayer functionality using WebSockets.
+A browser idle / tower-defense game inspired by Clash of Clans. The whole game
+lives in one vanilla-JS file (`public/js/game.js`, ~4,500 lines) rendered on a
+canvas — no framework, no build step.
 
-## Technologies Used
+Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
 
-- **Backend**: Node.js, Express
-- **Real-time Communication**: Socket.IO
-- **Frontend**: HTML/CSS/JavaScript (served statically)
+## What's in the game
 
-## Features
+- Isometric 24×24 village grid with drag-to-pan, zoom, and a build/move mode
+- 18 building types: Town Hall, resource generators (gold mine, elixir well,
+  dark drill), storages, and defenses — cannons, archer towers, mortars, air
+  defense, wizard towers, teslas, X-bows, infernos — plus walls, lab, builder
+  huts, army camps, and a clan castle
+- Enemy raids arrive in timed waves; ground troops path around (or chew
+  through) walls, and from wave 6 flying enemies skip them entirely
+- Three resources (gold / elixir / dark elixir), XP levels, achievements, and
+  a gem-powered lightning spell for emergencies
+- Day/night cycle (3 real minutes per in-game day), procedural WebAudio sound
+  effects, screen-shake and combo effects
+- Saves to `localStorage` every 15 seconds, auto-pauses when the tab is
+  hidden so raids don't happen while you're not looking
 
-- Real-time game state synchronization
-- Multiplayer support
-- Idle game mechanics
-- 3D-styled building graphics
+## Running it
 
-## Setup
-
-1. Install dependencies:
 ```bash
 npm install
+npm start          # Express + Socket.IO on http://localhost:3000
 ```
 
-2. Start the server:
-```bash
-npm start
-```
+`npm run dev` does the same with nodemon auto-reload.
 
-3. For development with auto-reload:
-```bash
-npm run dev
-```
+The Node server mostly exists to serve the static files; there's a small
+Socket.IO hook that rebroadcasts game-state updates to other connected
+clients, but the game runs fine without it (the deployed version on
+j4den.com is static files only).
 
-4. Open your browser to `http://localhost:3000`
+## Deploying
 
-## Network Access
+Every push to `master` mirrors `public/` into my
+[j4den](https://github.com/JadenB9/j4den) site repo via GitHub Actions, which
+Cloudflare Pages then publishes at `j4den.com/clashidle`. Details in
+[DEPLOY.md](DEPLOY.md).
 
-The server is configured to accept connections on all network interfaces, allowing you to access the game from other devices on your local network at `http://[your-local-ip]:3000`.
+## Layout
+
+- `public/index.html` — page shell, HUD, resource bar
+- `public/js/game.js` — the entire game: config, building defs, waves, AI,
+  rendering, audio, save/load
+- `public/css/style.css` — HUD styling
+- `server.js` — static file server + optional Socket.IO relay
