@@ -2,44 +2,50 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#0b0f1a">
+    <meta name="color-scheme" content="dark">
+    <meta name="description" content="Kingdom of Ember — an idle tower-defense game. Build a village, collect resources and hold off raids. Saves in your browser.">
     <title>Clash Idle — Kingdom of Ember</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20260406f">
+    <link rel="stylesheet" href="css/style.css?v=20261006a">
 </head>
 <body>
     <div id="app">
         <!-- Top Resource Bar -->
         <header id="topBar">
             <div class="brand">
-                <span class="brand-mark">⚔</span>
+                <span class="brand-mark" aria-hidden="true">⚔</span>
                 <div class="brand-text">
                     <div class="brand-title">Kingdom of Ember</div>
                     <div class="brand-sub">Clash Idle</div>
                 </div>
             </div>
 
-            <div class="resources" id="resources">
+            <div class="resources" id="resources" role="group" aria-label="Resources">
                 <div class="res" data-res="gold" title="Gold — spent on buildings & upgrades">
-                    <span class="res-ico">◈</span>
+                    <span class="res-ico" aria-hidden="true">◈</span>
+                    <span class="sr-only">Gold</span>
                     <span class="res-val" id="val-gold">0</span>
                     <span class="res-rate" id="rate-gold">+0/s</span>
                 </div>
                 <div class="res" data-res="elixir" title="Elixir — unlocks advanced structures">
-                    <span class="res-ico">❂</span>
+                    <span class="res-ico" aria-hidden="true">❂</span>
+                    <span class="sr-only">Elixir</span>
                     <span class="res-val" id="val-elixir">0</span>
                     <span class="res-rate" id="rate-elixir">+0/s</span>
                 </div>
                 <div class="res" data-res="dark" title="Dark Elixir — prestige tier resource">
-                    <span class="res-ico">✦</span>
+                    <span class="res-ico" aria-hidden="true">✦</span>
+                    <span class="sr-only">Dark Elixir</span>
                     <span class="res-val" id="val-dark">0</span>
                     <span class="res-rate" id="rate-dark">+0/s</span>
                 </div>
                 <div class="res" data-res="gems" title="Gems — premium. Earned from wave rewards">
-                    <span class="res-ico">♦</span>
+                    <span class="res-ico" aria-hidden="true">♦</span>
+                    <span class="sr-only">Gems</span>
                     <span class="res-val" id="val-gems">0</span>
                 </div>
             </div>
@@ -61,7 +67,7 @@
 
         <!-- Main Game Area -->
         <main id="gameArea">
-            <canvas id="gameCanvas"></canvas>
+            <canvas id="gameCanvas" aria-label="Kingdom map. Tap a building to collect, long-press or right-click it for its menu, drag to pan."></canvas>
 
             <!-- HUD overlay on canvas -->
             <div class="hud">
@@ -80,40 +86,40 @@
 
             <!-- Zoom controls -->
             <div class="zoom-controls">
-                <button class="zoom-btn" id="zoomIn" title="Zoom in (+)">+</button>
-                <div class="zoom-val" id="zoomVal">100%</div>
-                <button class="zoom-btn" id="zoomOut" title="Zoom out (-)">−</button>
-                <button class="zoom-btn reset" id="zoomReset" title="Reset (0)">⟲</button>
+                <button class="zoom-btn" id="zoomIn" title="Zoom in (+)" aria-label="Zoom in">+</button>
+                <div class="zoom-val" id="zoomVal" aria-hidden="true">100%</div>
+                <button class="zoom-btn" id="zoomOut" title="Zoom out (-)" aria-label="Zoom out">−</button>
+                <button class="zoom-btn reset" id="zoomReset" title="Reset view (0)" aria-label="Reset view">⟲</button>
             </div>
 
             <!-- Combo indicator -->
-            <div class="combo-label" id="comboLabel">COMBO</div>
+            <div class="combo-label" id="comboLabel" aria-hidden="true">COMBO</div>
 
             <!-- Tooltips for buildings -->
-            <div id="hoverTip" class="hover-tip"></div>
+            <div id="hoverTip" class="hover-tip" aria-hidden="true"></div>
 
             <!-- Toast notifications -->
-            <div id="toasts" class="toasts"></div>
+            <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
         </main>
 
         <!-- Sidebar -->
         <aside id="sidebar">
-            <div class="tabs">
-                <button class="tab active" data-tab="build">Build</button>
-                <button class="tab" data-tab="army">Army</button>
-                <button class="tab" data-tab="coop">Co-op</button>
-                <button class="tab" data-tab="stats">Stats</button>
+            <div class="tabs" role="tablist" aria-label="Panels">
+                <button class="tab active" data-tab="build" role="tab" aria-selected="true" aria-controls="panel-build">Build</button>
+                <button class="tab" data-tab="army" role="tab" aria-selected="false" aria-controls="panel-army">Army</button>
+                <button class="tab" data-tab="coop" role="tab" aria-selected="false" aria-controls="panel-coop">Co-op</button>
+                <button class="tab" data-tab="stats" role="tab" aria-selected="false" aria-controls="panel-stats">Stats</button>
             </div>
 
             <!-- Build Tab -->
-            <section class="tab-content active" data-tab="build">
+            <section class="tab-content active" data-tab="build" id="panel-build" role="tabpanel" aria-label="Build">
                 <div class="section-title">Structures</div>
                 <div id="buildMenu" class="build-grid"></div>
-                <div class="hint">Tap a card, then click an empty tile to place.</div>
+                <div class="hint">Tap a card, then tap an empty tile to place. Long-press or right-click a building to upgrade, move or sell it.</div>
             </section>
 
             <!-- Army Tab -->
-            <section class="tab-content" data-tab="army">
+            <section class="tab-content" data-tab="army" id="panel-army" role="tabpanel" aria-label="Army">
                 <div class="section-title">Defenses</div>
                 <div id="armyList" class="army-list"></div>
                 <div class="section-title">Achievements</div>
@@ -121,7 +127,7 @@
             </section>
 
             <!-- Co-op Tab -->
-            <section class="tab-content" data-tab="coop">
+            <section class="tab-content" data-tab="coop" id="panel-coop" role="tabpanel" aria-label="Co-op">
                 <div class="section-title">Multiplayer Co-op</div>
                 <div id="coopDisconnected" class="coop-section">
                     <div class="coop-code-block">
@@ -131,7 +137,7 @@
                     </div>
                     <div class="coop-connect-block">
                         <div class="coop-label">Enter Partner's Code</div>
-                        <input type="text" id="partnerCodeInput" class="coop-input" maxlength="6" placeholder="XXXXXX" autocomplete="off" spellcheck="false">
+                        <input type="text" id="partnerCodeInput" class="coop-input" maxlength="6" placeholder="XXXXXX" autocomplete="off" spellcheck="false" autocapitalize="characters" aria-label="Partner's game code">
                         <button class="btn primary small" id="btnConnect">Connect</button>
                     </div>
                     <div class="coop-status offline" id="coopStatus">Not Connected</div>
@@ -144,7 +150,7 @@
                     </div>
                     <div class="partner-resources" id="partnerRes"></div>
                     <div class="partner-wave" id="partnerWave"></div>
-                    <canvas id="partnerMap" class="partner-map" width="280" height="280"></canvas>
+                    <canvas id="partnerMap" class="partner-map" width="280" height="280" aria-label="Partner's village map"></canvas>
                     <div class="section-title" style="margin-top:12px">Send Resources</div>
                     <div class="gift-row">
                         <button class="btn small gift-btn" data-gift="gold">◈ Send 10% Gold</button>
@@ -159,64 +165,71 @@
             </section>
 
             <!-- Stats Tab -->
-            <section class="tab-content" data-tab="stats">
+            <section class="tab-content" data-tab="stats" id="panel-stats" role="tabpanel" aria-label="Stats">
                 <div class="section-title">Kingdom Statistics</div>
                 <div id="statList" class="stat-list"></div>
                 <div class="section-title">Save</div>
                 <div class="save-row">
                     <button class="btn small" id="btnSave">Save</button>
-                    <button class="btn small" id="btnExport">Export</button>
+                    <button class="btn small" id="btnExport" title="Download your save as a file">Export</button>
+                    <button class="btn small" id="btnImport" title="Load a save file">Import</button>
                     <button class="btn small danger" id="btnReset">Reset</button>
+                </div>
+                <input type="file" id="importFile" accept=".json,application/json" hidden>
+                <div class="hint">Saves to this browser every 15s and when you leave. While you're away your kingdom earns at half rate, for up to 4 hours.</div>
+                <div class="section-title">Settings</div>
+                <div class="save-row">
+                    <button class="btn small" id="btnSound" aria-pressed="true">Sound: On</button>
                 </div>
             </section>
         </aside>
 
         <!-- Bottom Action Bar -->
         <footer id="bottomBar">
-            <button class="action" id="actCollect">
-                <span class="action-ico">◉</span>
+            <button class="action" id="actCollect" aria-label="Collect all" title="Collect all (Space)">
+                <span class="action-ico" aria-hidden="true">◉</span>
                 <span class="action-label">Collect All</span>
             </button>
-            <button class="action" id="actAutoCollect" title="Toggle auto-collect">
-                <span class="action-ico">↻</span>
+            <button class="action" id="actAutoCollect" title="Toggle auto-collect" aria-label="Auto-collect" aria-pressed="false">
+                <span class="action-ico" aria-hidden="true">↻</span>
                 <span class="action-label">Auto: Off</span>
             </button>
-            <button class="action" id="actPause" title="Pause (P)">
-                <span class="action-ico">⏸</span>
+            <button class="action" id="actPause" title="Pause (P)" aria-label="Pause" aria-pressed="false">
+                <span class="action-ico" aria-hidden="true">⏸</span>
                 <span class="action-label">Pause</span>
             </button>
-            <button class="action" id="actRally">
-                <span class="action-ico">⚑</span>
+            <button class="action" id="actRally" aria-label="Rally defenses" title="Rally defenses: heal towers and reset their cooldowns">
+                <span class="action-ico" aria-hidden="true">⚑</span>
                 <span class="action-label">Rally Defenses</span>
             </button>
-            <button class="action" id="actBoost">
-                <span class="action-ico">✦</span>
+            <button class="action" id="actBoost" aria-label="Spend a gem for double production for 60 seconds" title="Spend 1 gem: x2 production for 60s">
+                <span class="action-ico" aria-hidden="true">✦</span>
                 <span class="action-label">Spend Gem (x2 · 60s)</span>
             </button>
-            <button class="action spell" id="actSpell">
-                <span class="action-ico">⚡</span>
+            <button class="action spell" id="actSpell" aria-label="Lightning spell, costs 1 gem" title="Lightning spell — 1 gem (L)">
+                <span class="action-ico" aria-hidden="true">⚡</span>
                 <span class="action-label">Lightning (1 ♦)</span>
             </button>
-            <button class="action warcry" id="actWarCry" title="War Cry — 50% tower damage for 15s (90s cooldown)">
-                <span class="action-ico">🔥</span>
+            <button class="action warcry" id="actWarCry" title="War Cry — +50% tower damage for 15s, 90s cooldown (W)" aria-label="War Cry">
+                <span class="action-ico" aria-hidden="true">🔥</span>
                 <span class="action-label">War Cry</span>
             </button>
-            <button class="action" id="actCancel" style="display:none">
-                <span class="action-ico">✕</span>
+            <button class="action" id="actCancel" style="display:none" aria-label="Cancel" title="Cancel (Esc)">
+                <span class="action-ico" aria-hidden="true">✕</span>
                 <span class="action-label">Cancel Build</span>
             </button>
         </footer>
 
         <!-- Modal -->
         <div id="modal" class="modal">
-            <div class="modal-panel">
-                <button class="modal-close" id="modalClose">✕</button>
+            <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+                <button class="modal-close" id="modalClose" aria-label="Close">✕</button>
                 <div id="modalBody"></div>
             </div>
         </div>
 
         <!-- Co-op Invite Notification -->
-        <div id="inviteNotify" class="invite-notify">
+        <div id="inviteNotify" class="invite-notify" role="alert">
             <div class="invite-content">
                 <div class="invite-icon">⚔</div>
                 <div class="invite-text">
@@ -232,13 +245,14 @@
 
         <!-- Welcome screen -->
         <div id="welcome" class="welcome">
-            <div class="welcome-panel">
-                <div class="welcome-crest">⚔</div>
-                <h1>Kingdom of Ember</h1>
+            <div class="welcome-panel" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
+                <div class="welcome-crest" aria-hidden="true">⚔</div>
+                <h1 id="welcomeTitle">Kingdom of Ember</h1>
                 <p class="tagline">Build. Defend. Conquer. Idle-style.</p>
                 <ul class="welcome-tips">
                     <li>◈ Buildings generate resources over time</li>
                     <li>◎ Tap any building to collect a click bonus</li>
+                    <li>⚒ Long-press or right-click a building to upgrade it</li>
                     <li>⚔ Raiders attack every minute — build defenses</li>
                     <li>★ Level up to unlock new structures</li>
                 </ul>
@@ -247,7 +261,7 @@
         </div>
     </div>
 
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-    <script src="js/game.js?v=20260406f"></script>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
+    <script src="js/game.js?v=20261006a"></script>
 </body>
 </html>

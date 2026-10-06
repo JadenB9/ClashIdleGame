@@ -598,6 +598,7 @@
         bindInput() {
             const c = this.canvas;
             const DRAG_THRESH = 7;       // pixels from downX/downY before a press becomes a drag
+            const LONG_PRESS_MS = 500;   // hold this long on a building to open its menu
 
             const getPos = (e) => {
                 const r = c.getBoundingClientRect();
@@ -629,6 +630,20 @@
                 // clicking anywhere on a tall building (not just its base tile) counts.
                 this.input.downBuilding = this.buildingAtScreen(p.x, p.y);
                 this.audio.ensure();
+                // Long-press a building opens its menu. Touch screens have no
+                // right-click, so without this there was no way to upgrade,
+                // move or sell on a phone.
+                clearTimeout(this._pressTimer);
+                if (this.input.downBuilding) {
+                    const pressed = this.input.downBuilding;
+                    this._pressTimer = setTimeout(() => {
+                        if (!this.input.down || this.input.drag || this.input.downBuilding !== pressed) return;
+                        if (this.buildMode || this.spellMode || this.moveMode) return;
+                        if (!this.buildings.includes(pressed)) return;
+                        this.input.down = false; // swallow the release so it doesn't also collect
+                        this.openBuildingModal(pressed);
+                    }, LONG_PRESS_MS);
+                }
             };
 
             const onMove = (e) => {
@@ -646,6 +661,7 @@
                     //   2. pan: press started on grass → pan the camera
                     if (!this.input.drag && dist > DRAG_THRESH) {
                         this.input.drag = true;
+                        clearTimeout(this._pressTimer);
                         if (this.input.downBuilding
                                 && !this.buildMode
                                 && !this.spellMode
@@ -669,6 +685,7 @@
             };
 
             const onUp = () => {
+                clearTimeout(this._pressTimer);
                 if (this.input.down) {
                     if (this.input.dragMove) {
                         // Drag-to-move release: try to place at the hovered tile
@@ -699,9 +716,48 @@
                 this.hoverBuilding = null;
                 this.rebuildHoverTip();
             });
-            c.addEventListener('touchstart', (e) => { e.preventDefault(); onDown(e); }, { passive: false });
-            c.addEventListener('touchmove',  (e) => { e.preventDefault(); onMove(e); }, { passive: false });
-            c.addEventListener('touchend',   (e) => { e.preventDefault(); onUp(); }, { passive: false });
+            // Two-finger pinch zooms around the midpoint. While pinching, the
+            // single-finger press is cancelled so lifting a finger doesn't tap.
+            let pinchDist = 0;
+            const touchInfo = (e) => {
+                const r = c.getBoundingClientRect();
+                const [a, b] = e.touches;
+                return {
+                    dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+                    x: (a.clientX + b.clientX) / 2 - r.left,
+                    y: (a.clientY + b.clientY) / 2 - r.top,
+                };
+            };
+            c.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (e.touches.length === 2) {
+                    clearTimeout(this._pressTimer);
+                    // If the first finger had already started dragging a building, put it back
+                    if (this.input.dragMove) { this.moveMode = null; this.updateCanvasCursor(); }
+                    this.input.down = false;
+                    this.input.drag = false;
+                    this.input.dragMove = false;
+                    pinchDist = touchInfo(e).dist;
+                    return;
+                }
+                if (e.touches.length === 1) onDown(e);
+            }, { passive: false });
+            c.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (e.touches.length === 2 && pinchDist > 0) {
+                    const t = touchInfo(e);
+                    this.zoomBy(t.dist / pinchDist, t.x, t.y);
+                    pinchDist = t.dist;
+                    return;
+                }
+                onMove(e);
+            }, { passive: false });
+            c.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                if (e.touches.length < 2) pinchDist = 0;
+                onUp();
+            }, { passive: false });
+            c.addEventListener('touchcancel', () => { pinchDist = 0; this.input.down = false; onUp(); });
 
             // Right click: exit build/move/spell mode if active, otherwise open modal
             c.addEventListener('contextmenu', (e) => {
@@ -1670,6 +1726,7 @@
                 const lbl = btn.querySelector('.action-label');
                 if (lbl) lbl.textContent = this.paused ? 'Resume' : 'Pause';
                 btn.classList.toggle('on', this.paused);
+                btn.setAttribute('aria-pressed', String(this.paused));
             }
             // Reset dt so the first post-resume tick doesn't jump.
             if (!this.paused) this.lastTime = performance.now();
@@ -3406,16 +3463,18 @@
                 for (const [type, def] of entries) {
                     const locked = this.player.level < def.unlockLevel;
                     const afford = this.canAfford(def.baseCost);
-                    const card = document.createElement('div');
+                    // Real buttons so the shop works from the keyboard too
+                    const card = document.createElement('button');
+                    card.type = 'button';
                     card.className = 'build-card' + (locked ? ' locked' : '') + (!afford && !locked ? ' cannot-afford' : '');
                     card.dataset.type = type;
                     const cost = Object.entries(def.baseCost).map(([k,v]) => `${fmt(v)} ${this.resSymbol(k)}`).join(' · ') || 'Free';
                     card.innerHTML = `
-                        <div class="build-icon">${def.icon}</div>
-                        <div class="build-name">${def.name}</div>
+                        <span class="build-icon" aria-hidden="true">${def.icon}</span>
+                        <span class="build-name">${def.name}</span>
                         ${locked
-                            ? `<div class="build-lock">Unlocks Lv ${def.unlockLevel}</div>`
-                            : `<div class="build-cost ${!afford ? 'red' : ''}">${cost}</div>`}
+                            ? `<span class="build-lock">Unlocks Lv ${def.unlockLevel}</span>`
+                            : `<span class="build-cost ${!afford ? 'red' : ''}">${cost}</span>`}
                     `;
                     card.addEventListener('click', () => {
                         // Re-evaluate affordability at click time — state may have changed
@@ -3442,10 +3501,22 @@
                 card.classList.toggle('locked', locked);
                 card.classList.toggle('cannot-afford', !afford && !locked);
                 card.classList.toggle('selected', this.buildMode === type);
+                card.setAttribute('aria-pressed', String(this.buildMode === type));
+                card.setAttribute('aria-disabled', String(locked));
                 // Also refresh the red-cost color on the cost line
                 const costEl = card.querySelector('.build-cost');
                 if (costEl) costEl.classList.toggle('red', !afford);
             }
+        }
+
+        showTab(name) {
+            document.querySelectorAll('.tab').forEach(t => {
+                const on = t.dataset.tab === name;
+                t.classList.toggle('active', on);
+                t.setAttribute('aria-selected', String(on));
+            });
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.dataset.tab === name));
+            this.updateUI(); // fill the newly shown tab right away instead of on the next tick
         }
 
         setBuildMode(type) {
@@ -3474,9 +3545,7 @@
         bindUI() {
             document.querySelectorAll('.tab').forEach(tab => {
                 tab.addEventListener('click', () => {
-                    const name = tab.dataset.tab;
-                    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
-                    document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.dataset.tab === name));
+                    this.showTab(tab.dataset.tab);
                     this.audio.click();
                 });
             });
@@ -3618,7 +3687,7 @@
             const body = document.getElementById('modalBody');
             const stats = [];
             stats.push({ label: 'Level', value: `${b.level} / ${def.maxLevel}` });
-            stats.push({ label: 'Health', value: `${Math.ceil(b.hp)}/${b.maxHp}` });
+            stats.push({ label: 'Health', value: `${fmt(Math.ceil(b.hp))}/${fmt(b.maxHp)}` });
             if (def.production) {
                 const p = def.production(b.level);
                 for (const k in p) stats.push({ label: `${k[0].toUpperCase()+k.slice(1)} / sec`, value: `+${p[k].toFixed(2)}` });
@@ -3654,7 +3723,7 @@
             }
 
             body.innerHTML = `
-                <h2>${def.icon} ${def.name}</h2>
+                <h2 id="modalTitle">${def.icon} ${def.name}</h2>
                 <div class="subtitle">${def.desc}</div>
                 <div class="stat-grid">
                     ${stats.map(s => `
@@ -3676,7 +3745,7 @@
                     <div class="upgrade-block">
                         <div class="upgrade-label">Next Level</div>
                         <div class="upgrade-cost">${costStr}</div>
-                        <button class="btn primary" id="upgradeBtn" ${afford ? '' : 'disabled style="opacity:.5;cursor:not-allowed"'}>Upgrade →</button>
+                        <button class="btn primary" id="upgradeBtn" ${afford ? '' : 'disabled'}>Upgrade →</button>
                     </div>
                 ` : `<div class="upgrade-block"><div class="upgrade-label">Max level reached</div></div>`}
                 <div class="modal-actions">
@@ -3684,10 +3753,13 @@
                     ${b.type !== 'townhall' ? `<button class="btn small danger" id="sellBtn">Sell (50%)</button>` : ''}
                 </div>
                 <div class="modal-hint">
-                    Single-click = this menu · Double-click = move · Right-click = quick menu
+                    Right-click or long-press a building = this menu · Drag it to move · Shift+click = quick upgrade
                 </div>
             `;
 
+            if (!modal.classList.contains('open')) this._modalReturnFocus = document.activeElement;
+            this.modalBuilding = b;
+            this._modalUpCost = upCost;
             modal.classList.add('open');
             const upBtn = document.getElementById('upgradeBtn');
             if (upBtn) upBtn.addEventListener('click', () => this.upgradeBuilding(b));
@@ -3997,10 +4069,10 @@
                 el.className = 'confirm-dialog';
                 el.innerHTML = `
                     <div class="confirm-backdrop"></div>
-                    <div class="confirm-panel">
-                        <div class="confirm-icon"></div>
-                        <h2 class="confirm-title"></h2>
-                        <div class="confirm-body"></div>
+                    <div class="confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+                        <div class="confirm-icon" aria-hidden="true"></div>
+                        <h2 class="confirm-title" id="confirmTitle"></h2>
+                        <div class="confirm-body" id="confirmBody"></div>
                         <div class="confirm-actions">
                             <button class="btn small" data-act="no"></button>
                             <button class="btn primary" data-act="yes"></button>
@@ -4019,8 +4091,10 @@
             noBtn.textContent  = opts.noText || 'Cancel';
             panel.classList.toggle('danger', !!opts.danger);
 
+            const returnFocus = document.activeElement;
             const close = () => {
                 el.classList.remove('open');
+                if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
                 yesBtn.removeEventListener('click', onYes);
                 noBtn.removeEventListener('click', onNo);
                 el.querySelector('.confirm-backdrop').removeEventListener('click', onNo);
@@ -4030,7 +4104,9 @@
             const onNo  = () => { close(); if (opts.onNo) opts.onNo(); };
             const onKey = (e) => {
                 if (e.key === 'Escape') onNo();
-                if (e.key === 'Enter')  onYes();
+                // Enter on a focused button presses that button (so Enter on
+                // "Keep Playing" can't wipe the save); anywhere else it confirms
+                if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') onYes();
             };
             yesBtn.addEventListener('click', onYes);
             noBtn.addEventListener('click', onNo);
@@ -4039,6 +4115,8 @@
             // Force reflow to restart animation
             void el.offsetWidth;
             el.classList.add('open');
+            // Destructive prompts start on the safe choice
+            (opts.danger ? noBtn : yesBtn).focus();
         }
 
         // ---------- War Cry ----------
@@ -4265,9 +4343,7 @@
             // Send initial state immediately
             try { conn.send({ type: 'state', state: this.getCoopState() }); } catch (_) {}
 
-            // Switch to co-op tab
-            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'coop'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.dataset.tab === 'coop'));
+            this.showTab('coop');
         }
 
         handleCoopDisconnect() {

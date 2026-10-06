@@ -27,6 +27,9 @@
     --gem-hi: #a6ecff;
     --danger: #ff5d5d;
     --good: #6bff95;
+    /* The game world is always a dark night/day map, so the chrome stays dark
+       in both site themes; this keeps native controls and scrollbars dark too */
+    color-scheme: dark;
 }
 
 * {
@@ -43,6 +46,26 @@ html, body {
     color: var(--text);
     background: var(--bg-0);
     user-select: none;
+    touch-action: manipulation; /* no double-tap zoom delay on the buttons */
+}
+
+/* Hidden visually, still read by screen readers */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Keyboard focus ring (mouse/touch clicks don't show it) */
+:focus-visible {
+    outline: 3px solid var(--gem);
+    outline-offset: 2px;
 }
 
 #app {
@@ -57,7 +80,9 @@ html, body {
     gap: 12px;
     padding: 12px;
     height: 100vh;
+    height: 100dvh;
     max-height: 100vh;
+    max-height: 100dvh;
 }
 
 /* ================= TOP BAR ================= */
@@ -458,6 +483,10 @@ html, body {
 }
 
 .build-card {
+    /* it's a <button>: undo the browser's button styling */
+    font: inherit;
+    color: inherit;
+    width: 100%;
     background: var(--panel-2);
     border: 2px solid #2e3854;
     border-radius: 8px;
@@ -493,6 +522,8 @@ html, body {
 .build-card.cannot-afford {
     opacity: .55;
 }
+
+.build-icon, .build-name, .build-cost, .build-lock { display: block; }
 
 .build-icon {
     font-size: 28px;
@@ -558,7 +589,8 @@ html, body {
 .achievement-name { font-weight: 700; color: var(--text); font-size: 11px; }
 .achievement-desc { font-size: 9px; color: var(--text-dim); }
 
-.save-row { display: flex; gap: 6px; }
+.save-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.save-row + .hint { text-align: left; }
 
 .btn {
     background: var(--panel-2);
@@ -582,6 +614,13 @@ html, body {
 
 .btn:active { transform: translateY(1px); }
 
+.btn:disabled,
+.btn:disabled:hover {
+    opacity: .5;
+    cursor: not-allowed;
+    transform: none;
+}
+
 .btn.primary {
     background: var(--ember);
     border-color: var(--ember-hi);
@@ -604,10 +643,11 @@ html, body {
 #bottomBar {
     grid-area: bot;
     display: flex;
-    gap: 12px;
+    gap: 10px;
     align-items: center;
     justify-content: center;
-    padding: 0 20px;
+    /* left gap keeps the buttons clear of j4den.com's back chip (fixed, bottom-left) */
+    padding: 0 20px 0 96px;
     background: var(--panel);
     border: 2px solid var(--panel-border);
     border-radius: 10px;
@@ -629,7 +669,8 @@ html, body {
     letter-spacing: 1px;
     text-transform: uppercase;
     transition: background .15s, border-color .15s, transform .08s;
-    min-width: 150px;
+    min-width: 0;
+    white-space: nowrap;
     justify-content: center;
 }
 
@@ -685,8 +726,9 @@ html, body {
     border: 3px solid var(--gold);
     border-radius: 12px;
     padding: 28px;
-    min-width: 380px;
-    max-width: 440px;
+    width: min(440px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
     position: relative;
     animation: popIn .25s ease-out;
 }
@@ -853,6 +895,9 @@ html, body {
     padding: 40px 50px;
     text-align: center;
     max-width: 500px;
+    margin: 12px;
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
     animation: popIn .4s ease-out;
 }
 
@@ -1311,6 +1356,18 @@ html, body {
 
 /* ================= RESPONSIVE ================= */
 
+@media (max-width: 1360px) {
+    .action { padding: 10px 12px; gap: 6px; font-size: 11px; letter-spacing: .5px; }
+    .action-ico { font-size: 16px; }
+}
+
+@media (max-width: 1120px) {
+    /* labels go; the icons + tooltips carry the buttons */
+    .action-label { display: none; }
+    .action { padding: 10px 16px; }
+    .action-ico { font-size: 18px; }
+}
+
 @media (max-width: 900px) {
     #app {
         grid-template-areas:
@@ -1318,16 +1375,89 @@ html, body {
             "game"
             "side"
             "bot";
-        grid-template-columns: 1fr;
-        grid-template-rows: 72px 1fr 260px 76px;
+        /* minmax(0, ...) lets the column shrink below its content's width
+           instead of pushing the whole layout off the right of the screen */
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: 72px minmax(0, 1fr) 260px 76px;
     }
 
-    .resources { gap: 6px; }
-    .res { min-width: 90px; padding: 6px 10px; }
+    .resources { gap: 6px; min-width: 0; }
+    .res { min-width: 0; padding: 6px 10px; }
     .res-val { font-size: 13px; }
     .brand-text { display: none; }
     .build-grid { grid-template-columns: repeat(3, 1fr); }
     .action { padding: 8px 12px; min-width: 0; font-size: 10px; }
     .action-label { display: none; }
     .zoom-controls { bottom: 8px; left: 8px; }
+}
+
+/* Phones */
+@media (max-width: 600px) {
+    #app {
+        gap: 8px;
+        padding: 8px;
+        grid-template-rows: auto minmax(0, 1fr) 236px auto;
+    }
+
+    #topBar { gap: 8px; padding: 6px 8px; }
+    .brand { display: none; }
+    .resources { flex: 1; gap: 4px; }
+    .res {
+        flex: 1 1 0;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0;
+        padding: 4px 6px;
+        position: relative;
+    }
+    .res-ico { position: absolute; top: 4px; right: 5px; font-size: 11px; }
+    .res-val { font-size: 13px; }
+    .res-rate { font-size: 9px; }
+    .player { gap: 0; }
+    .player-meta { display: none; }
+    .level-ring { width: 38px; height: 38px; }
+    #playerLevel { font-size: 14px; }
+
+    .hud { inset: 6px 6px auto 6px; gap: 6px; }
+    .hud-panel { min-width: 0; padding: 5px 9px; }
+    .hud-panel.center { font-size: 11px; min-height: 0; padding: 5px 6px; }
+    .hud-value { font-size: 15px; }
+    .toasts { top: 64px; right: 6px; left: 6px; align-items: flex-end; }
+    .toast { min-width: 0; max-width: 100%; padding: 8px 10px; font-size: 11px; }
+    .combo-label { top: 64px; font-size: 20px; }
+    .zoom-controls { padding: 4px; }
+    .zoom-btn { width: 30px; height: 30px; }
+
+    .tab { font-size: 10px; letter-spacing: .5px; padding: 11px 0; }
+    .tab-content { padding: 10px; }
+    .build-card { padding: 8px 4px; }
+    .build-icon { font-size: 22px; }
+
+    /* 7 buttons share the bar; the left gap is for the 30px back chip */
+    #bottomBar {
+        gap: 5px;
+        padding: 6px 6px 6px 46px;
+        justify-content: flex-start;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    #bottomBar::-webkit-scrollbar { display: none; }
+    .action { flex: 1 0 40px; padding: 10px 0; }
+    .action-ico { font-size: 17px; }
+
+    .modal-panel { padding: 20px 16px; }
+    .welcome-panel { padding: 26px 20px; }
+    .welcome h1 { font-size: 28px; }
+    .welcome-crest { font-size: 48px; }
+    .tagline { letter-spacing: 2px; font-size: 11px; }
+    .welcome-tips { padding: 12px 14px; margin: 16px 0; }
+    .welcome-tips li { font-size: 12px; padding: 4px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }
