@@ -14,8 +14,12 @@
         tileH: 36,
         zoomMin: 0.65,
         zoomMax: 2.4,
-        saveKey: 'kingdomOfEmber.v3',
+        saveKey: 'kingdomOfEmber.v3',   // key stays put so old saves still load; the format version lives in the data
+        saveVersion: 4,
         autoSaveMs: 15000,
+        offlineMaxSec: 4 * 60 * 60,      // offline earnings cap out after 4 hours away
+        offlineRate: 0.5,                // and pay half the live rate
+        darkCapFrac: 0.3,                // dark elixir storage is 30% of the normal cap
         dayLengthSec: 180,        // 3 minutes real-time = 1 in-game day
         waveBaseSec: 75,
         waveMinSec: 35,
@@ -399,11 +403,17 @@
     class Audio {
         constructor() {
             this.ctx = null;
-            this.enabled = true;
+            this.enabled = true;   // false if WebAudio isn't available
+            this.muted = false;    // player's sound setting
             this.gain = null;
         }
         ensure() {
-            if (this.ctx) return;
+            if (!this.enabled) return;
+            if (this.ctx) {
+                // Browsers start the context suspended until a user gesture
+                if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+                return;
+            }
             try {
                 const Ctor = window.AudioContext || window['webkitAudioContext'];
                 this.ctx = new Ctor();
@@ -413,7 +423,7 @@
             } catch (e) { this.enabled = false; }
         }
         beep(freq, dur = 0.1, type = 'sine', vol = 1) {
-            if (!this.enabled) return;
+            if (!this.enabled || this.muted) return;
             this.ensure();
             if (!this.ctx) return;
             const o = this.ctx.createOscillator();
@@ -559,6 +569,9 @@
             requestAnimationFrame((t) => this.loop(t));
 
             setInterval(() => this.save(), CFG.autoSaveMs);
+            // Also save when the page goes away so closing the tab doesn't lose
+            // up to 15 seconds of progress (and offline time is measured from here)
+            window.addEventListener('pagehide', () => this.save());
             this.initCoop();
 
             const welcome = document.getElementById('welcome');
@@ -567,7 +580,8 @@
                 this.audio.ensure();
                 this.audio.click();
             });
-            if (localStorage.getItem(CFG.saveKey)) welcome.classList.add('hidden');
+            if (this.hadSave) welcome.classList.add('hidden');
+            else document.getElementById('welcomeStart').focus();
         }
 
         // ---------- Canvas sizing ----------
@@ -1854,12 +1868,12 @@
 
             // Auto-collect tick — every 5 seconds, trigger the full "Collect All"
             // action (same as the bottom-bar button) when the toggle is on.
-            // Gives the visible collect effect (particles + toast) automatically.
+            // Shows the floating numbers but skips the toast so it doesn't spam.
             if (this.autoCollect) {
                 this._autoCollectAcc = (this._autoCollectAcc || 0) + dt;
                 if (this._autoCollectAcc >= 5) {
                     this._autoCollectAcc = 0;
-                    this.collectAll();
+                    this.collectAll(true);
                 }
             }
 
@@ -3565,23 +3579,39 @@
             if (autoBtn) autoBtn.addEventListener('click', () => {
                 this.audio.click();
                 this.autoCollect = !this.autoCollect;
-                const label = autoBtn.querySelector('.action-label');
-                if (label) label.textContent = this.autoCollect ? 'Auto: On' : 'Auto: Off';
-                autoBtn.classList.toggle('on', this.autoCollect);
+                this.syncToggles();
                 this.toast(this.autoCollect ? 'Auto-collect enabled' : 'Auto-collect disabled', 'success');
             });
 
+            const soundBtn = document.getElementById('btnSound');
+            if (soundBtn) soundBtn.addEventListener('click', () => {
+                this.audio.muted = !this.audio.muted;
+                this.syncToggles();
+                this.audio.click();
+                this.save();
+            });
+            this.syncToggles(); // the save may have turned these on
+
             // Auto-pause when the tab becomes hidden so raiders don't attack
             // the kingdom while the player has the app closed or backgrounded.
+            // Production still counts: it's paid out at the offline rate on return.
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden) {
                     this._wasPausedBeforeHide = this.paused;
+                    this._hiddenAt = Date.now();
                     this.paused = true;
-                } else if (!this._wasPausedBeforeHide && !this.gameOverShown) {
-                    this.paused = false;
-                    // Reset frame delta so the first post-resume tick doesn't
-                    // jump forward by the entire hidden duration.
-                    this.lastTime = performance.now();
+                    this.save();
+                } else {
+                    const away = (Date.now() - (this._hiddenAt || Date.now())) / 1000;
+                    this._hiddenAt = 0;
+                    if (!this._wasPausedBeforeHide && !this.gameOverShown) {
+                        this.paused = false;
+                        // Reset frame delta so the first post-resume tick doesn't
+                        // jump forward by the entire hidden duration.
+                        this.lastTime = performance.now();
+                        this.applyOfflineEarnings(away);
+                        this.updateUI();
+                    }
                 }
             });
 
@@ -3602,7 +3632,13 @@
             });
 
             document.getElementById('btnSave').addEventListener('click', () => { this.save(); this.toast('Game saved', 'success'); this.audio.click(); });
-            document.getElementById('btnExport').addEventListener('click', () => { this.exportSave(); });
+            document.getElementById('btnExport').addEventListener('click', () => { this.audio.click(); this.exportSave(); });
+            const importInput = document.getElementById('importFile');
+            document.getElementById('btnImport').addEventListener('click', () => { this.audio.click(); importInput.click(); });
+            importInput.addEventListener('change', () => {
+                this.importSave(importInput.files[0]);
+                importInput.value = ''; // so picking the same file again still fires change
+            });
             document.getElementById('btnReset').addEventListener('click', () => {
                 this.showConfirm({
                     title: 'Reset Kingdom',
@@ -3611,10 +3647,7 @@
                     yesText: 'Erase Everything',
                     noText: 'Keep Playing',
                     danger: true,
-                    onYes: () => {
-                        localStorage.removeItem(CFG.saveKey);
-                        location.reload();
-                    },
+                    onYes: () => this.wipeSave(),
                 });
             });
 
@@ -3627,7 +3660,22 @@
             if (zReset) zReset.addEventListener('click', () => { this.audio.click(); this.cam.zoom = 1; this.centerCamera(); });
         }
 
-        collectAll() {
+        // Labels/state for the on/off buttons (auto-collect, sound)
+        syncToggles() {
+            const autoBtn = document.getElementById('actAutoCollect');
+            if (autoBtn) {
+                autoBtn.querySelector('.action-label').textContent = this.autoCollect ? 'Auto: On' : 'Auto: Off';
+                autoBtn.classList.toggle('on', this.autoCollect);
+                autoBtn.setAttribute('aria-pressed', String(this.autoCollect));
+            }
+            const soundBtn = document.getElementById('btnSound');
+            if (soundBtn) {
+                soundBtn.textContent = this.audio.muted ? 'Sound: Off' : 'Sound: On';
+                soundBtn.setAttribute('aria-pressed', String(!this.audio.muted));
+            }
+        }
+
+        collectAll(quiet = false) {
             let total = 0;
             for (const b of this.buildings) {
                 const def = BLD[b.type];
@@ -3635,18 +3683,21 @@
                 const bonus = def.clickBonus(b.level);
                 for (const k in bonus) {
                     const amt = Math.floor(bonus[k] * this.boost.mult * 0.5);
-                    this.res[k] = Math.min(this.cap(), (this.res[k] || 0) + amt);
-                    if (k === 'gold') { this.stats.goldEarned += amt; total += amt; }
-                    const p = this.worldIso(b.tx + 0.5, b.ty + 0.5);
-                    this.floatText(`+${amt}`, p.x, p.y - 30, this.resColor(k));
+                    const got = this.addRes(k, amt);
+                    if (k === 'gold') { this.stats.goldEarned += got; total += got; }
+                    if (got > 0) {
+                        const p = this.worldIso(b.tx + 0.5, b.ty + 0.5);
+                        this.floatText(`+${fmt(got)}`, p.x, p.y - 30, this.resColor(k));
+                    }
                 }
             }
             if (total > 0) {
                 this.audio.coin();
                 this.pulseRes('gold');
-                this.toast(`Collected ${fmt(total)} gold`, 'success');
-            } else {
-                this.toast('Nothing to collect', 'warn');
+                // Auto-collect runs every 5s; keep it from burying real alerts in toasts
+                if (!quiet) this.toast(`Collected ${fmt(total)} gold`, 'success');
+            } else if (!quiet) {
+                this.toast(this.res.gold >= this.cap() ? 'Gold storage is full — upgrade the Town Hall or build a Vault' : 'Nothing to collect', 'warn');
             }
             this.updateUI();
         }
@@ -4040,10 +4091,7 @@
                     yesText: '⚔ Rebuild',
                     noText: 'Not yet',
                     danger: true,
-                    onYes: () => {
-                        localStorage.removeItem(CFG.saveKey);
-                        location.reload();
-                    },
+                    onYes: () => this.wipeSave(),
                     onNo: () => {
                         // Declined: give them a 60s grace period to rebuild, then waves resume
                         this.wave.timer = 60;
@@ -4607,108 +4655,189 @@
         }
 
         // ---------- Save / Load ----------
+        // Save format versions (the localStorage key never changes, the version
+        // lives inside the data so old saves keep loading):
+        //   v3 — original format
+        //   v4 — adds settings (sound, auto-collect)
+        snapshot() {
+            // Sanitize wave timer on write so the game-over sentinel never
+            // leaks into persisted state. If the value is wild (destroyed
+            // game over path), clamp it back to a normal range.
+            const sanitizedTimer = Math.max(
+                5,
+                Math.min(this.wave.timer || CFG.waveBaseSec, Math.max(CFG.waveBaseSec, 120))
+            );
+            return {
+                v: CFG.saveVersion,
+                res: this.res,
+                player: this.player,
+                buildings: this.buildings.map(b => ({ id: b.id, type: b.type, tx: b.tx, ty: b.ty, level: b.level, hp: b.hp, maxHp: b.maxHp })),
+                stats: this.stats,
+                achievements: this.achievements,
+                wave: { number: this.wave.number, timer: sanitizedTimer },
+                dayTime: this.dayTime,
+                dayCount: this.dayCount,
+                cam: { zoom: this.cam.zoom },
+                settings: { sound: !this.audio.muted, autoCollect: this.autoCollect },
+                // While the tab is hidden the game is frozen, so the clock for
+                // offline earnings starts when it was hidden, not when we saved
+                savedAt: (document.hidden && this._hiddenAt) || Date.now(),
+            };
+        }
+
         save() {
+            // Reset / import reload the page; the pagehide save must not undo them
+            if (this.saveLocked) return false;
             try {
-                // Sanitize wave timer on write so the game-over sentinel never
-                // leaks into persisted state. If the value is wild (destroyed
-                // game over path), clamp it back to a normal range.
-                const sanitizedTimer = Math.max(
-                    5,
-                    Math.min(this.wave.timer || CFG.waveBaseSec, Math.max(CFG.waveBaseSec, 120))
-                );
-                const data = {
-                    v: 3,
-                    res: this.res,
-                    player: this.player,
-                    buildings: this.buildings.map(b => ({ id: b.id, type: b.type, tx: b.tx, ty: b.ty, level: b.level, hp: b.hp, maxHp: b.maxHp })),
-                    stats: this.stats,
-                    achievements: this.achievements,
-                    wave: { number: this.wave.number, timer: sanitizedTimer },
-                    dayTime: this.dayTime,
-                    dayCount: this.dayCount,
-                    cam: { zoom: this.cam.zoom },
-                    savedAt: Date.now(),
-                };
-                localStorage.setItem(CFG.saveKey, JSON.stringify(data));
-            } catch (e) { console.error('Save failed', e); }
+                localStorage.setItem(CFG.saveKey, JSON.stringify(this.snapshot()));
+                this._saveWarned = false;
+                return true;
+            } catch (e) {
+                console.error('Save failed', e);
+                // Storage full or blocked (some private modes) — say so once, not every 15s
+                if (!this._saveWarned) {
+                    this._saveWarned = true;
+                    this.toast('Could not save — browser storage is full or blocked. Use Export to keep a copy.', 'error');
+                }
+                return false;
+            }
+        }
+
+        // Turn raw save text into a current-version save object.
+        // Throws if it isn't a Kingdom of Ember save at all.
+        parseSave(raw) {
+            const d = JSON.parse(raw);
+            if (!d || typeof d !== 'object' || !d.res || typeof d.res !== 'object' || !Array.isArray(d.buildings)) {
+                throw new Error('not a Kingdom of Ember save');
+            }
+            return this.migrateSave(d);
+        }
+
+        migrateSave(d) {
+            const v = Number(d.v) || 3;
+            if (v < 4) {
+                // v3 -> v4: settings didn't exist yet
+                d.settings = { sound: true, autoCollect: false };
+            }
+            d.v = CFG.saveVersion;
+            return d;
         }
 
         loadSave() {
+            let raw = null;
+            try { raw = localStorage.getItem(CFG.saveKey); } catch (e) { /* storage blocked */ }
+            this.hadSave = !!raw;
+            if (!raw) {
+                this.placeInitial();
+                return;
+            }
+            let d;
             try {
-                const raw = localStorage.getItem(CFG.saveKey);
-                if (!raw) {
-                    this.placeInitial();
-                    return;
-                }
-                const d = JSON.parse(raw);
-                if (d.res) this.res = { ...this.res, ...d.res };
-                if (d.player) this.player = { ...this.player, ...d.player };
-                if (d.stats) this.stats = { ...this.stats, ...d.stats };
-                if (d.achievements) this.achievements = d.achievements;
-                if (d.wave) this.wave.number = d.wave.number;
-                // Sanitize the wave timer — old saves could get corrupted values
-                // (e.g. 999999 from the game-over sentinel). Clamp to a sane range
-                // so the "next raid in 16656:53" bug can't survive a reload.
-                if (d.wave && typeof d.wave.timer === 'number') {
-                    const maxSane = Math.max(CFG.waveBaseSec, 120);
-                    this.wave.timer = Math.max(5, Math.min(d.wave.timer, maxSane));
-                }
-                if (typeof d.dayTime === 'number') this.dayTime = d.dayTime;
-                if (typeof d.dayCount === 'number') this.dayCount = d.dayCount;
-                if (d.cam && d.cam.zoom) this.cam.zoom = d.cam.zoom;
-
-                if (Array.isArray(d.buildings)) {
-                    let townHallSeen = false;
-                    for (const s of d.buildings) {
-                        if (!BLD[s.type]) continue; // unknown type (save migration)
-                        // Dedupe town halls on load — only keep the first one.
-                        // Guards against corrupt saves with duplicates.
-                        if (s.type === 'townhall') {
-                            if (townHallSeen) continue;
-                            townHallSeen = true;
-                        }
-                        this.buildings.push({
-                            id: s.id || Math.random().toString(36).slice(2,9),
-                            type: s.type, tx: s.tx, ty: s.ty,
-                            level: s.level || 1,
-                            hp: s.hp ?? 100, maxHp: s.maxHp ?? 100,
-                            lastShot: 0, animScale: 1,
-                        });
-                    }
-                }
-
-                if (d.savedAt) {
-                    const offlineMs = Math.min(Date.now() - d.savedAt, 4 * 60 * 60 * 1000);
-                    const offlineSec = offlineMs / 1000;
-                    if (offlineSec > 10) {
-                        this.recomputeRates();
-                        const og = Math.floor(this.rates.gold * offlineSec * 0.5);
-                        const oe = Math.floor(this.rates.elixir * offlineSec * 0.5);
-                        const od = this.rates.dark * offlineSec * 0.5;
-                        this.res.gold += og;
-                        this.res.elixir += oe;
-                        this.res.dark += od;
-                        setTimeout(() => {
-                            this.toast(`Offline earnings: +${fmt(og)} gold, +${fmt(oe)} elixir`, 'success');
-                        }, 800);
-                    }
-                }
-
-                this.recomputeRates();
-
-                // Safety net: if the save somehow lost the Town Hall (destroyed
-                // mid-wave, user dismissed the modal, etc.), auto-show the
-                // Kingdom Fallen prompt so the player always has a way back in.
-                const hasTH = this.buildings.some(b => b.type === 'townhall');
-                if (!hasTH) {
-                    // Defer until after init finishes so the confirm dialog
-                    // and audio are both ready.
-                    setTimeout(() => this.gameOver(), 400);
-                }
+                d = this.parseSave(raw);
             } catch (e) {
+                console.warn('Save could not be read, starting fresh', e);
+                // Keep the unreadable save instead of letting the next autosave
+                // overwrite it, so it can still be recovered by hand
+                try { localStorage.setItem(CFG.saveKey + '.corrupt', raw); } catch (_) { /* ignore */ }
+                this.placeInitial();
+                setTimeout(() => this.toast('Your save could not be read, so a new kingdom was started. The old data was kept as a backup.', 'error'), 800);
+                return;
+            }
+            try {
+                this.applySave(d);
+            } catch (e) {
+                // applySave checks everything, but never leave a half-loaded village
                 console.error('Load failed', e);
+                this.buildings = [];
                 this.placeInitial();
             }
+        }
+
+        // Copy a parsed save into the game, checking every value on the way in
+        // so a hand-edited or half-written save can't put NaN or junk in state.
+        applySave(d) {
+            const r = d.res;
+            for (const k of ['gold', 'elixir', 'dark', 'gems']) this.res[k] = safeNum(r[k], this.res[k]);
+            this.res.gems = Math.floor(this.res.gems);
+
+            const p = d.player || {};
+            this.player.level = Math.floor(safeNum(p.level, 1, 1, 999));
+            this.player.xp = safeNum(p.xp, 0);
+            if (typeof p.name === 'string') this.player.name = p.name.slice(0, 24);
+
+            const st = d.stats || {};
+            for (const k in this.stats) this.stats[k] = safeNum(st[k], 0);
+            const ach = d.achievements || {};
+            for (const a of ACHS) if (ach[a.id] === true) this.achievements[a.id] = true;
+
+            const w = d.wave || {};
+            this.wave.number = Math.floor(safeNum(w.number, 0, 0, 1e6));
+            // Clamp the wave timer — old saves could hold 999999 from the
+            // game-over sentinel ("next raid in 16656:53")
+            this.wave.timer = safeNum(w.timer, this.wave.timer, 5, Math.max(CFG.waveBaseSec, 120));
+            this.dayTime = safeNum(d.dayTime, this.dayTime, 0, 0.9999);
+            this.dayCount = Math.floor(safeNum(d.dayCount, 1, 1));
+            this.cam.zoom = safeNum(d.cam && d.cam.zoom, 1, CFG.zoomMin, CFG.zoomMax);
+
+            const settings = d.settings || {};
+            this.audio.muted = settings.sound === false;
+            this.autoCollect = settings.autoCollect === true;
+
+            for (const s of d.buildings) {
+                if (!s || !Object.hasOwn(BLD, s.type)) continue; // unknown type (removed building)
+                const def = BLD[s.type];
+                if (!Number.isInteger(s.tx) || !Number.isInteger(s.ty)) continue;
+                // Off the grid, overlapping, or a second Town Hall: corrupt, skip it
+                if (!this.canPlace(s.type, s.tx, s.ty)) continue;
+                if (s.type === 'townhall' && this.buildings.some(b => b.type === 'townhall')) continue;
+                const level = Math.floor(safeNum(s.level, 1, 1, def.maxLevel));
+                const maxHp = this.hpFor(s.type, level);
+                const hp = safeNum(s.hp, maxHp, 0, maxHp);
+                this.buildings.push({
+                    id: typeof s.id === 'string' ? s.id.slice(0, 16) : Math.random().toString(36).slice(2, 9),
+                    type: s.type, tx: s.tx, ty: s.ty,
+                    level,
+                    hp: hp > 0 ? hp : maxHp, maxHp,
+                    lastShot: 0, animScale: 1,
+                });
+            }
+
+            this.recomputeRates();
+            this.applyOfflineEarnings((Date.now() - safeNum(d.savedAt, Date.now())) / 1000);
+
+            // Safety net: if the save somehow lost the Town Hall (destroyed
+            // mid-wave, user dismissed the modal, etc.), auto-show the
+            // Kingdom Fallen prompt so the player always has a way back in.
+            const hasTH = this.buildings.some(b => b.type === 'townhall');
+            if (!hasTH) {
+                // Defer until after init finishes so the confirm dialog
+                // and audio are both ready.
+                setTimeout(() => this.gameOver(), 400);
+            }
+        }
+
+        // Pay out production for time the game wasn't running: tab closed, or
+        // tab hidden (the sim pauses then so raids can't hit an unwatched base).
+        // Half rate, capped at 4 hours, and never past storage caps.
+        applyOfflineEarnings(sec) {
+            if (!(sec > 10)) return null; // also skips NaN and clocks that went backwards
+            const t = Math.min(sec, CFG.offlineMaxSec);
+            const got = {};
+            for (const k of ['gold', 'elixir', 'dark']) got[k] = this.addRes(k, this.rates[k] * t * CFG.offlineRate);
+            this.stats.goldEarned += got.gold;
+
+            const parts = [];
+            if (got.gold >= 1) parts.push(`${fmt(got.gold)} ◈`);
+            if (got.elixir >= 1) parts.push(`${fmt(got.elixir)} ❂`);
+            if (got.dark >= 1) parts.push(`${fmt(got.dark)} ✦`);
+            const away = fmtDuration(sec) + (sec > CFG.offlineMaxSec ? ' (earnings cap at 4h)' : '');
+            const anyRate = this.rates.gold + this.rates.elixir + this.rates.dark > 0;
+            if (parts.length) {
+                setTimeout(() => this.toast(`Away ${away}: +${parts.join(' · ')}`, 'success'), 800);
+            } else if (anyRate) {
+                setTimeout(() => this.toast(`Away ${away} — storage was already full`, 'warn'), 800);
+            }
+            return got;
         }
 
         placeInitial() {
@@ -4734,17 +4863,69 @@
         }
 
         exportSave() {
-            const raw = localStorage.getItem(CFG.saveKey) || JSON.stringify({ empty: true });
+            // Export what's in memory right now, not the last autosave
+            this.save();
+            const raw = JSON.stringify(this.snapshot());
             const blob = new Blob([raw], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `kingdom-ember-${Date.now()}.json`;
+            a.download = `kingdom-of-ember-${new Date().toISOString().slice(0, 10)}.json`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
             this.toast('Save exported', 'success');
+        }
+
+        importSave(file) {
+            if (!file) return;
+            if (file.size > 1024 * 1024) {
+                this.audio.error();
+                this.toast('That file is too big to be a save', 'error');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+                let d;
+                try {
+                    d = this.parseSave(String(reader.result));
+                } catch (e) {
+                    this.audio.error();
+                    this.toast("That file isn't a Kingdom of Ember save", 'error');
+                    return;
+                }
+                const lv = Math.floor(safeNum(d.player && d.player.level, 1, 1, 999));
+                const wave = Math.floor(safeNum(d.wave && d.wave.number, 0, 0, 1e6));
+                this.showConfirm({
+                    title: 'Import Save',
+                    icon: '⇪',
+                    body: `Load the kingdom from this file (level ${lv}, wave ${wave}, ${d.buildings.length} buildings)?<br><br><span style="color:#ff9a6b">Your current kingdom will be replaced. Export it first if you want to keep it.</span>`,
+                    yesText: 'Import',
+                    noText: 'Cancel',
+                    danger: true,
+                    onYes: () => {
+                        this.saveLocked = true;
+                        try {
+                            localStorage.setItem(CFG.saveKey, JSON.stringify(d));
+                        } catch (e) {
+                            this.saveLocked = false;
+                            this.toast('Could not write the save to browser storage', 'error');
+                            return;
+                        }
+                        location.reload();
+                    },
+                });
+            };
+            reader.onerror = () => this.toast('Could not read that file', 'error');
+            reader.readAsText(file);
+        }
+
+        // Start over. Used by Reset and by Rebuild after the Town Hall falls.
+        wipeSave() {
+            this.saveLocked = true;
+            try { localStorage.removeItem(CFG.saveKey); } catch (_) { /* ignore */ }
+            location.reload();
         }
     }
 

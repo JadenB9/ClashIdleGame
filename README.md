@@ -19,8 +19,13 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   a gem-powered lightning spell for emergencies
 - Day/night cycle (3 real minutes per in-game day), procedural WebAudio sound
   effects, screen-shake and combo effects
-- Saves to `localStorage` every 15 seconds, auto-pauses when the tab is
-  hidden so raids don't happen while you're not looking
+- Saves to `localStorage` every 15 seconds and when you leave the page, with
+  a versioned format, validation on load (a broken save is set aside instead
+  of crashing or being overwritten) and Export / Import to a `.json` file
+- Auto-pauses when the tab is hidden so raids don't happen while you're not
+  looking; time away (tab closed or hidden) pays out at half rate for up to
+  4 hours, within your storage caps
+- Works on phones: long-press a building for its menu, pinch to zoom
 
 ## Running it
 
