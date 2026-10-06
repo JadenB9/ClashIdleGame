@@ -347,11 +347,28 @@
     const rand = (a, b) => a + Math.random() * (b - a);
     const randi = (a, b) => Math.floor(rand(a, b));
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const SUFFIXES = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi'];
     const fmt = (n) => {
+        if (!Number.isFinite(n)) return '0';
+        if (n < 0) return '-' + fmt(-n);
         if (n < 1000) return Math.floor(n).toString();
-        if (n < 1e6)  return (n / 1e3).toFixed(n < 1e4 ? 2 : 1) + 'K';
-        if (n < 1e9)  return (n / 1e6).toFixed(2) + 'M';
-        return (n / 1e9).toFixed(2) + 'B';
+        let tier = Math.min(Math.floor(Math.log10(n) / 3), SUFFIXES.length - 1);
+        let v = n / Math.pow(1000, tier);
+        // 999.95K would round up to "1000.0K" — bump it to the next tier instead
+        if (v >= 999.95 && tier < SUFFIXES.length - 1) { tier++; v /= 1000; }
+        return v.toFixed(v < 10 ? 2 : 1) + SUFFIXES[tier];
+    };
+    // These lists refresh at 10Hz; only touch the DOM when the markup actually changed
+    const setHtml = (el, html) => { if (el._html !== html) { el._html = html; el.innerHTML = html; } };
+    // Per-second rates: keep one decimal for small numbers so +0.4/s isn't shown as +0
+    const fmtRate = (n, digits = 1) => (n < 1000 ? n.toFixed(digits) : fmt(n));
+    // A number from outside (save file, co-op peer) or a fallback if it isn't one
+    const safeNum = (v, fallback, lo = 0, hi = Infinity) => (Number.isFinite(v) ? clamp(v, lo, hi) : fallback);
+    const fmtDuration = (sec) => {
+        const m = Math.round(sec / 60);
+        if (m < 1) return `${Math.round(sec)}s`;
+        if (m < 60) return `${m}m`;
+        return `${Math.floor(m / 60)}h ${m % 60}m`;
     };
     const fmtTime = (sec) => {
         sec = Math.max(0, Math.ceil(sec));
@@ -715,6 +732,14 @@
             }, { passive: false });
 
             window.addEventListener('keydown', (e) => {
+                // Leave typing (co-op code box) and browser shortcuts like Cmd+W / Ctrl+0 alone
+                const tag = e.target && e.target.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+                if (e.ctrlKey || e.metaKey || e.altKey) return;
+                // While a dialog is up its own buttons own the keyboard
+                const dialogOpen = document.getElementById('modal').classList.contains('open')
+                    || document.querySelector('.confirm-dialog.open');
+                if (dialogOpen && e.key !== 'Escape') return;
                 if (e.key === 'Escape') {
                     this.setBuildMode(null);
                     this.moveMode = null;
@@ -722,7 +747,8 @@
                     this.updateCanvasCursor();
                     this.closeModal();
                 }
-                if (e.key === ' ')     { e.preventDefault(); this.collectAll(); }
+                // Space on a focused button should press that button, not collect
+                if (e.key === ' ' && tag !== 'BUTTON') { e.preventDefault(); this.collectAll(); }
                 if (e.key === '+' || e.key === '=') this.zoomBy(1.15, this.vw/2, this.vh/2);
                 if (e.key === '-' || e.key === '_') this.zoomBy(1/1.15, this.vw/2, this.vh/2);
                 if (e.key === '0') { this.cam.zoom = 1; this.centerCamera(); }
@@ -899,6 +925,12 @@
                 return;
             }
 
+            // "Move" from the building menu: the next tap picks the destination
+            if (this.moveMode) {
+                this.commitDragMove({ tx, ty });
+                return;
+            }
+
             // Click a building — use visual hit detection so clicks anywhere on
             // the drawn shape register, not just the base tile footprint.
             const b = this.buildingAtScreen(sx, sy);
@@ -945,12 +977,14 @@
             this.floatText(def.name, p.x, p.y - 40, '#ffe3a1');
         }
 
-        /** Called on mouse-up when a drag-to-move was in progress. */
-        commitDragMove() {
+        /**
+         * Drop the building being moved. Called on mouse-up after a drag-to-move,
+         * and on a tap after picking "Move" in the building menu (with that tile).
+         */
+        commitDragMove(t = this.hoverTile) {
             const mb = this.moveMode;
             if (!mb) { this.moveMode = null; this.updateCanvasCursor(); return; }
-            const t = this.hoverTile;
-            if (!t) {
+            if (!t || t.tx < 0 || t.ty < 0 || t.tx >= CFG.gridW || t.ty >= CFG.gridH) {
                 this.toast('Drop on a valid tile', 'warn');
                 this.moveMode = null;
                 this.updateCanvasCursor();
@@ -997,8 +1031,8 @@
             Object.entries(bonus).forEach(([k, v]) => {
                 const mul = this.boost.mult * this.combo.mult * (k === 'gold' ? this.goldMult : 1);
                 const amt = Math.floor(v * mul);
-                this.res[k] = Math.min(this.cap(), (this.res[k] || 0) + amt);
-                if (k === 'gold') this.stats.goldEarned += amt;
+                const got = this.addRes(k, amt);
+                if (k === 'gold') this.stats.goldEarned += got;
                 const p = this.worldIso(b.tx + 0.5, b.ty + 0.5);
                 this.floatText(`+${amt}`, p.x, p.y - 40, this.resColor(k));
             });
@@ -1238,8 +1272,7 @@
             }
             this.spend(cost);
             b.level++;
-            const hpMul = 1.18;
-            b.maxHp = Math.floor(def.baseHP * Math.pow(hpMul, b.level - 1));
+            b.maxHp = this.hpFor(b.type, b.level);
             b.hp = b.maxHp;
             this.stats.upgrades++;
             this.gainXp(25);
@@ -1251,6 +1284,11 @@
             if (document.getElementById('modal').classList.contains('open')) {
                 this.openBuildingModal(b);
             }
+        }
+
+        // Max HP grows 18% per level
+        hpFor(type, level) {
+            return Math.floor(BLD[type].baseHP * Math.pow(1.18, level - 1));
         }
 
         destroyBuilding(b) {
@@ -1265,11 +1303,22 @@
                     size: rand(3, 7),
                 });
             }
-            this.buildings = this.buildings.filter(x => x !== b);
+            this.removeBuilding(b);
             this.audio.die();
             this.toast(`${def.name} destroyed!`, 'error');
-            this.recomputeRates();
             if (b.type === 'townhall') this.gameOver();
+        }
+
+        // Take a building off the map and drop every reference to it, so raiders
+        // stop hitting an empty tile and an open menu can't upgrade a ghost.
+        removeBuilding(b) {
+            this.buildings = this.buildings.filter(x => x !== b);
+            for (const e of this.enemies) if (e.target === b) e.target = null;
+            if (this.hoverBuilding === b) { this.hoverBuilding = null; this.rebuildHoverTip(); }
+            if (this.selectedBuilding === b) this.selectedBuilding = null;
+            if (this.moveMode === b) { this.moveMode = null; this.updateCanvasCursor(); }
+            if (this.modalBuilding === b) this.closeModal();
+            this.recomputeRates();
         }
 
         canAfford(cost) {
@@ -1285,6 +1334,21 @@
             const th = this.buildings.find(b => b.type === 'townhall');
             const thCap = th ? BLD.townhall.provides(th.level).cap : 3000;
             return thCap + this.capBonus;
+        }
+
+        // Storage cap for one resource. Gems are uncapped; dark elixir gets a smaller vault.
+        capFor(k) {
+            if (k === 'gems') return Infinity;
+            return k === 'dark' ? this.cap() * CFG.darkCapFrac : this.cap();
+        }
+
+        // Add to a resource without going past its cap, and return how much
+        // actually went in. Never takes anything away if a sold vault already
+        // left the player over the cap.
+        addRes(k, amt) {
+            const before = this.res[k] || 0;
+            this.res[k] = Math.max(before, Math.min(this.capFor(k), before + amt));
+            return this.res[k] - before;
         }
 
         recomputeRates() {
@@ -1311,6 +1375,15 @@
             }
             r.gold *= this.goldMult;
             this.rates = r;
+        }
+
+        isNight() {
+            return this.dayTime < 0.2 || this.dayTime > 0.8;
+        }
+
+        // Live production multiplier: gem boost x night bonus (+25% at night)
+        rateMult() {
+            return this.boost.mult * (this.isNight() ? 1.25 : 1);
         }
 
         // ---------- Combat ----------
@@ -1466,30 +1539,34 @@
                     if (dd <= splash) {
                         other.hp -= dmg * 0.5;
                         this.popups.push({ x: other.x, y: other.y - 20, text: `-${Math.floor(dmg * 0.5)}`, color: '#ff9a6b', life: 0.8, max: 0.8 });
+                        // Splash kills count too (they used to vanish with no gold or kill credit)
+                        if (other.hp <= 0) this.killEnemy(other);
                     }
                 }
             }
-            if (e.hp <= 0 && !e.dead) {
-                e.dead = true;
-                this.stats.kills++;
-                this.res.gold = Math.min(this.cap(), this.res.gold + e.reward.gold);
-                this.stats.goldEarned += e.reward.gold;
-                this.gainXp(e.reward.xp);
-                if (Math.random() < 0.05) {
-                    this.res.gems += 1;
-                    this.floatText('+1 ♦', e.x, e.y - 30, '#5cd8ff');
-                }
-                this.audio.die();
-                for (let i = 0; i < 14; i++) {
-                    this.particles.push({
-                        x: e.x, y: e.y,
-                        vx: rand(-140, 140), vy: rand(-180, -30),
-                        life: 0.9, max: 0.9, color: i % 2 ? '#ff6b35' : '#ffc857', size: rand(3, 6),
-                    });
-                }
-                this.floatText(`+${e.reward.gold}`, e.x, e.y - 20, '#ffc857');
-                this.checkAchievements();
+            if (e.hp <= 0) this.killEnemy(e);
+        }
+
+        killEnemy(e) {
+            if (e.dead) return;
+            e.dead = true;
+            this.stats.kills++;
+            this.stats.goldEarned += this.addRes('gold', e.reward.gold);
+            this.gainXp(e.reward.xp);
+            if (Math.random() < 0.05) {
+                this.res.gems += 1;
+                this.floatText('+1 ♦', e.x, e.y - 30, '#5cd8ff');
             }
+            this.audio.die();
+            for (let i = 0; i < 14; i++) {
+                this.particles.push({
+                    x: e.x, y: e.y,
+                    vx: rand(-140, 140), vy: rand(-180, -30),
+                    life: 0.9, max: 0.9, color: i % 2 ? '#ff6b35' : '#ffc857', size: rand(3, 6),
+                });
+            }
+            this.floatText(`+${e.reward.gold}`, e.x, e.y - 20, '#ffc857');
+            this.checkAchievements();
         }
 
         enemyTick(dt) {
@@ -1618,13 +1695,10 @@
             if (this.dayTime >= 1) { this.dayTime -= 1; this.dayCount++; }
 
             // Resources (night bonus: +25% during night hours)
-            const mult = this.boost.mult;
-            const nightMult = (this.dayTime < 0.2 || this.dayTime > 0.8) ? 1.25 : 1;
-            const rm = mult * nightMult;
-            this.res.gold   = Math.min(this.cap(), this.res.gold   + this.rates.gold   * dt * rm);
-            this.res.elixir = Math.min(this.cap(), this.res.elixir + this.rates.elixir * dt * rm);
-            this.res.dark   = Math.min(this.cap() * 0.3, this.res.dark + this.rates.dark * dt * rm);
-            this.stats.goldEarned += this.rates.gold * dt * rm;
+            const rm = this.rateMult();
+            this.stats.goldEarned += this.addRes('gold', this.rates.gold * dt * rm);
+            this.addRes('elixir', this.rates.elixir * dt * rm);
+            this.addRes('dark', this.rates.dark * dt * rm);
 
             // Boost timer
             if (this.boost.timeLeft > 0) {
@@ -3633,40 +3707,72 @@
             });
             const moveBtn = document.getElementById('moveBtn');
             if (moveBtn) moveBtn.addEventListener('click', () => {
-                this.moveMode = b;
+                // setBuildMode(null) clears moveMode, so it has to run first
                 this.setBuildMode(null);
+                this.moveMode = b;
                 this.spellMode = false;
                 this.updateCanvasCursor();
                 this.closeModal();
-                this.toast('Click an empty tile to move', 'warn');
+                this.toast('Tap an empty tile to move it there', 'warn');
             });
             const sellBtn = document.getElementById('sellBtn');
             if (sellBtn) sellBtn.addEventListener('click', () => {
-                const refund = Math.floor((def.baseCost.gold || 0) * 0.5);
-                this.res.gold += refund;
-                this.buildings = this.buildings.filter(x => x !== b);
-                this.recomputeRates();
-                this.toast(`Sold for ${refund} gold`, 'success');
-                this.audio.coin();
+                // Refund half of every resource it cost to place (not just gold)
+                const refund = {};
+                for (const k in def.baseCost) refund[k] = Math.floor(def.baseCost[k] * 0.5);
+                const refundStr = Object.entries(refund).map(([k, v]) => `${fmt(v)} ${this.resSymbol(k)}`).join(' · ');
+                const lostLevels = b.level > 1 ? `<br><br><span style="color:#ff9a6b">Its ${b.level - 1} upgrade${b.level > 2 ? 's' : ''} won't be refunded.</span>` : '';
                 this.closeModal();
-                this.updateUI();
+                this.showConfirm({
+                    title: `Sell ${def.name}?`,
+                    icon: def.icon,
+                    body: `You'll get back ${refundStr}.${lostLevels}`,
+                    yesText: 'Sell',
+                    noText: 'Keep it',
+                    danger: true,
+                    onYes: () => {
+                        if (!this.buildings.includes(b)) return; // destroyed while the dialog was up
+                        for (const k in refund) this.addRes(k, refund[k]);
+                        this.removeBuilding(b);
+                        this.toast(`Sold for ${refundStr}`, 'success');
+                        this.audio.coin();
+                        this.updateUI();
+                    },
+                });
             });
+
+            // Keyboard users land on the main action instead of somewhere behind the overlay
+            (upBtn && !upBtn.disabled ? upBtn : document.getElementById('modalClose')).focus({ preventScroll: true });
         }
 
         closeModal() {
-            document.getElementById('modal').classList.remove('open');
+            const modal = document.getElementById('modal');
+            if (!modal.classList.contains('open')) return;
+            modal.classList.remove('open');
+            this.modalBuilding = null;
+            // Hand focus back to whatever had it before the menu opened
+            if (this._modalReturnFocus && document.contains(this._modalReturnFocus)) this._modalReturnFocus.focus();
+            this._modalReturnFocus = null;
         }
 
         updateUI() {
             document.getElementById('val-gold').textContent   = fmt(this.res.gold);
             document.getElementById('val-elixir').textContent = fmt(this.res.elixir);
             document.getElementById('val-dark').textContent   = fmt(this.res.dark);
-            document.getElementById('val-gems').textContent   = this.res.gems;
+            document.getElementById('val-gems').textContent   = fmt(this.res.gems);
 
-            const mult = this.boost.mult;
-            document.getElementById('rate-gold').textContent   = `+${(this.rates.gold * mult).toFixed(1)}/s`;
-            document.getElementById('rate-elixir').textContent = `+${(this.rates.elixir * mult).toFixed(1)}/s`;
-            document.getElementById('rate-dark').textContent   = `+${(this.rates.dark * mult).toFixed(2)}/s`;
+            // Keep an open building menu's Upgrade button in sync as resources come in
+            if (this.modalBuilding && this._modalUpCost) {
+                const upBtn = document.getElementById('upgradeBtn');
+                if (upBtn) upBtn.disabled = !this.canAfford(this._modalUpCost);
+            }
+
+            // Show what's actually coming in right now, night bonus included
+            const mult = this.rateMult();
+            const moon = this.isNight() ? ' 🌙' : '';
+            document.getElementById('rate-gold').textContent   = `+${fmtRate(this.rates.gold * mult)}/s${moon}`;
+            document.getElementById('rate-elixir').textContent = `+${fmtRate(this.rates.elixir * mult)}/s`;
+            document.getElementById('rate-dark').textContent   = `+${fmtRate(this.rates.dark * mult, 2)}/s`;
 
             document.getElementById('playerLevel').textContent = this.player.level;
             const xpNeeded = CFG.xpToLevel(this.player.level);
@@ -3691,8 +3797,7 @@
             const mins = Math.floor((this.dayTime * 24 - hours) * 60);
             document.getElementById('dayTime').textContent = `${hours.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}`;
             document.getElementById('dayCount').textContent = `Day ${this.dayCount}`;
-            const isNight = this.dayTime < 0.2 || this.dayTime > 0.8;
-            document.getElementById('dayLabel').textContent = isNight ? 'Night' : 'Day';
+            document.getElementById('dayLabel').textContent = this.isNight() ? 'Night · +25%' : 'Day';
 
             // Zoom indicator
             const zEl = document.getElementById('zoomVal');
@@ -3727,13 +3832,6 @@
                 }
             }
 
-            // Night bonus indicator on rate display
-            const isNightNow = this.dayTime < 0.2 || this.dayTime > 0.8;
-            const rateGold = document.getElementById('rate-gold');
-            if (rateGold && isNightNow) {
-                rateGold.textContent += ' 🌙';
-            }
-
             // Only rebuild inner tab content when that tab is actually visible.
             // updateUI runs at 10Hz, so skipping hidden tabs saves a LOT of DOM work.
             const activeTab = document.querySelector('.tab.active')?.dataset.tab;
@@ -3762,10 +3860,10 @@
                 { label: 'Total DPS', val: totalDps.toFixed(0) },
                 ...Object.entries(defCount).map(([k,v]) => ({ label: k, val: v })),
             ];
-            army.innerHTML = rows.map(r => `<div class="army-item"><span>${r.label}</span><span class="val">${r.val}</span></div>`).join('');
+            setHtml(army, rows.map(r => `<div class="army-item"><span>${r.label}</span><span class="val">${r.val}</span></div>`).join(''));
 
             const al = document.getElementById('achievementList');
-            al.innerHTML = ACHS.map(a => `
+            setHtml(al, ACHS.map(a => `
                 <div class="achievement ${this.achievements[a.id] ? 'done' : ''}">
                     <div class="achievement-icon">${a.icon}</div>
                     <div class="achievement-body">
@@ -3773,7 +3871,7 @@
                         <div class="achievement-desc">${a.desc}</div>
                     </div>
                 </div>
-            `).join('');
+            `).join(''));
         }
 
         updateStatsTab() {
@@ -3792,7 +3890,7 @@
                 { label: 'Gold Multiplier', val: `x${this.goldMult.toFixed(2)}` },
                 { label: 'XP Multiplier', val: `x${this.xpMult.toFixed(2)}` },
             ];
-            el.innerHTML = rows.map(r => `<div class="stat-row"><span>${r.label}</span><span class="val">${r.val}</span></div>`).join('');
+            setHtml(el, rows.map(r => `<div class="stat-row"><span>${r.label}</span><span class="val">${r.val}</span></div>`).join(''));
         }
 
         // ---------- Feedback helpers ----------
@@ -3802,6 +3900,8 @@
             el.className = 'toast ' + type;
             el.textContent = msg;
             container.appendChild(el);
+            // Don't let a burst of events stack toasts down the whole screen
+            while (container.children.length > 4) container.firstElementChild.remove();
             setTimeout(() => {
                 el.classList.add('out');
                 setTimeout(() => el.remove(), 320);
@@ -4285,13 +4385,15 @@
         }
 
         receiveGift(resource, amount, from) {
-            if (resource === 'gems') {
-                this.res.gems += amount;
-            } else {
-                this.res[resource] = Math.min(this.cap(), (this.res[resource] || 0) + amount);
-            }
+            // Gifts come straight off the wire from another browser, so don't
+            // trust them: only real resources, only sane positive amounts.
+            if (!['gold', 'elixir', 'dark', 'gems'].includes(resource)) return;
+            amount = Math.floor(Number(amount));
+            if (!Number.isFinite(amount) || amount < 1) return;
+            if (resource === 'gems') amount = 1; // the send button only ever gives 1
+            amount = this.addRes(resource, amount);
             this.audio.levelup();
-            this.toast(`${from} sent you ${fmt(amount)} ${this.resSymbol(resource)}!`, 'success');
+            this.toast(`${String(from || 'Your partner').slice(0, 40)} sent you ${fmt(amount)} ${this.resSymbol(resource)}!`, 'success');
             this.pulseRes(resource);
             this.showAlert(`♦ GIFT: +${fmt(amount)} ${resource.toUpperCase()} ♦`, 2);
             this.updateUI();
@@ -4321,16 +4423,23 @@
             const nameEl = document.getElementById('partnerName');
             if (nameEl) nameEl.textContent = `${s.name} · Lv ${s.level}`;
 
+            // Partner state is untrusted (it comes from their browser), so every
+            // value goes through Number() + fmt and lands via textContent
             const resEl = document.getElementById('partnerRes');
-            if (resEl) resEl.innerHTML = `
-                <span class="p-res gold">◈ ${fmt(s.res.gold)}</span>
-                <span class="p-res elixir">❂ ${fmt(s.res.elixir)}</span>
-                <span class="p-res dark">✦ ${fmt(s.res.dark)}</span>
-                <span class="p-res gem">♦ ${s.res.gems}</span>
-            `;
+            if (resEl) {
+                const r = s.res || {};
+                resEl.replaceChildren(...[
+                    ['gold', '◈', r.gold], ['elixir', '❂', r.elixir], ['dark', '✦', r.dark], ['gem', '♦', r.gems],
+                ].map(([cls, sym, v]) => {
+                    const span = document.createElement('span');
+                    span.className = 'p-res ' + cls;
+                    span.textContent = `${sym} ${fmt(Number(v))}`;
+                    return span;
+                }));
+            }
 
             const waveEl = document.getElementById('partnerWave');
-            if (waveEl) {
+            if (waveEl && s.wave) {
                 if (s.wave.active) {
                     waveEl.textContent = `Wave ${s.wave.number} · ${s.enemies} enemies · ${s.boost ? '⚡BOOSTED' : ''} ${s.warCry ? '🔥WAR CRY' : ''}`;
                 } else {
@@ -4365,10 +4474,10 @@
             }
 
             // Buildings
-            if (state.buildings) {
+            if (Array.isArray(state.buildings)) {
                 for (const b of state.buildings) {
+                    if (!b || !Object.hasOwn(BLD, b.type)) continue;
                     const def = BLD[b.type];
-                    if (!def) continue;
                     const size = def.size || 1;
                     const x = b.tx * cellW;
                     const y = b.ty * cellH;
