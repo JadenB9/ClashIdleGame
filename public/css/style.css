@@ -4,6 +4,9 @@
    Solid colors, chunky borders, deliberate contrast.
    ============================================================ */
 
+/* Dark is the default (no attribute on <html>); light is data-theme="light",
+   the same contract as the rest of j4den.com. The map canvas keeps its own
+   day/night lighting in both — only the chrome around it changes. */
 :root {
     --bg-0: #0e1422;
     --bg-1: #151c2e;
@@ -12,24 +15,86 @@
     --panel-2: #0f1525;
     --panel-border: #ffc857;
     --panel-border-dim: #5a4a1a;
+    --line: #2e3854;
+    --hover: #2a3456;
+    --hover-soft: #1f2a44;
     --text: #f4ecd8;
     --text-dim: #a7a08a;
-    --text-mute: #6b6854;
+    --text-mute: #8a846c;
     --gold: #ffc857;
     --gold-hi: #ffe3a1;
     --gold-lo: #8a6318;
     --ember: #ff6b35;
     --ember-hi: #ff9a6b;
+    --ember-hover: #ff8657;
+    --ember-hover-line: #ffb88a;
     --elixir: #c471ed;
     --elixir-hi: #e3a8ff;
     --dark: #8a4de0;
     --gem: #5cd8ff;
     --gem-hi: #a6ecff;
     --danger: #ff5d5d;
+    --danger-line: #8a2d2d;
+    --danger-text: #ffb4b4;
+    --danger-bg: #3a1010;
     --good: #6bff95;
-    /* The game world is always a dark night/day map, so the chrome stays dark
-       in both site themes; this keeps native controls and scrollbars dark too */
+    --warn-text: #ff9a6b;
+    --alert-bg: #1e1208;
+    --spell-bg: #1a2e44;
+    --warcry-bg: #2a1a0a;
+    --collect-bg: #8a6318;
+    --collect-hover: #a87a20;
+    --scrim: rgba(0, 0, 0, 0.78);
+    --scrim-heavy: rgba(0, 0, 0, 0.85);
+    --shadow: rgba(0, 0, 0, 0.6);
+    --map-edge: #0b1220;
     color-scheme: dark;
+}
+
+/* Light: parchment and ink. Gold, ember, elixir and gem keep their hue but
+   drop to shades that pass AA on cream; the panel borders stay bright gold. */
+:root[data-theme="light"] {
+    --bg-0: #ece2cc;
+    --bg-1: #f3ead8;
+    --bg-2: #e3d7bd;
+    --panel: #faf4e6;
+    --panel-2: #efe6d2;
+    --panel-border: #d4a033;
+    --panel-border-dim: #d8c7a0;
+    --line: #d9cdb2;
+    --hover: #e8dcc1;
+    --hover-soft: #f1e9d6;
+    --text: #2a2114;
+    --text-dim: #6b5e46;
+    --text-mute: #75684f;
+    --gold: #9a6a0e;
+    --gold-hi: #7a5208;
+    --gold-lo: #c9a24a;
+    --ember: #c4481a;
+    --ember-hi: #a63c14;
+    --ember-hover: #d4521c;
+    --ember-hover-line: #e5906a;
+    --elixir: #8e3fc2;
+    --elixir-hi: #7a2fae;
+    --dark: #6a35b8;
+    --gem: #177fa6;
+    --gem-hi: #0f6587;
+    --danger: #c62828;
+    --danger-line: #d98c8c;
+    --danger-text: #a12626;
+    --danger-bg: #f6dcd6;
+    --good: #1e7f3f;
+    --warn-text: #b8431a;
+    --alert-bg: #fbe9d6;
+    --spell-bg: #dceff6;
+    --warcry-bg: #f9e2d4;
+    --collect-bg: #f0d58a;
+    --collect-hover: #e6c66e;
+    --scrim: rgba(50, 38, 18, 0.55);
+    --scrim-heavy: rgba(50, 38, 18, 0.68);
+    --shadow: rgba(60, 45, 20, 0.25);
+    --map-edge: #2b3a28;
+    color-scheme: light;
 }
 
 * {
@@ -48,6 +113,8 @@ html, body {
     user-select: none;
     touch-action: manipulation; /* no double-tap zoom delay on the buttons */
 }
+
+[hidden] { display: none !important; }
 
 /* Hidden visually, still read by screen readers */
 .sr-only {
@@ -138,16 +205,16 @@ html, body {
     gap: 8px;
     padding: 8px 14px;
     background: var(--panel-2);
-    border: 2px solid #2e3854;
+    border: 2px solid var(--line);
     border-radius: 8px;
     min-width: 130px;
     transition: transform .15s ease;
 }
 
-.res[data-res="gold"]   { border-color: #ffc857; }
-.res[data-res="elixir"] { border-color: #c471ed; }
-.res[data-res="dark"]   { border-color: #8a4de0; }
-.res[data-res="gems"]   { border-color: #5cd8ff; }
+.res[data-res="gold"]   { border-color: var(--gold); }
+.res[data-res="elixir"] { border-color: var(--elixir); }
+.res[data-res="dark"]   { border-color: var(--dark); }
+.res[data-res="gems"]   { border-color: var(--gem); }
 
 .res.pulse {
     animation: resPulse .35s ease-out;
@@ -204,7 +271,7 @@ html, body {
 
 .ring-bg {
     fill: var(--panel-2);
-    stroke: #2e3854;
+    stroke: var(--line);
     stroke-width: 2;
 }
 
@@ -239,6 +306,37 @@ html, body {
     color: var(--text-dim);
 }
 
+/* Square icon button (theme toggle). Sun shows in dark, moon in light:
+   "press me to go to the other one". */
+.icon-btn {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    background: var(--panel-2);
+    border: 2px solid var(--gold-lo);
+    border-radius: 8px;
+    color: var(--gold-hi);
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+}
+
+.icon-btn:hover {
+    background: var(--hover);
+    border-color: var(--panel-border);
+}
+
+.icon-btn svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+}
+
+.icon-btn .ico-moon { display: none; }
+:root[data-theme="light"] .icon-btn .ico-sun { display: none; }
+:root[data-theme="light"] .icon-btn .ico-moon { display: block; }
+
 /* ================= GAME AREA ================= */
 
 #gameArea {
@@ -246,7 +344,7 @@ html, body {
     position: relative;
     border-radius: 10px;
     overflow: hidden;
-    background: #0b1220;
+    background: var(--map-edge);
     border: 2px solid var(--panel-border);
 }
 
@@ -290,7 +388,7 @@ html, body {
     flex: 1;
     text-align: center;
     border-color: var(--ember);
-    background: #1e1208;
+    background: var(--alert-bg);
     min-height: 38px;
     display: flex;
     align-items: center;
@@ -352,6 +450,9 @@ html, body {
     font-family: 'Cinzel', serif;
     font-size: 12px;
 }
+
+.hover-tip .tip-dim { color: var(--text-dim); }
+.hover-tip .tip-help { color: var(--text-mute); }
 
 .toasts {
     position: absolute;
@@ -426,7 +527,7 @@ html, body {
 
 .tab:hover {
     color: var(--text);
-    background: rgba(255, 200, 87, 0.06);
+    background: var(--hover-soft);
 }
 
 .tab.active {
@@ -441,7 +542,7 @@ html, body {
     right: 0;
     bottom: -2px;
     height: 2px;
-    background: var(--gold);
+    background: var(--panel-border);
 }
 
 .tab-content {
@@ -488,7 +589,7 @@ html, body {
     color: inherit;
     width: 100%;
     background: var(--panel-2);
-    border: 2px solid #2e3854;
+    border: 2px solid var(--line);
     border-radius: 8px;
     padding: 10px 8px;
     text-align: center;
@@ -499,13 +600,13 @@ html, body {
 
 .build-card:hover {
     transform: translateY(-2px);
-    border-color: var(--gold);
-    background: #1f2a44;
+    border-color: var(--panel-border);
+    background: var(--hover-soft);
 }
 
 .build-card.selected {
-    border-color: var(--gold);
-    background: #2a3456;
+    border-color: var(--panel-border);
+    background: var(--hover);
 }
 
 .build-card.locked {
@@ -515,7 +616,7 @@ html, body {
 
 .build-card.locked:hover {
     transform: none;
-    border-color: #2e3854;
+    border-color: var(--line);
     background: var(--panel-2);
 }
 
@@ -592,6 +693,55 @@ html, body {
 .save-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .save-row + .hint { text-align: left; }
 
+/* Settings: label on the left, control on the right */
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.setting-row:last-of-type { border-bottom: 0; }
+
+.setting-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+    flex-shrink: 0;
+}
+
+.setting-row .btn.small { flex: 0 0 auto; min-width: 64px; }
+
+/* Three-way picker: one bordered pill, the pressed option filled */
+.seg {
+    display: inline-flex;
+    border: 2px solid var(--gold-lo);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--panel-2);
+}
+
+.seg-btn {
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    background: transparent;
+    border: 0;
+    border-right: 2px solid var(--gold-lo);
+    padding: 6px 9px;
+    cursor: pointer;
+    transition: background .12s, color .12s;
+}
+
+.seg-btn:last-child { border-right: 0; }
+.seg-btn:hover { color: var(--text); background: var(--hover-soft); }
+.seg-btn[aria-pressed="true"] { color: var(--gold-hi); background: var(--hover); }
+.seg-btn:focus-visible { outline-offset: -3px; }
+
 .btn {
     background: var(--panel-2);
     border: 2px solid var(--gold-lo);
@@ -608,8 +758,8 @@ html, body {
 }
 
 .btn:hover {
-    background: #2a3456;
-    border-color: var(--gold);
+    background: var(--hover);
+    border-color: var(--panel-border);
 }
 
 .btn:active { transform: translateY(1px); }
@@ -630,13 +780,13 @@ html, body {
 }
 
 .btn.primary:hover {
-    background: #ff8657;
-    border-color: #ffb88a;
+    background: var(--ember-hover);
+    border-color: var(--ember-hover-line);
 }
 
 .btn.small { padding: 7px 12px; font-size: 10px; flex: 1; }
-.btn.danger { border-color: #8a2d2d; color: #ffb4b4; }
-.btn.danger:hover { border-color: var(--danger); background: #3a1010; }
+.btn.danger { border-color: var(--danger-line); color: var(--danger-text); }
+.btn.danger:hover { border-color: var(--danger); background: var(--danger-bg); }
 
 /* ================= BOTTOM BAR ================= */
 
@@ -675,8 +825,8 @@ html, body {
 }
 
 .action:hover {
-    background: #2a3456;
-    border-color: var(--gold);
+    background: var(--hover);
+    border-color: var(--panel-border);
 }
 
 .action:active { transform: translateY(1px); }
@@ -687,16 +837,16 @@ html, body {
 }
 
 #actCancel {
-    border-color: #8a2d2d;
-    color: #ffb4b4;
+    border-color: var(--danger-line);
+    color: var(--danger-text);
 }
 
 #actCancel .action-ico { color: var(--danger); }
-#actCancel:hover { background: #3a1010; border-color: var(--danger); }
+#actCancel:hover { background: var(--danger-bg); border-color: var(--danger); }
 
 /* Toggle buttons — highlight when active */
 .action.on {
-    background: #2a3456;
+    background: var(--hover);
     border-color: var(--gold-hi);
     color: var(--gold-hi);
 }
@@ -707,7 +857,7 @@ html, body {
 .modal {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.78);
+    background: var(--scrim);
     display: none;
     align-items: center;
     justify-content: center;
@@ -723,7 +873,7 @@ html, body {
 
 .modal-panel {
     background: var(--panel);
-    border: 3px solid var(--gold);
+    border: 3px solid var(--panel-border);
     border-radius: 12px;
     padding: 28px;
     width: min(440px, calc(100vw - 24px));
@@ -777,7 +927,7 @@ html, body {
 
 .modal .stat-box {
     background: var(--panel-2);
-    border: 2px solid #2e3854;
+    border: 2px solid var(--line);
     border-radius: 6px;
     padding: 10px 12px;
 }
@@ -852,8 +1002,8 @@ html, body {
 }
 
 .btn.collect {
-    background: var(--gold-lo);
-    border: 2px solid var(--gold);
+    background: var(--collect-bg);
+    border: 2px solid var(--panel-border);
     color: var(--gold-hi);
     padding: 11px 22px;
     font-size: 13px;
@@ -861,7 +1011,7 @@ html, body {
 }
 
 .btn.collect:hover {
-    background: #a87a20;
+    background: var(--collect-hover);
 }
 
 .modal .modal-hint {
@@ -873,12 +1023,53 @@ html, body {
     letter-spacing: 0.5px;
 }
 
+.modal .mt-6 { margin-top: 6px; }
+.warn-text { color: var(--warn-text); }
+
+/* Welcome-back summary (offline earnings) */
+.modal .away-grid .stat-box .value { font-size: 18px; }
+.modal .away-grid .stat-box.gold .value   { color: var(--gold); }
+.modal .away-grid .stat-box.elixir .value { color: var(--elixir); }
+.modal .away-grid .stat-box.dark .value   { color: var(--dark); }
+.modal .modal-actions.center { justify-content: center; }
+
+/* Keyboard shortcut reference */
+.keys {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+    font-size: 12px;
+}
+
+.keys td {
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+}
+
+.keys td:first-child { width: 42%; white-space: nowrap; }
+.keys tr:last-child td { border-bottom: 0; }
+
+kbd {
+    display: inline-block;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gold-hi);
+    background: var(--panel-2);
+    border: 1px solid var(--gold-lo);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 1px 6px;
+    margin-right: 3px;
+}
+
 /* ================= WELCOME ================= */
 
 .welcome {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.85);
+    background: var(--scrim-heavy);
     z-index: 2000;
     display: flex;
     align-items: center;
@@ -890,7 +1081,7 @@ html, body {
 
 .welcome-panel {
     background: var(--panel);
-    border: 3px solid var(--gold);
+    border: 3px solid var(--panel-border);
     border-radius: 14px;
     padding: 40px 50px;
     text-align: center;
@@ -975,8 +1166,8 @@ html, body {
 }
 
 .zoom-btn:hover {
-    background: #2a3456;
-    border-color: var(--gold);
+    background: var(--hover);
+    border-color: var(--panel-border);
 }
 
 .zoom-btn.reset {
@@ -1022,7 +1213,7 @@ html, body {
 }
 
 .action.spell:hover {
-    background: #1a2e44;
+    background: var(--spell-bg);
     border-color: var(--gem-hi);
 }
 
@@ -1046,18 +1237,18 @@ html, body {
 .confirm-backdrop {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.85);
+    background: var(--scrim-heavy);
     animation: fadeIn .25s ease-out;
 }
 
 .confirm-panel {
     position: relative;
     background: var(--panel);
-    border: 3px solid var(--gold);
+    border: 3px solid var(--panel-border);
     border-radius: 14px;
     padding: 30px 36px 26px;
-    min-width: 380px;
-    max-width: 480px;
+    min-width: min(380px, calc(100vw - 24px));
+    max-width: min(480px, calc(100vw - 24px));
     text-align: center;
     animation: popIn .3s ease-out;
 }
@@ -1178,7 +1369,7 @@ html, body {
     outline: none;
 }
 
-.coop-input:focus { border-color: var(--gold); }
+.coop-input:focus { border-color: var(--panel-border); }
 
 .coop-input::placeholder {
     color: var(--text-mute);
@@ -1204,6 +1395,20 @@ html, body {
     color: var(--text-mute);
     background: rgba(107, 104, 84, 0.1);
 }
+
+/* Relay (signalling server) state under the code box */
+.coop-status.pending {
+    color: var(--gold);
+    background: rgba(255, 200, 87, 0.08);
+}
+
+.coop-status.error {
+    color: var(--danger-text);
+    background: rgba(255, 93, 93, 0.1);
+}
+
+.coop-section .section-title.spaced { margin-top: 12px; }
+.coop-disconnect { margin-top: 12px; width: 100%; }
 
 .coop-hint {
     font-size: 11px;
@@ -1297,9 +1502,9 @@ html, body {
     gap: 14px;
     padding: 14px 20px;
     background: var(--panel);
-    border: 3px solid var(--gold);
+    border: 3px solid var(--panel-border);
     border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 8px 32px var(--shadow);
 }
 
 .invite-icon {
@@ -1334,7 +1539,7 @@ html, body {
 .action.warcry .action-ico { color: var(--ember); }
 
 .action.warcry:hover {
-    background: #2a1a0a;
+    background: var(--warcry-bg);
     border-color: var(--ember-hi);
 }
 
@@ -1417,6 +1622,8 @@ html, body {
     .player-meta { display: none; }
     .level-ring { width: 38px; height: 38px; }
     #playerLevel { font-size: 14px; }
+    .icon-btn { width: 34px; height: 34px; }
+    .icon-btn svg { width: 16px; height: 16px; }
 
     .hud { inset: 6px 6px auto 6px; gap: 6px; }
     .hud-panel { min-width: 0; padding: 5px 9px; }
@@ -1446,6 +1653,11 @@ html, body {
     .action-ico { font-size: 17px; }
 
     .modal-panel { padding: 20px 16px; }
+    .confirm-panel { padding: 22px 16px 18px; }
+    .confirm-title { font-size: 20px; letter-spacing: 2px; }
+    .confirm-actions { flex-wrap: wrap; }
+    .confirm-actions .btn { min-width: 0; flex: 1 1 120px; }
+    .setting-row { flex-wrap: wrap; }
     .welcome-panel { padding: 26px 20px; }
     .welcome h1 { font-size: 28px; }
     .welcome-crest { font-size: 48px; }

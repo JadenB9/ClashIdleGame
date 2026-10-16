@@ -15,10 +15,12 @@
         zoomMin: 0.65,
         zoomMax: 2.4,
         saveKey: 'kingdomOfEmber.v3',   // key stays put so old saves still load; the format version lives in the data
-        saveVersion: 4,
+        saveVersion: 5,
         autoSaveMs: 15000,
         offlineMaxSec: 4 * 60 * 60,      // offline earnings cap out after 4 hours away
         offlineRate: 0.5,                // and pay half the live rate
+        offlineSummarySec: 120,          // away longer than this gets a summary dialog instead of a toast
+        catchUpMaxSec: 3,                // a frame gap up to this long is simulated step by step; beyond it counts as time away
         darkCapFrac: 0.3,                // dark elixir storage is 30% of the normal cap
         dayLengthSec: 180,        // 3 minutes real-time = 1 in-game day
         waveBaseSec: 75,
@@ -352,10 +354,15 @@
     const randi = (a, b) => Math.floor(rand(a, b));
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const SUFFIXES = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi'];
+    const NOTATIONS = ['short', 'full', 'sci'];
+    // Number format from Settings: 12.5K (default), 12,500 or 1.25e4. Saved with the game.
+    let notation = 'short';
     const fmt = (n) => {
         if (!Number.isFinite(n)) return '0';
         if (n < 0) return '-' + fmt(-n);
         if (n < 1000) return Math.floor(n).toString();
+        if (notation === 'full') return Math.floor(n).toLocaleString('en-US');
+        if (notation === 'sci') return n.toExponential(2).replace('e+', 'e');
         let tier = Math.min(Math.floor(Math.log10(n) / 3), SUFFIXES.length - 1);
         let v = n / Math.pow(1000, tier);
         // 999.95K would round up to "1000.0K" — bump it to the next tier instead
@@ -368,6 +375,19 @@
     const fmtRate = (n, digits = 1) => (n < 1000 ? n.toFixed(digits) : fmt(n));
     // A number from outside (save file, co-op peer) or a fallback if it isn't one
     const safeNum = (v, fallback, lo = 0, hi = Infinity) => (Number.isFinite(v) ? clamp(v, lo, hi) : fallback);
+    // Strings and whole numbers from a co-op peer: bounded, never used as-is
+    const cleanStr = (v, max, fallback = '') => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : fallback);
+    const cleanInt = (v, fallback, lo, hi) => Math.floor(safeNum(Number(v), fallback, lo, hi));
+    // Drop finished entries in place; the old `arr = arr.filter(...)` made a new array every frame
+    const compact = (arr, keep) => {
+        let w = 0;
+        for (let i = 0; i < arr.length; i++) if (keep(arr[i])) arr[w++] = arr[i];
+        arr.length = w;
+        return arr;
+    };
+    const alive = (p) => p.life > 0;
+    // textContent writes are not free even when nothing changed; skip the no-ops
+    const setText = (el, s) => { if (el && el._t !== s) { el._t = s; el.textContent = s; } };
     const fmtDuration = (sec) => {
         const m = Math.round(sec / 60);
         if (m < 1) return `${Math.round(sec)}s`;
@@ -480,7 +500,7 @@
             this.enemies = [];
             this.particles = [];
             this.popups = [];
-            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0 };
+            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0 };
             this.achievements = {};
             this.dayTime = 0.25;
             this.dayCount = 1;
@@ -535,10 +555,17 @@
                 partnerState: null,
                 syncInterval: null,
                 pendingInvite: null,
+                relay: 'connecting',    // signalling server: connecting | ready | lost | error | offline
+                relayText: '',
+                reconnectTimer: null,
+                reconnectTries: 0,
+                lastStateAt: 0,
             };
 
             this.lastTime = 0;
             this.alertTimer = 0;
+            // Reused every frame by render(): no per-frame array for the depth sort
+            this._draws = [];
 
             try {
                 this.socket = (typeof io !== 'undefined') ? io() : null;
@@ -557,12 +584,14 @@
                 }
             } catch (e) { /* ignore */ }
 
+            this.cacheEls();
             this.resize();
             window.addEventListener('resize', () => this.resize());
             this.bindInput();
             this.loadSave();
             this.buildMenu();
             this.bindUI();
+            this.initTheme();
             this.centerCamera();
 
             this.lastTime = performance.now();
@@ -571,7 +600,11 @@
             setInterval(() => this.save(), CFG.autoSaveMs);
             // Also save when the page goes away so closing the tab doesn't lose
             // up to 15 seconds of progress (and offline time is measured from here)
-            window.addEventListener('pagehide', () => this.save());
+            window.addEventListener('pagehide', () => {
+                this.save();
+                // Tell the partner we left instead of letting their link time out
+                if (this.coop.connected) this.disconnectCoop();
+            });
             this.initCoop();
 
             const welcome = document.getElementById('welcome');
@@ -598,6 +631,86 @@
             this.groundCache = null;
             this.cacheMinX = undefined;
             this.clampCamera();
+        }
+
+        // The HUD refreshes ten times a second; look its elements up once
+        cacheEls() {
+            const $ = (id) => document.getElementById(id);
+            this.el = {
+                gold: $('val-gold'), elixir: $('val-elixir'), dark: $('val-dark'), gems: $('val-gems'),
+                rateGold: $('rate-gold'), rateElixir: $('rate-elixir'), rateDark: $('rate-dark'),
+                level: $('playerLevel'), xp: $('playerXp'), ring: $('xpRing'),
+                waveTimer: $('waveTimer'), waveInfo: $('waveInfo'),
+                dayTime: $('dayTime'), dayCount: $('dayCount'), dayLabel: $('dayLabel'),
+                zoom: $('zoomVal'), combo: $('comboLabel'),
+                warCry: $('actWarCry'), cancel: $('actCancel'),
+                modal: $('modal'), modalBody: $('modalBody'),
+                coopStatus: $('coopStatus'), themeBtn: $('btnTheme'),
+            };
+            this.el.warCryLabel = this.el.warCry ? this.el.warCry.querySelector('.action-label') : null;
+        }
+
+        // ---------- Theme ----------
+        // Shared with the rest of j4den.com: localStorage.theme is "light" or
+        // "dark", and nothing saved means follow the device. The inline script
+        // in <head> already set the attribute before paint; this keeps the
+        // toggle, the settings picker and the browser chrome color in step.
+        initTheme() {
+            const btn = this.el.themeBtn;
+            if (btn) btn.addEventListener('click', () => {
+                this.audio.click();
+                this.setTheme(this.isLight() ? 'dark' : 'light');
+            });
+            document.querySelectorAll('#themeSeg .seg-btn').forEach(b => {
+                b.addEventListener('click', () => { this.audio.click(); this.setTheme(b.dataset.themeOpt); });
+            });
+            // The device flipped between light and dark, or another j4den.com tab changed the setting
+            const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+            if (mq && mq.addEventListener) mq.addEventListener('change', () => { if (!this.savedTheme()) this.applyTheme(); });
+            window.addEventListener('storage', (e) => { if (e.key === 'theme') this.applyTheme(); });
+            this.applyTheme();
+        }
+
+        savedTheme() {
+            try {
+                const t = localStorage.getItem('theme');
+                return (t === 'light' || t === 'dark') ? t : null;
+            } catch (e) { return null; }
+        }
+
+        isLight() {
+            return document.documentElement.getAttribute('data-theme') === 'light';
+        }
+
+        // mode: 'light', 'dark' or 'system' (forget the choice, follow the device)
+        setTheme(mode) {
+            const explicit = (mode === 'light' || mode === 'dark') ? mode : null;
+            try {
+                if (explicit) localStorage.setItem('theme', explicit);
+                else localStorage.removeItem('theme');
+            } catch (e) { /* private window: the choice still holds for this page */ }
+            this._themeOverride = explicit;
+            this.applyTheme();
+        }
+
+        applyTheme() {
+            const saved = this.savedTheme() || this._themeOverride || null;
+            const light = saved === 'light' || (!saved && window.matchMedia
+                && window.matchMedia('(prefers-color-scheme: light)').matches);
+            const root = document.documentElement;
+            if (light) root.setAttribute('data-theme', 'light');
+            else root.removeAttribute('data-theme');
+            const btn = this.el.themeBtn;
+            if (btn) {
+                btn.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
+                btn.title = (light ? 'Dark mode' : 'Light mode') + ' (T)';
+            }
+            // Browser chrome follows the page's theme, not just the device's
+            document.querySelectorAll('meta[name="theme-color"]').forEach(m => { m.content = light ? '#ece2cc' : '#0b0f1a'; });
+            const pick = saved || 'system';
+            document.querySelectorAll('#themeSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeOpt === pick)));
+            // The partner minimap is painted with the chrome colors
+            if (this.coop.partnerState) this.renderPartnerMinimap(this.coop.partnerState);
         }
 
         centerCamera() {
@@ -835,6 +948,12 @@
                 if (e.key === 'p' || e.key === 'P') {
                     this.togglePause();
                 }
+                if (e.key === 'a' || e.key === 'A') this.toggleAutoCollect();
+                if (e.key === 'r' || e.key === 'R') this.rally();
+                if (e.key === 'm' || e.key === 'M') this.toggleSound();
+                if (e.key === 't' || e.key === 'T') this.setTheme(this.isLight() ? 'dark' : 'light');
+                if (e.key === '?') this.showShortcuts();
+                if (e.key >= '1' && e.key <= '4') this.showTab(['build', 'army', 'coop', 'stats'][e.key - 1]);
             });
         }
 
@@ -927,7 +1046,7 @@
             if (this.hoverBuilding && !this.buildMode && !this.spellMode && !this.moveMode) {
                 const b = this.hoverBuilding;
                 const def = BLD[b.type];
-                const parts = [`<strong>${def.name}</strong> <span style="color:#a7a08a">Lv ${b.level}</span>`];
+                const parts = [`<strong>${def.name}</strong> <span class="tip-dim">Lv ${b.level}</span>`];
                 parts.push(`HP ${Math.ceil(b.hp)}/${b.maxHp}`);
                 if (def.production) {
                     const p = def.production(b.level);
@@ -945,7 +1064,7 @@
                     if (p.rallyMult) parts.push(`+${(p.rallyMult*100).toFixed(0)}% rally heal`);
                     if (p.waveGems) parts.push(`+${p.waveGems} gem/wave`);
                 }
-                parts.push(`<span style="color:#6b6854">Shift+click = upgrade · Right-click = menu · Drag = move</span>`);
+                parts.push(`<span class="tip-help">Shift+click = upgrade · Right-click = menu · Drag = move</span>`);
                 tip.innerHTML = parts.join('<br>');
                 tip.classList.add('visible');
                 this._hoverLevel = b.level;
@@ -1690,7 +1809,7 @@
                 // Flying enemies float much higher above the ground + bob
                 e.y = p.y - (e.flying ? 40 + Math.sin(e.wobble * 0.5) * 6 : 10);
             }
-            this.enemies = this.enemies.filter(e => e.hp > 0);
+            compact(this.enemies, e => e.hp > 0);
         }
 
         projectileTick(dt) {
@@ -1709,7 +1828,7 @@
                 p.ttl -= dt;
                 if (p.ttl <= 0) p.dead = true;
             }
-            this.projectiles = this.projectiles.filter(p => !p.dead);
+            compact(this.projectiles, p => !p.dead);
         }
 
         // ---------- XP / Level ----------
@@ -1749,17 +1868,33 @@
 
         // ---------- Main loop ----------
         loop(ts) {
-            const dt = Math.min((ts - this.lastTime) / 1000, 0.1);
+            let elapsed = (ts - this.lastTime) / 1000;
             this.lastTime = ts;
             // When paused (manual, tab hidden, or game-over), skip sim tick but
             // keep rendering so the UI stays responsive to the user.
-            if (!this.paused) this.update(dt);
+            if (!this.paused && elapsed > 0) {
+                // A long frame used to be clamped to 0.1s, so a throttled tab
+                // (window covered, laptop lid half shut) ran the kingdom slow
+                // and lost most of its production. A short gap is now simulated
+                // in 0.1s steps so timers and raids stay on the clock, and a
+                // long one is paid out like time away instead of being dropped.
+                if (elapsed > CFG.catchUpMaxSec) {
+                    this.applyOfflineEarnings(elapsed - CFG.catchUpMaxSec);
+                    elapsed = CFG.catchUpMaxSec;
+                }
+                while (elapsed > 0) {
+                    const dt = Math.min(elapsed, 0.1);
+                    this.update(dt);
+                    elapsed -= dt;
+                }
+            }
             this.render();
             requestAnimationFrame((t) => this.loop(t));
         }
 
         update(dt) {
             this.tnow += dt;
+            this.stats.playTime += dt;
 
             // Day cycle
             this.dayTime += dt / CFG.dayLengthSec;
@@ -1817,6 +1952,7 @@
                 if (this.wave.spawnLeft <= 0 && this.enemies.length === 0) {
                     this.wave.active = false;
                     this.wave.timer = Math.max(CFG.waveMinSec, CFG.waveBaseSec - this.wave.number * 2);
+                    this.stats.wavesCleared++;
                     this.res.gems += this.waveGems;
                     this.gainXp(25 + this.wave.number * 5);
                     this.toast(`Wave ${this.wave.number} cleared! +${this.waveGems} ♦`, 'success');
@@ -1843,14 +1979,14 @@
                 p.vy += 280 * dt;
                 p.life -= dt;
             }
-            this.particles = this.particles.filter(p => p.life > 0);
+            compact(this.particles, alive);
 
             // Popups
             for (const p of this.popups) {
                 p.y -= 40 * dt;
                 p.life -= dt;
             }
-            this.popups = this.popups.filter(p => p.life > 0);
+            compact(this.popups, alive);
 
             // Alert timer
             if (this.alertTimer > 0) {
@@ -1917,17 +2053,23 @@
                 ctx.setLineDash([]);
             }
 
-            // Depth-sorted draw list
-            const draws = [];
+            // Depth-sorted draw list. The array is reused and each entity carries
+            // its own depth, so there are no per-frame closures to collect.
+            const draws = this._draws;
+            draws.length = 0;
             for (const b of this.buildings) {
-                const def = BLD[b.type];
-                draws.push({ depth: b.tx + b.ty + def.size, fn: () => this.drawBuilding(ctx, b) });
+                b._depth = b.tx + b.ty + BLD[b.type].size;
+                draws.push(b);
             }
             for (const e of this.enemies) {
-                draws.push({ depth: e.tx + e.ty + 0.5, fn: () => this.drawEnemy(ctx, e) });
+                e._depth = e.tx + e.ty + 0.5;
+                draws.push(e);
             }
-            draws.sort((a, b) => a.depth - b.depth);
-            for (const d of draws) d.fn();
+            draws.sort((a, b) => a._depth - b._depth);
+            for (const d of draws) {
+                if (d.kind) this.drawEnemy(ctx, d);   // only enemies have a kind
+                else this.drawBuilding(ctx, d);
+            }
 
             // Projectiles on top
             for (const p of this.projectiles) this.drawProjectile(ctx, p);
@@ -2011,8 +2153,13 @@
                 if (t >= colors[i].t && t <= colors[i+1].t) { a = colors[i]; b = colors[i+1]; break; }
             }
             const f = (t - a.t) / (b.t - a.t || 1);
-            const top = mixColor(a.top, b.top, f);
-            const bot = mixColor(a.bot, b.bot, f);
+            // The sky only moves a hair per frame; mix the hex strings once per step of the day
+            const q = Math.round(t * 2000);
+            if (!this._skyMix || this._skyMix.q !== q) {
+                this._skyMix = { q, top: mixColor(a.top, b.top, f), bot: mixColor(a.bot, b.bot, f) };
+            }
+            const top = this._skyMix.top;
+            const bot = this._skyMix.bot;
             // Cache gradient — recompute only when colors change appreciably
             if (!this._skyCache || this._skyCache.top !== top || this._skyCache.bot !== bot || this._skyCache.h !== this.vh) {
                 const g = ctx.createLinearGradient(0, 0, 0, this.vh);
@@ -2031,15 +2178,21 @@
                 const isNight = t < 0.25 || t > 0.75;
                 if (!isNight) {
                     ctx.save();
-                    const gg = ctx.createRadialGradient(cx, cy, 0, cx, cy, 60);
-                    gg.addColorStop(0, 'rgba(255, 230, 160, 0.9)');
-                    gg.addColorStop(0.3, 'rgba(255, 180, 100, 0.5)');
-                    gg.addColorStop(1, 'rgba(255, 120, 40, 0)');
-                    ctx.fillStyle = gg;
-                    ctx.fillRect(cx - 60, cy - 60, 120, 120);
+                    // One gradient built at the origin and moved into place,
+                    // instead of a new gradient object every frame
+                    if (!this._sunGrad) {
+                        const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, 60);
+                        gg.addColorStop(0, 'rgba(255, 230, 160, 0.9)');
+                        gg.addColorStop(0.3, 'rgba(255, 180, 100, 0.5)');
+                        gg.addColorStop(1, 'rgba(255, 120, 40, 0)');
+                        this._sunGrad = gg;
+                    }
+                    ctx.translate(cx, cy);
+                    ctx.fillStyle = this._sunGrad;
+                    ctx.fillRect(-60, -60, 120, 120);
                     ctx.fillStyle = '#ffe3a1';
                     ctx.beginPath();
-                    ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+                    ctx.arc(0, 0, 14, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.restore();
                 } else {
@@ -2417,9 +2570,17 @@
             }
             if (ok) {
                 ctx.globalAlpha = 0.65;
-                this.drawBuilding(ctx, { tx, ty, type: this.buildMode, level: 1, hp: 100, maxHp: 100, animScale: 1, ghost: true });
+                this.drawBuilding(ctx, this.ghostFor(this.buildMode, tx, ty, 1, 100, 100));
                 ctx.globalAlpha = 1;
             }
+        }
+
+        // The build/move previews are drawn every frame: fill in one reusable object
+        ghostFor(type, tx, ty, level, hp, maxHp) {
+            const g = this._ghost || (this._ghost = { ghost: true, animScale: 1 });
+            g.type = type; g.tx = tx; g.ty = ty;
+            g.level = level; g.hp = hp; g.maxHp = maxHp;
+            return g;
         }
 
         drawMoveGhost(ctx) {
@@ -2458,12 +2619,8 @@
             if (ok) {
                 ctx.save();
                 ctx.globalAlpha = 0.9;
-                this.drawBuilding(ctx, {
-                    tx, ty, type: this.moveMode.type,
-                    level: this.moveMode.level,
-                    hp: this.moveMode.hp, maxHp: this.moveMode.maxHp,
-                    animScale: 1, ghost: true,
-                });
+                const m = this.moveMode;
+                this.drawBuilding(ctx, this.ghostFor(m.type, tx, ty, m.level, m.hp, m.maxHp));
                 ctx.restore();
             }
         }
@@ -2541,14 +2698,22 @@
                 // wash on the roof. Shifts are aggressive enough that you can
                 // tell a Lv 1 from a Lv 5 at a glance.
                 const lvl = b.level || 1;
-                const maxLv = def.maxLevel || 20;
-                const progress = Math.min(1, (lvl - 1) / Math.max(1, maxLv - 1));
-                // Darken right face toward a rich shadow color (up to 55%)
-                const c1 = progress > 0 ? mixColor(def.color1, '#0a0410', progress * 0.55) : def.color1;
-                // Left face shifts toward a warm ember tone as buildings grow
-                const c2 = progress > 0 ? mixColor(def.color2, '#4a1808', progress * 0.45) : def.color2;
-                // Roof shifts toward a brilliant gold tone
-                const rf = progress > 0 ? mixColor(def.roof, '#ffc857', Math.min(0.8, progress * 0.85)) : def.roof;
+                // The three mixed colors only change on upgrade, so they live on
+                // the building instead of being re-mixed from hex every frame
+                if (!b._col || b._col.level !== lvl || b._col.type !== b.type) {
+                    const maxLv = def.maxLevel || 20;
+                    const progress = Math.min(1, (lvl - 1) / Math.max(1, maxLv - 1));
+                    b._col = {
+                        level: lvl, type: b.type,
+                        // Darken right face toward a rich shadow color (up to 55%)
+                        c1: progress > 0 ? mixColor(def.color1, '#0a0410', progress * 0.55) : def.color1,
+                        // Left face shifts toward a warm ember tone as buildings grow
+                        c2: progress > 0 ? mixColor(def.color2, '#4a1808', progress * 0.45) : def.color2,
+                        // Roof shifts toward a brilliant gold tone
+                        rf: progress > 0 ? mixColor(def.roof, '#ffc857', Math.min(0.8, progress * 0.85)) : def.roof,
+                    };
+                }
+                const { c1, c2, rf } = b._col;
 
                 // Right face
                 ctx.fillStyle = c1;
@@ -3394,14 +3559,20 @@
                 ctx.lineTo(p.x + dx / d * 8, p.y + dy / d * 8);
                 ctx.stroke();
             } else if (p.type === 'wizard') {
-                const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 8);
-                g.addColorStop(0, '#fff');
-                g.addColorStop(0.4, '#5cd8ff');
-                g.addColorStop(1, 'rgba(92,216,255,0)');
-                ctx.fillStyle = g;
+                if (!this._orbGrad) {
+                    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 8);
+                    g.addColorStop(0, '#fff');
+                    g.addColorStop(0.4, '#5cd8ff');
+                    g.addColorStop(1, 'rgba(92,216,255,0)');
+                    this._orbGrad = g;
+                }
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.fillStyle = this._orbGrad;
                 ctx.beginPath();
-                ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+                ctx.arc(0, 0, 8, 0, Math.PI * 2);
                 ctx.fill();
+                ctx.restore();
             } else if (p.type === 'tesla') {
                 // Lightning bolt segment
                 ctx.strokeStyle = '#a6c8ff';
@@ -3546,14 +3717,13 @@
             this.moveMode = null;
             this.spellMode = false;
             this.updateCanvasCursor();
-            document.getElementById('actCancel').style.display = type ? 'flex' : 'none';
             this.buildMenu();
         }
 
         updateCanvasCursor() {
-            const c = document.getElementById('gameCanvas');
-            c.classList.toggle('building', !!this.buildMode || !!this.moveMode || !!this.spellMode);
-            document.getElementById('actCancel').style.display = (this.buildMode || this.moveMode || this.spellMode) ? 'flex' : 'none';
+            const busy = !!(this.buildMode || this.moveMode || this.spellMode);
+            this.canvas.classList.toggle('building', busy);
+            this.el.cancel.hidden = !busy;
         }
 
         bindUI() {
@@ -3576,20 +3746,15 @@
             if (pauseBtn) pauseBtn.addEventListener('click', () => { this.audio.click(); this.togglePause(); });
 
             const autoBtn = document.getElementById('actAutoCollect');
-            if (autoBtn) autoBtn.addEventListener('click', () => {
-                this.audio.click();
-                this.autoCollect = !this.autoCollect;
-                this.syncToggles();
-                this.toast(this.autoCollect ? 'Auto-collect enabled' : 'Auto-collect disabled', 'success');
-            });
+            if (autoBtn) autoBtn.addEventListener('click', () => { this.audio.click(); this.toggleAutoCollect(); });
 
             const soundBtn = document.getElementById('btnSound');
-            if (soundBtn) soundBtn.addEventListener('click', () => {
-                this.audio.muted = !this.audio.muted;
-                this.syncToggles();
-                this.audio.click();
-                this.save();
+            if (soundBtn) soundBtn.addEventListener('click', () => this.toggleSound());
+            document.querySelectorAll('#notationSeg .seg-btn').forEach(b => {
+                b.addEventListener('click', () => { this.audio.click(); this.setNotation(b.dataset.notation); });
             });
+            const keysBtn = document.getElementById('btnShortcuts');
+            if (keysBtn) keysBtn.addEventListener('click', () => { this.audio.click(); this.showShortcuts(); });
             this.syncToggles(); // the save may have turned these on
 
             // Auto-pause when the tab becomes hidden so raiders don't attack
@@ -3643,7 +3808,7 @@
                 this.showConfirm({
                     title: 'Reset Kingdom',
                     icon: '⚠',
-                    body: 'Erase all progress and start a new kingdom?<br><br><span style="color:#ff9a6b">This cannot be undone.</span>',
+                    body: 'Erase all progress and start a new kingdom?<br><br><span class="warn-text">This cannot be undone.</span>',
                     yesText: 'Erase Everything',
                     noText: 'Keep Playing',
                     danger: true,
@@ -3670,9 +3835,95 @@
             }
             const soundBtn = document.getElementById('btnSound');
             if (soundBtn) {
-                soundBtn.textContent = this.audio.muted ? 'Sound: Off' : 'Sound: On';
+                soundBtn.textContent = this.audio.muted ? 'Off' : 'On';
                 soundBtn.setAttribute('aria-pressed', String(!this.audio.muted));
             }
+            document.querySelectorAll('#notationSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.notation === notation)));
+        }
+
+        toggleAutoCollect() {
+            this.autoCollect = !this.autoCollect;
+            this.syncToggles();
+            this.toast(this.autoCollect ? 'Auto-collect enabled' : 'Auto-collect disabled', 'success');
+        }
+
+        toggleSound() {
+            this.audio.muted = !this.audio.muted;
+            this.syncToggles();
+            this.audio.click();
+            this.save();
+        }
+
+        setNotation(n) {
+            if (!NOTATIONS.includes(n) || n === notation) return;
+            notation = n;
+            this.syncToggles();
+            this.buildMenu(true);   // the costs on the cards are baked into their markup
+            this.updateUI();
+            if (this.modalBuilding) this.openBuildingModal(this.modalBuilding);
+            this.save();
+        }
+
+        // Open the shared modal with something that isn't a building (help, welcome back)
+        openPlainModal(html) {
+            const modal = this.el.modal;
+            if (!modal.classList.contains('open')) this._modalReturnFocus = document.activeElement;
+            this.modalBuilding = null;
+            this._modalUpCost = null;
+            this.el.modalBody.innerHTML = html;
+            modal.classList.add('open');
+            document.getElementById('modalClose').focus({ preventScroll: true });
+        }
+
+        showShortcuts() {
+            // Static text only; nothing here comes from a save or a peer
+            const rows = [
+                [['Space'], 'Collect from every mine and well'],
+                [['P'], 'Pause / resume'],
+                [['W'], 'War Cry'],
+                [['L'], 'Lightning spell, then click a tile'],
+                [['A'], 'Auto-collect on / off'],
+                [['R'], 'Rally defenses'],
+                [['M'], 'Sound on / off'],
+                [['T'], 'Light / dark theme'],
+                [['1', '2', '3', '4'], 'Build · Army · Co-op · Stats tab'],
+                [['+', '−'], 'Zoom in / out'],
+                [['0'], 'Reset the view'],
+                [['Esc'], 'Cancel a build, move or spell · close a menu'],
+                [['Shift + click'], 'Upgrade a building without the menu'],
+                [['Right-click', 'long-press'], 'Building menu'],
+                [['Drag'], 'Move a building'],
+                [['?'], 'This list'],
+            ];
+            this.openPlainModal(`
+                <h2 id="modalTitle">Keyboard</h2>
+                <div class="subtitle">Shortcuts work whenever you're not typing in a box.</div>
+                <table class="keys">${rows.map(([keys, what]) =>
+                    `<tr><td>${keys.map(k => `<kbd>${k}</kbd>`).join('')}</td><td>${what}</td></tr>`).join('')}</table>
+            `);
+        }
+
+        // Breakdown of what came in while the tab was closed or hidden. A toast
+        // used to carry this and was gone in two seconds; longer absences get
+        // a dialog the player can actually read.
+        showOfflineSummary(sec, got, capped) {
+            const boxes = [['gold', 'Gold', '◈'], ['elixir', 'Elixir', '❂'], ['dark', 'Dark Elixir', '✦']]
+                .filter(([k]) => got[k] >= 1)
+                .map(([k, name, sym]) => `<div class="stat-box ${k}"><div class="label">${name}</div><div class="value">+${fmt(got[k])} ${sym}</div></div>`)
+                .join('');
+            const note = capped
+                ? 'Earnings stop after 4 hours away, and never go past your storage.'
+                : 'Time away pays half the live rate, up to 4 hours, within your storage.';
+            this.openPlainModal(`
+                <h2 id="modalTitle">Welcome back</h2>
+                <div class="subtitle">You were away for ${fmtDuration(sec)}. ${boxes ? 'The kingdom kept working:' : 'Your storage was already full, so nothing new came in.'}</div>
+                ${boxes ? `<div class="stat-grid away-grid">${boxes}</div>` : ''}
+                <div class="modal-hint">${note}</div>
+                <div class="modal-actions center"><button class="btn primary" id="awayOk">Back to the kingdom</button></div>
+            `);
+            const ok = document.getElementById('awayOk');
+            ok.addEventListener('click', () => { this.audio.click(); this.closeModal(); });
+            ok.focus({ preventScroll: true });
         }
 
         collectAll(quiet = false) {
@@ -3789,7 +4040,7 @@
                         <div class="collect-label">Tap to Collect</div>
                         <div class="collect-preview">${collectPreview}</div>
                         <button class="btn collect" id="collectBtn">◉ Collect Burst</button>
-                        <div class="hint" style="margin-top:6px">Keep clicking for combo multipliers</div>
+                        <div class="hint mt-6">Keep clicking for combo multipliers</div>
                     </div>
                 ` : ''}
                 ${canUp ? `
@@ -3844,7 +4095,7 @@
                 const refund = {};
                 for (const k in def.baseCost) refund[k] = Math.floor(def.baseCost[k] * 0.5);
                 const refundStr = Object.entries(refund).map(([k, v]) => `${fmt(v)} ${this.resSymbol(k)}`).join(' · ');
-                const lostLevels = b.level > 1 ? `<br><br><span style="color:#ff9a6b">Its ${b.level - 1} upgrade${b.level > 2 ? 's' : ''} won't be refunded.</span>` : '';
+                const lostLevels = b.level > 1 ? `<br><br><span class="warn-text">Its ${b.level - 1} upgrade${b.level > 2 ? 's' : ''} won't be refunded.</span>` : '';
                 this.closeModal();
                 this.showConfirm({
                     title: `Sell ${def.name}?`,
@@ -3879,10 +4130,11 @@
         }
 
         updateUI() {
-            document.getElementById('val-gold').textContent   = fmt(this.res.gold);
-            document.getElementById('val-elixir').textContent = fmt(this.res.elixir);
-            document.getElementById('val-dark').textContent   = fmt(this.res.dark);
-            document.getElementById('val-gems').textContent   = fmt(this.res.gems);
+            const el = this.el;
+            setText(el.gold, fmt(this.res.gold));
+            setText(el.elixir, fmt(this.res.elixir));
+            setText(el.dark, fmt(this.res.dark));
+            setText(el.gems, fmt(this.res.gems));
 
             // Keep an open building menu's Upgrade button in sync as resources come in
             if (this.modalBuilding && this._modalUpCost) {
@@ -3893,65 +4145,59 @@
             // Show what's actually coming in right now, night bonus included
             const mult = this.rateMult();
             const moon = this.isNight() ? ' 🌙' : '';
-            document.getElementById('rate-gold').textContent   = `+${fmtRate(this.rates.gold * mult)}/s${moon}`;
-            document.getElementById('rate-elixir').textContent = `+${fmtRate(this.rates.elixir * mult)}/s`;
-            document.getElementById('rate-dark').textContent   = `+${fmtRate(this.rates.dark * mult, 2)}/s`;
+            setText(el.rateGold, `+${fmtRate(this.rates.gold * mult)}/s${moon}`);
+            setText(el.rateElixir, `+${fmtRate(this.rates.elixir * mult)}/s`);
+            setText(el.rateDark, `+${fmtRate(this.rates.dark * mult, 2)}/s`);
 
-            document.getElementById('playerLevel').textContent = this.player.level;
+            setText(el.level, String(this.player.level));
             const xpNeeded = CFG.xpToLevel(this.player.level);
-            document.getElementById('playerXp').textContent = `${Math.floor(this.player.xp)} / ${xpNeeded} XP`;
-            const ring = document.getElementById('xpRing');
+            setText(el.xp, `${Math.floor(this.player.xp)} / ${xpNeeded} XP`);
             const ringLen = 100.5;
-            ring.style.strokeDashoffset = ringLen * (1 - this.player.xp / xpNeeded);
+            el.ring.style.strokeDashoffset = ringLen * (1 - this.player.xp / xpNeeded);
 
-            const wt = document.getElementById('waveTimer');
-            const wi = document.getElementById('waveInfo');
             if (this.wave.active) {
-                wt.textContent = `${this.enemies.length} left`;
-                wt.classList.add('danger');
-                wi.textContent = `Wave ${this.wave.number} · In progress`;
+                setText(el.waveTimer, `${this.enemies.length} left`);
+                el.waveTimer.classList.add('danger');
+                setText(el.waveInfo, `Wave ${this.wave.number} · In progress`);
             } else {
-                wt.textContent = fmtTime(this.wave.timer);
-                wt.classList.toggle('danger', this.wave.timer < 10);
-                wi.textContent = `Wave ${this.wave.number + 1} · Goblins`;
+                setText(el.waveTimer, fmtTime(this.wave.timer));
+                el.waveTimer.classList.toggle('danger', this.wave.timer < 10);
+                setText(el.waveInfo, `Wave ${this.wave.number + 1} · Goblins`);
             }
 
             const hours = Math.floor(this.dayTime * 24);
             const mins = Math.floor((this.dayTime * 24 - hours) * 60);
-            document.getElementById('dayTime').textContent = `${hours.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}`;
-            document.getElementById('dayCount').textContent = `Day ${this.dayCount}`;
-            document.getElementById('dayLabel').textContent = this.isNight() ? 'Night · +25%' : 'Day';
+            setText(el.dayTime, `${hours.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}`);
+            setText(el.dayCount, `Day ${this.dayCount}`);
+            setText(el.dayLabel, this.isNight() ? 'Night · +25%' : 'Day');
 
             // Zoom indicator
-            const zEl = document.getElementById('zoomVal');
-            if (zEl) zEl.textContent = `${Math.round(this.cam.zoom * 100)}%`;
+            setText(el.zoom, `${Math.round(this.cam.zoom * 100)}%`);
 
             // Combo indicator
-            const cEl = document.getElementById('comboLabel');
-            if (cEl) {
+            if (el.combo) {
                 if (this.combo.count >= 3) {
-                    cEl.textContent = `COMBO x${this.combo.mult}`;
-                    cEl.style.opacity = '1';
+                    setText(el.combo, `COMBO x${this.combo.mult}`);
+                    el.combo.style.opacity = '1';
                 } else {
-                    cEl.style.opacity = '0';
+                    el.combo.style.opacity = '0';
                 }
             }
 
             // War Cry button state
-            const wcBtn = document.getElementById('actWarCry');
+            const wcBtn = el.warCry;
             if (wcBtn) {
-                const wcLabel = wcBtn.querySelector('.action-label');
                 if (this.warCry.active) {
                     wcBtn.classList.add('active');
                     wcBtn.classList.remove('on-cooldown');
-                    if (wcLabel) wcLabel.textContent = `War Cry ${Math.ceil(this.warCry.timeLeft)}s`;
+                    setText(el.warCryLabel, `War Cry ${Math.ceil(this.warCry.timeLeft)}s`);
                 } else if (this.warCry.cooldown > 0) {
                     wcBtn.classList.remove('active');
                     wcBtn.classList.add('on-cooldown');
-                    if (wcLabel) wcLabel.textContent = `Cooldown ${Math.ceil(this.warCry.cooldown)}s`;
+                    setText(el.warCryLabel, `Cooldown ${Math.ceil(this.warCry.cooldown)}s`);
                 } else {
                     wcBtn.classList.remove('active', 'on-cooldown');
-                    if (wcLabel) wcLabel.textContent = 'War Cry';
+                    setText(el.warCryLabel, 'War Cry');
                 }
             }
 
@@ -4007,6 +4253,8 @@
                 { label: 'Max Combo', val: 'x' + this.stats.maxCombo },
                 { label: 'Spells Cast', val: this.stats.spells },
                 { label: 'Total Gold Earned', val: fmt(this.stats.goldEarned) },
+                { label: 'Waves Cleared', val: this.stats.wavesCleared },
+                { label: 'Time Played', val: fmtDuration(this.stats.playTime) },
                 { label: 'Current Wave', val: this.wave.number },
                 { label: 'Current Day', val: this.dayCount },
                 { label: 'Storage Capacity', val: fmt(this.cap()) },
@@ -4188,10 +4436,12 @@
 
         // ---------- Co-op Multiplayer ----------
         initCoop() {
+            this.bindCoopUI();
             if (typeof Peer === 'undefined') {
                 console.warn('PeerJS not loaded, co-op disabled');
                 const codeEl = document.getElementById('gameCode');
                 if (codeEl) codeEl.textContent = 'OFFLINE';
+                this.setRelayStatus('offline', 'Co-op offline — the PeerJS script did not load');
                 return;
             }
 
@@ -4206,34 +4456,95 @@
                 const peer = new Peer('ember_' + code, { debug: 0 });
 
                 peer.on('open', () => {
-                    console.log('Co-op ready, code:', code);
+                    this.coop.reconnectTries = 0;
+                    this.setRelayStatus('ready', 'Ready — share your code');
                 });
 
                 peer.on('connection', (conn) => {
                     this.handleIncomingConnection(conn);
                 });
 
+                // Lost the signalling server (sleep, a network change). A partner
+                // link already up is direct WebRTC and keeps going; new ones
+                // can't be made until we're back, so get back.
+                peer.on('disconnected', () => {
+                    if (this.coop.peer !== peer) return;
+                    this.setRelayStatus('lost', 'Relay lost — reconnecting…');
+                    this.scheduleReconnect(peer);
+                });
+
+                peer.on('close', () => {
+                    if (this.coop.peer === peer && !this.coop.reconnectTimer) this.setRelayStatus('offline', 'Co-op offline');
+                });
+
                 peer.on('error', (err) => {
-                    if (err.type === 'unavailable-id') {
+                    const type = err && err.type;
+                    if (type === 'unavailable-id') {
+                        // Someone else holds this code right now: roll a new one
                         this.coop.code = genCode();
                         if (codeEl) codeEl.textContent = this.coop.code;
+                        this.coop.peer = null;
                         peer.destroy();
                         this.coop.peer = createPeer(this.coop.code);
+                    } else if (type === 'peer-unavailable') {
+                        // The code we tried isn't online. PeerJS reports this on
+                        // the Peer, not the connection, so the 12s timeout used
+                        // to be the only feedback.
+                        clearTimeout(this._connectTimer);
+                        this.audio.error();
+                        this.toast('Nobody is online with that code', 'error');
+                    } else if (type === 'browser-incompatible') {
+                        this.setRelayStatus('offline', 'Co-op needs a browser with WebRTC');
+                    } else if (type === 'network' || type === 'server-error' || type === 'socket-error' || type === 'socket-closed') {
+                        this.setRelayStatus('error', 'Relay unreachable — co-op offline');
+                        this.scheduleReconnect(peer);
+                    } else if (type === 'webrtc') {
+                        clearTimeout(this._connectTimer);
+                        this.toast('Connection failed — the two networks could not link up', 'error');
                     } else {
-                        console.warn('Peer error:', err.type, err.message);
+                        console.warn('Peer error:', type, err && err.message);
                     }
                 });
 
                 return peer;
             };
+            this._createPeer = createPeer;
 
             try {
                 this.coop.peer = createPeer(this.coop.code);
             } catch (e) {
                 console.warn('Co-op init failed:', e);
+                this.setRelayStatus('offline', 'Co-op offline — this browser cannot open a peer link');
             }
+        }
 
-            this.bindCoopUI();
+        // Try the relay again with backoff (2s, 4s, 8s ... up to 30s, five tries).
+        // A peer that never got through was torn down by PeerJS, so it needs
+        // a fresh object; one that was connected before can just reconnect.
+        scheduleReconnect(peer) {
+            if (this.coop.reconnectTimer || this.coop.peer !== peer || !this._createPeer) return;
+            const tries = this.coop.reconnectTries++;
+            if (tries >= 5) {
+                this.setRelayStatus('error', 'Relay unreachable — reload the page to retry co-op');
+                return;
+            }
+            const wait = Math.min(30000, 2000 * Math.pow(2, tries));
+            this.coop.reconnectTimer = setTimeout(() => {
+                this.coop.reconnectTimer = null;
+                if (this.coop.peer !== peer) return;
+                this.setRelayStatus('lost', 'Reconnecting to relay…');
+                if (peer.destroyed) {
+                    this.coop.peer = this._createPeer(this.coop.code);
+                } else if (peer.disconnected) {
+                    try { peer.reconnect(); } catch (e) { this.coop.peer = this._createPeer(this.coop.code); }
+                }
+            }, wait);
+        }
+
+        setRelayStatus(state, text) {
+            this.coop.relay = state;
+            this.coop.relayText = text;
+            this.updateCoopUI();
         }
 
         bindCoopUI() {
@@ -4253,8 +4564,8 @@
             if (connectBtn && codeInput) {
                 connectBtn.addEventListener('click', () => {
                     const code = codeInput.value.trim().toUpperCase();
-                    if (code.length !== 6) {
-                        this.toast('Enter a 6-character code', 'warn');
+                    if (!/^[A-Z0-9]{6}$/.test(code)) {
+                        this.toast('Codes are 6 letters and digits', 'warn');
                         this.audio.error();
                         return;
                     }
@@ -4298,45 +4609,73 @@
         }
 
         connectToPartner(code) {
-            if (!this.coop.peer) { this.toast('Co-op not available', 'error'); return; }
+            const peer = this.coop.peer;
+            if (!peer) { this.toast('Co-op not available', 'error'); return; }
             if (this.coop.connected) { this.toast('Already connected', 'warn'); return; }
+            if (peer.destroyed || peer.disconnected) {
+                this.toast('Not on the relay yet — trying to reconnect', 'warn');
+                this.scheduleReconnect(peer);
+                return;
+            }
 
             this.toast('Connecting...', 'warn');
-            const conn = this.coop.peer.connect('ember_' + code, {
-                metadata: { name: this.player.name, level: this.player.level, code: this.coop.code }
-            });
+            let conn = null;
+            try {
+                conn = peer.connect('ember_' + code, {
+                    metadata: { name: this.player.name, level: this.player.level, code: this.coop.code }
+                });
+            } catch (e) { /* handled below */ }
+            if (!conn) { this.toast('Could not start the connection', 'error'); return; }
 
-            const timeout = setTimeout(() => {
+            clearTimeout(this._connectTimer);
+            this._connectTimer = setTimeout(() => {
                 if (!this.coop.connected) {
-                    this.toast('Connection timed out — is partner online?', 'error');
-                    conn.close();
+                    this.toast('Connection timed out — is your partner online?', 'error');
+                    try { conn.close(); } catch (_) {}
                 }
             }, 12000);
 
             conn.on('open', () => {
-                clearTimeout(timeout);
+                clearTimeout(this._connectTimer);
                 this.setupConnection(conn);
                 conn.send({ type: 'hello', name: this.player.name, level: this.player.level });
             });
 
             conn.on('error', () => {
-                clearTimeout(timeout);
+                clearTimeout(this._connectTimer);
                 this.toast('Connection failed — check the code', 'error');
             });
         }
 
         handleIncomingConnection(conn) {
-            if (this.coop.connected) {
-                conn.send({ type: 'busy' });
-                conn.close();
+            if (this.coop.connected || this.coop.pendingInvite) {
+                // A data channel can't carry anything until it opens, so the old
+                // send-then-close here never actually told them we were busy
+                conn.on('open', () => {
+                    try { conn.send({ type: 'busy' }); } catch (_) {}
+                    setTimeout(() => { try { conn.close(); } catch (_) {} }, 300);
+                });
                 return;
             }
-            const meta = conn.metadata || {};
+            // Metadata is whatever the other browser put there
+            const meta = (conn.metadata && typeof conn.metadata === 'object') ? conn.metadata : {};
+            const name = cleanStr(meta.name, 24, 'A player');
+            const level = cleanInt(meta.level, 1, 1, 999);
             this.coop.pendingInvite = conn;
 
             conn.on('open', () => {
-                this.showInviteNotification(meta.name || 'A player', meta.level || 1);
+                if (this.coop.pendingInvite === conn) this.showInviteNotification(name, level);
             });
+
+            // They gave up, or their tab closed, before we answered
+            const withdrawn = () => {
+                if (this.coop.pendingInvite !== conn) return;
+                this.coop.pendingInvite = null;
+                this.hideInviteNotification();
+                this.toast('Invite withdrawn', 'warn');
+            };
+            conn.on('close', withdrawn);
+            conn.on('error', withdrawn);
 
             // Auto-decline after 30 seconds
             setTimeout(() => {
@@ -4419,12 +4758,15 @@
             this.handleCoopDisconnect();
         }
 
+        // Everything here arrived over a data channel from another browser.
+        // Only the shape we expect gets through, every number is clamped and
+        // every string is cut short, and it only ever lands via textContent.
         handleCoopData(data) {
-            if (!data || !data.type) return;
+            if (!data || typeof data !== 'object' || typeof data.type !== 'string') return;
 
             switch (data.type) {
                 case 'hello':
-                    this.toast(`${data.name} (Lv ${data.level}) joined!`, 'success');
+                    this.toast(`${cleanStr(data.name, 24, 'Partner')} (Lv ${cleanInt(data.level, 1, 1, 999)}) joined!`, 'success');
                     break;
                 case 'declined':
                     this.toast('Invite was declined', 'warn');
@@ -4437,14 +4779,59 @@
                 case 'goodbye':
                     this.handleCoopDisconnect();
                     break;
-                case 'state':
-                    this.coop.partnerState = data.state;
+                case 'state': {
+                    // The honest client sends one every 2s; don't let a flood redraw the panel
+                    const now = performance.now();
+                    if (now - this.coop.lastStateAt < 400) return;
+                    this.coop.lastStateAt = now;
+                    const s = this.sanitizePeerState(data.state);
+                    if (!s) return;
+                    this.coop.partnerState = s;
                     this.updatePartnerPanel();
                     break;
+                }
                 case 'gift':
-                    this.receiveGift(data.resource, data.amount, data.from);
+                    this.receiveGift(data.resource, data.amount, cleanStr(data.from, 24, 'Your partner'));
                     break;
             }
+        }
+
+        // Copy only the fields the partner panel draws, each checked, into a fresh object
+        sanitizePeerState(s) {
+            if (!s || typeof s !== 'object') return null;
+            const res = (s.res && typeof s.res === 'object') ? s.res : {};
+            const wave = (s.wave && typeof s.wave === 'object') ? s.wave : {};
+            const buildings = [];
+            if (Array.isArray(s.buildings)) {
+                // No more entries than the grid has tiles; anything past that is junk
+                for (const b of s.buildings.slice(0, CFG.gridW * CFG.gridH)) {
+                    if (!b || typeof b !== 'object' || typeof b.type !== 'string' || !Object.hasOwn(BLD, b.type)) continue;
+                    const def = BLD[b.type];
+                    const maxHp = cleanInt(b.maxHp, 1, 1, 1e9);
+                    buildings.push({
+                        type: b.type,
+                        tx: cleanInt(b.tx, 0, 0, CFG.gridW - 1),
+                        ty: cleanInt(b.ty, 0, 0, CFG.gridH - 1),
+                        level: cleanInt(b.level, 1, 1, def.maxLevel),
+                        hp: cleanInt(b.hp, maxHp, 0, maxHp),
+                        maxHp,
+                    });
+                }
+            }
+            return {
+                name: cleanStr(s.name, 24, 'Partner'),
+                level: cleanInt(s.level, 1, 1, 999),
+                res: {
+                    gold: safeNum(Number(res.gold), 0), elixir: safeNum(Number(res.elixir), 0),
+                    dark: safeNum(Number(res.dark), 0), gems: safeNum(Number(res.gems), 0),
+                },
+                buildings,
+                wave: { number: cleanInt(wave.number, 0, 0, 1e6), active: wave.active === true, timer: safeNum(Number(wave.timer), 0, 0, 1e6) },
+                enemies: cleanInt(s.enemies, 0, 0, 999),
+                dayCount: cleanInt(s.dayCount, 1, 1, 1e9),
+                boost: s.boost === true,
+                warCry: s.warCry === true,
+            };
         }
 
         getCoopState() {
@@ -4527,16 +4914,23 @@
             const connected = this.coop.connected;
             const panel = document.getElementById('coopConnected');
             const disconnected = document.getElementById('coopDisconnected');
-            if (panel) panel.style.display = connected ? 'block' : 'none';
-            if (disconnected) disconnected.style.display = connected ? 'none' : 'block';
+            if (panel) panel.hidden = !connected;
+            if (disconnected) disconnected.hidden = connected;
 
             const codeEl = document.getElementById('gameCode');
-            if (codeEl) codeEl.textContent = this.coop.code;
+            if (codeEl && this.coop.code) codeEl.textContent = this.coop.code;
 
-            const statusEl = document.getElementById('coopStatus');
+            // While there's no partner the status line reports the relay instead
+            const statusEl = this.el.coopStatus;
             if (statusEl) {
-                statusEl.textContent = connected ? 'Connected' : 'Not Connected';
-                statusEl.className = 'coop-status ' + (connected ? 'online' : 'offline');
+                if (connected) {
+                    statusEl.textContent = 'Connected';
+                    statusEl.className = 'coop-status online';
+                } else {
+                    const cls = { connecting: 'pending', lost: 'pending', ready: 'offline', error: 'error', offline: 'error' }[this.coop.relay] || 'offline';
+                    statusEl.textContent = this.coop.relayText || 'Not Connected';
+                    statusEl.className = 'coop-status ' + cls;
+                }
             }
         }
 
@@ -4547,8 +4941,8 @@
             const nameEl = document.getElementById('partnerName');
             if (nameEl) nameEl.textContent = `${s.name} · Lv ${s.level}`;
 
-            // Partner state is untrusted (it comes from their browser), so every
-            // value goes through Number() + fmt and lands via textContent
+            // Partner state went through sanitizePeerState() on arrival; it still
+            // only ever lands via textContent
             const resEl = document.getElementById('partnerRes');
             if (resEl) {
                 const r = s.res || {};
@@ -4582,13 +4976,16 @@
             const h = canvas.height;
             const cellW = w / CFG.gridW;
             const cellH = h / CFG.gridH;
+            // Painted with the chrome colors so it matches the panel in both themes
+            const css = getComputedStyle(document.documentElement);
+            const tone = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
 
             // Background
-            ctx.fillStyle = '#0f1525';
+            ctx.fillStyle = tone('--panel-2', '#0f1525');
             ctx.fillRect(0, 0, w, h);
 
             // Grid lines
-            ctx.strokeStyle = 'rgba(255, 200, 87, 0.06)';
+            ctx.strokeStyle = tone('--line', '#2e3854');
             ctx.lineWidth = 0.5;
             for (let x = 0; x <= CFG.gridW; x++) {
                 ctx.beginPath(); ctx.moveTo(x * cellW, 0); ctx.lineTo(x * cellW, h); ctx.stroke();
@@ -4624,7 +5021,7 @@
 
                     // Town hall golden border
                     if (b.type === 'townhall') {
-                        ctx.strokeStyle = '#ffc857';
+                        ctx.strokeStyle = tone('--panel-border', '#ffc857');
                         ctx.lineWidth = 1.5;
                         ctx.strokeRect(x + 0.5, y + 0.5, bw, bh);
                     }
@@ -4633,7 +5030,7 @@
 
             // Enemy count indicator
             if (state.enemies > 0) {
-                ctx.fillStyle = 'rgba(255, 93, 93, 0.85)';
+                ctx.fillStyle = tone('--danger', '#ff5d5d');
                 ctx.font = 'bold 12px Inter, sans-serif';
                 ctx.textAlign = 'right';
                 ctx.fillText(`⚔ ${state.enemies} enemies`, w - 6, 14);
@@ -4659,6 +5056,7 @@
         // lives inside the data so old saves keep loading):
         //   v3 — original format
         //   v4 — adds settings (sound, auto-collect)
+        //   v5 — adds the number format (settings.notation)
         snapshot() {
             // Sanitize wave timer on write so the game-over sentinel never
             // leaks into persisted state. If the value is wild (destroyed
@@ -4678,7 +5076,7 @@
                 dayTime: this.dayTime,
                 dayCount: this.dayCount,
                 cam: { zoom: this.cam.zoom },
-                settings: { sound: !this.audio.muted, autoCollect: this.autoCollect },
+                settings: { sound: !this.audio.muted, autoCollect: this.autoCollect, notation },
                 // While the tab is hidden the game is frozen, so the clock for
                 // offline earnings starts when it was hidden, not when we saved
                 savedAt: (document.hidden && this._hiddenAt) || Date.now(),
@@ -4689,7 +5087,12 @@
             // Reset / import reload the page; the pagehide save must not undo them
             if (this.saveLocked) return false;
             try {
-                localStorage.setItem(CFG.saveKey, JSON.stringify(this.snapshot()));
+                const raw = JSON.stringify(this.snapshot());
+                // Keep the save before this one in a second slot, so a write that
+                // lands broken (storage full mid-write, a crash) can be undone
+                const prev = localStorage.getItem(CFG.saveKey);
+                localStorage.setItem(CFG.saveKey, raw);
+                if (prev && prev !== raw) localStorage.setItem(CFG.saveKey + '.bak', prev);
                 this._saveWarned = false;
                 return true;
             } catch (e) {
@@ -4719,38 +5122,78 @@
                 // v3 -> v4: settings didn't exist yet
                 d.settings = { sound: true, autoCollect: false };
             }
+            if (v < 5) {
+                // v4 -> v5: number format
+                if (!d.settings || typeof d.settings !== 'object') d.settings = { sound: true, autoCollect: false };
+                d.settings.notation = 'short';
+            }
             d.v = CFG.saveVersion;
             return d;
         }
 
         loadSave() {
-            let raw = null;
-            try { raw = localStorage.getItem(CFG.saveKey); } catch (e) { /* storage blocked */ }
-            this.hadSave = !!raw;
-            if (!raw) {
+            let raw = null, bak = null;
+            try {
+                raw = localStorage.getItem(CFG.saveKey);
+                bak = localStorage.getItem(CFG.saveKey + '.bak');
+            } catch (e) { /* storage blocked */ }
+            this.hadSave = !!(raw || bak);
+            if (!raw && !bak) {
                 this.placeInitial();
                 return;
             }
+            if (raw && this.tryLoad(raw)) return;
+
+            // The main save is unreadable. Keep it instead of letting the next
+            // autosave overwrite it, then fall back to the slot from one save
+            // earlier before giving up and starting fresh.
+            if (raw) { try { localStorage.setItem(CFG.saveKey + '.corrupt', raw); } catch (_) { /* ignore */ } }
+            if (bak && this.tryLoad(bak)) {
+                this.save(); // the good copy goes back into the main slot
+                setTimeout(() => this.toast('Your save was damaged, so the backup from just before it was restored.', 'warn'), 800);
+                return;
+            }
+            this.placeInitial();
+            setTimeout(() => this.toast('Your save could not be read, so a new kingdom was started. The old data was kept as a backup.', 'error'), 800);
+        }
+
+        // Parse and apply one save blob. False, with the game back to a clean
+        // slate, if it can't be used.
+        tryLoad(raw) {
             let d;
             try {
                 d = this.parseSave(raw);
             } catch (e) {
-                console.warn('Save could not be read, starting fresh', e);
-                // Keep the unreadable save instead of letting the next autosave
-                // overwrite it, so it can still be recovered by hand
-                try { localStorage.setItem(CFG.saveKey + '.corrupt', raw); } catch (_) { /* ignore */ }
-                this.placeInitial();
-                setTimeout(() => this.toast('Your save could not be read, so a new kingdom was started. The old data was kept as a backup.', 'error'), 800);
-                return;
+                console.warn('Save could not be read', e);
+                return false;
             }
             try {
                 this.applySave(d);
+                return true;
             } catch (e) {
                 // applySave checks everything, but never leave a half-loaded village
                 console.error('Load failed', e);
-                this.buildings = [];
-                this.placeInitial();
+                this.resetState();
+                return false;
             }
+        }
+
+        // Back to the constructor's starting values (after a failed load)
+        resetState() {
+            this.res = { gold: 500, elixir: 150, dark: 0, gems: 5 };
+            this.player = { level: 1, xp: 0, name: 'Chief' };
+            this.buildings = [];
+            for (const k in this.stats) this.stats[k] = 0;
+            this.achievements = {};
+            this.wave.number = 0;
+            this.wave.timer = 90;
+            this.dayTime = 0.25;
+            this.dayCount = 1;
+            this.cam.zoom = 1;
+            this.audio.muted = false;
+            this.autoCollect = false;
+            notation = 'short';
+            this.recomputeRates();
         }
 
         // Copy a parsed save into the game, checking every value on the way in
@@ -4782,6 +5225,7 @@
             const settings = d.settings || {};
             this.audio.muted = settings.sound === false;
             this.autoCollect = settings.autoCollect === true;
+            notation = NOTATIONS.includes(settings.notation) ? settings.notation : 'short';
 
             for (const s of d.buildings) {
                 if (!s || !Object.hasOwn(BLD, s.type)) continue; // unknown type (removed building)
@@ -4832,7 +5276,10 @@
             if (got.dark >= 1) parts.push(`${fmt(got.dark)} ✦`);
             const away = fmtDuration(sec) + (sec > CFG.offlineMaxSec ? ' (earnings cap at 4h)' : '');
             const anyRate = this.rates.gold + this.rates.elixir + this.rates.dark > 0;
-            if (parts.length) {
+            if (sec >= CFG.offlineSummarySec && anyRate) {
+                // Long enough that a two-second toast would be missed
+                setTimeout(() => this.showOfflineSummary(sec, got, sec > CFG.offlineMaxSec), 800);
+            } else if (parts.length) {
                 setTimeout(() => this.toast(`Away ${away}: +${parts.join(' · ')}`, 'success'), 800);
             } else if (anyRate) {
                 setTimeout(() => this.toast(`Away ${away} — storage was already full`, 'warn'), 800);
@@ -4900,14 +5347,17 @@
                 this.showConfirm({
                     title: 'Import Save',
                     icon: '⇪',
-                    body: `Load the kingdom from this file (level ${lv}, wave ${wave}, ${d.buildings.length} buildings)?<br><br><span style="color:#ff9a6b">Your current kingdom will be replaced. Export it first if you want to keep it.</span>`,
+                    body: `Load the kingdom from this file (level ${lv}, wave ${wave}, ${d.buildings.length} buildings)?<br><br><span class="warn-text">Your current kingdom will be replaced. Export it first if you want to keep it.</span>`,
                     yesText: 'Import',
                     noText: 'Cancel',
                     danger: true,
                     onYes: () => {
                         this.saveLocked = true;
                         try {
+                            // The kingdom being replaced moves to the backup slot
+                            const prev = localStorage.getItem(CFG.saveKey);
                             localStorage.setItem(CFG.saveKey, JSON.stringify(d));
+                            if (prev) localStorage.setItem(CFG.saveKey + '.bak', prev);
                         } catch (e) {
                             this.saveLocked = false;
                             this.toast('Could not write the save to browser storage', 'error');
@@ -4924,7 +5374,10 @@
         // Start over. Used by Reset and by Rebuild after the Town Hall falls.
         wipeSave() {
             this.saveLocked = true;
-            try { localStorage.removeItem(CFG.saveKey); } catch (_) { /* ignore */ }
+            try {
+                localStorage.removeItem(CFG.saveKey);
+                localStorage.removeItem(CFG.saveKey + '.bak');
+            } catch (_) { /* ignore */ }
             location.reload();
         }
     }
