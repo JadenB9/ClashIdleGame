@@ -20,11 +20,26 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
 - Day/night cycle (3 real minutes per in-game day), procedural WebAudio sound
   effects, screen-shake and combo effects
 - Saves to `localStorage` every 15 seconds and when you leave the page, with
-  a versioned format, validation on load (a broken save is set aside instead
-  of crashing or being overwritten) and Export / Import to a `.json` file
+  a versioned format and validation on load. The save before the current one
+  is kept in a backup slot, so a damaged save is restored from it instead of
+  starting over (the broken copy is set aside either way). Export / Import to
+  a `.json` file
 - Auto-pauses when the tab is hidden so raids don't happen while you're not
   looking; time away (tab closed or hidden) pays out at half rate for up to
-  4 hours, within your storage caps
+  4 hours, within your storage caps, and a "Welcome back" summary shows what
+  came in. A throttled tab (window covered, lid half shut) is simulated in
+  0.1s steps on the next frame rather than running slow
+- Light and dark themes with a sun/moon toggle in the top bar. The choice is
+  the same `localStorage.theme` key the rest of j4den.com uses, so it carries
+  across the site; nothing saved means follow the device. The map keeps its
+  own day/night lighting in both
+- Settings panel (Stats tab): sound, theme (System / Light / Dark), number
+  format (12.5K, 12,500 or 1.25e4) and a keyboard shortcut list (`?`)
+- Keyboard: Space collects, P pauses, W War Cry, L lightning, A auto-collect,
+  R rally, M mute, T theme, 1–4 switch tabs, +/− zoom, 0 resets the view
+- Co-op over PeerJS: the Co-op tab shows the relay state (ready, lost,
+  reconnecting with backoff, unreachable), an unknown code says so at once,
+  and everything a partner sends is clamped and truncated before it is drawn
 - Works on phones: long-press a building for its menu, pinch to zoom
 
 ## Running it
@@ -50,8 +65,11 @@ Cloudflare Pages then publishes at `j4den.com/clashidle`. Details in
 
 ## Layout
 
-- `public/index.html` — page shell, HUD, resource bar
+- `public/index.html` — page shell, HUD, resource bar, settings; carries a
+  `<meta>` CSP (the one inline script, the theme pre-paint, is allowed by
+  hash — recompute the sha256 if it changes)
 - `public/js/game.js` — the entire game: config, building defs, waves, AI,
-  rendering, audio, save/load
-- `public/css/style.css` — HUD styling
+  rendering, audio, save/load, co-op
+- `public/css/style.css` — HUD styling; the dark tokens live on `:root` and
+  the light ones on `:root[data-theme="light"]`
 - `server.js` — static file server + optional Socket.IO relay
