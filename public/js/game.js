@@ -262,7 +262,7 @@
         centerCamera() {
             const mid = this.worldIso(CFG.gridW / 2, CFG.gridH / 2);
             this.cam.x = this.vw / 2 - mid.x * this.cam.zoom;
-            this.cam.y = this.vh / 2 - mid.y * this.cam.zoom - 20;
+            this.cam.y = this.vh / 2 - mid.y * this.cam.zoom - (this.vw < 600 ? -90 : 20);
             this.clampCamera();
         }
 
@@ -620,6 +620,10 @@
         selectBuilding(b, quiet = false) {
             if (this.panel && this.isNarrow && this.isNarrow()) this.closePanel();
             this.selected = b;
+            if (this.vw < 600) {
+                const c = this.centerOf(b), sy = this.cam.y + c.y * this.cam.zoom;
+                if (sy > this.vh * 0.42) { this.cam.y += this.vh * 0.3 - sy; this._camMoved = true; this.clampCamera(); }
+            }
             this.selPulse = 1;
             if (!quiet) this.audio.click();
             this.refreshSelection();
@@ -1537,6 +1541,7 @@
         gameOver() {
             if (this.gameOverShown) return;
             this.showAlert('KINGDOM FALLEN', 4);
+            if (this.wave.active) this.wave.number = Math.max(0, this.wave.number - 1);    // the raid that broke you is not survived
             this.wave.active = false; this.wave.spawnLeft = 0; this.wave.timer = CFG.waveBaseSec;
             this.enemies = []; this.projectiles = [];
             this.gameOverShown = true; this.paused = true;

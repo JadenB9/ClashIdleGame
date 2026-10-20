@@ -142,7 +142,7 @@
             name: 'Wizard Tower', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 6,
             baseCost: { gold: 3200, elixir: 900 }, baseHP: 420, tone: '#5c9de0',
             desc: 'Arcane bolts that splash across a crowd.',
-            upgradeCost: (lv) => ({ gold: 3500 * Math.pow(1.6, lv - 1), elixir: 1100 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 8 * Math.pow(1.45, lv - 3) } : {}) }),
+            upgradeCost: (lv) => ({ gold: 3500 * Math.pow(1.6, lv - 1), elixir: 1100 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 6 * Math.pow(1.45, lv - 3) } : {}) }),
             defense: (lv) => ({ range: 4.5, dmg: 40 + lv * 20, cd: 1.8, splash: 1.2 }),
         },
         frost: {
@@ -156,14 +156,14 @@
             name: 'Hidden Tesla', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 7,
             baseCost: { gold: 4200, elixir: 1400 }, baseHP: 600, tone: '#7aa6ff',
             desc: 'Crackling coil that fires very fast.',
-            upgradeCost: (lv) => ({ gold: 4500 * Math.pow(1.6, lv - 1), elixir: 1500 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 10 * Math.pow(1.45, lv - 3) } : {}) }),
+            upgradeCost: (lv) => ({ gold: 4500 * Math.pow(1.6, lv - 1), elixir: 1500 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 8 * Math.pow(1.45, lv - 3) } : {}) }),
             defense: (lv) => ({ range: 5, dmg: 28 + lv * 16, cd: 0.55, splash: 0 }),
         },
         xbow: {
             name: 'X-Bow', cat: 'defense', size: 1, maxLevel: 18, unlockLevel: 8,
             baseCost: { gold: 6000, elixir: 2000 }, baseHP: 520, tone: '#a67c4a',
             desc: 'A siege crossbow with enormous range.',
-            upgradeCost: (lv) => ({ gold: 6500 * Math.pow(1.6, lv - 1), elixir: 2200 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 12 * Math.pow(1.45, lv - 3) } : {}) }),
+            upgradeCost: (lv) => ({ gold: 6500 * Math.pow(1.6, lv - 1), elixir: 2200 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 10 * Math.pow(1.45, lv - 3) } : {}) }),
             defense: (lv) => ({ range: 9, dmg: 22 + lv * 12, cd: 0.35, splash: 0 }),
         },
         inferno: {
@@ -258,8 +258,8 @@
     // ---------- DIFFICULTY ----------
     const DIFFICULTY = {
         easy:   { label: 'Relaxed', hp: 0.7, dmg: 0.6,  loot: 1.0, crowns: 0.8, desc: 'Weaker raiders. Good for idling.' },
-        normal: { label: 'Normal',  hp: 1,    dmg: 1,    loot: 1.0, crowns: 1.0, desc: 'The intended challenge.' },
-        hard:   { label: 'Hard',    hp: 2.2, dmg: 1.8,  loot: 1.2, crowns: 1.4, desc: 'Tougher raiders, better loot and crowns.' },
+        normal: { label: 'Normal',  hp: 1.12, dmg: 1,    loot: 1.0, crowns: 1.0, desc: 'The intended challenge.' },
+        hard:   { label: 'Hard',    hp: 2.0, dmg: 1.8,  loot: 1.2, crowns: 1.4, desc: 'Tougher raiders, better loot and crowns.' },
     };
 
     // ---------- WAVE BOONS ----------

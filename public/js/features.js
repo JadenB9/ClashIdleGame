@@ -156,7 +156,7 @@
             const spots = [[gw / 2, -1.4], [gw + 1.4, gh / 2], [gw / 2, gh + 1.4], [-1.4, gh / 2]];
             const c = this.worldIso(gw / 2, gh / 2);
             const cs = { x: this.cam.x + c.x * this.cam.zoom, y: this.cam.y + c.y * this.cam.zoom };
-            const m = 46, top = 108, bot = this.vh - 100;
+            const m = 46, top = this.vw < 900 ? 250 : 108, bot = this.vh - 100;
             for (const s of sides) {
                 const w = this.worldIso(spots[s][0], spots[s][1]);
                 let x = this.cam.x + w.x * this.cam.zoom, y = this.cam.y + w.y * this.cam.zoom;

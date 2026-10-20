@@ -689,3 +689,9 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
 @media (max-width: 560px) {
     .mode-hint { top: auto; bottom: 182px; max-width: 94%; }
 }
+
+/* steadier build cards, and toasts that stay off the selection card on phones */
+.build-grid { grid-auto-rows: 1fr; }
+@media (max-width: 560px) {
+    #app.has-sel .toasts, #app.drawer-open .toasts { top: 120px; bottom: auto; width: 64%; }
+}
