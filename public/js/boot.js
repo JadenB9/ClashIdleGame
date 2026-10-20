@@ -2,6 +2,7 @@
 (function (K) {
     'use strict';
     K.installMixin(K.Game, K.UI);
+    K.installMixin(K.Game, K.Features);
     K.installMixin(K.Game, K.Net);
     window.addEventListener('DOMContentLoaded', () => {
         const game = new K.Game();

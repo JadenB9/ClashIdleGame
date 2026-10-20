@@ -631,6 +631,7 @@
         //   v4 — adds settings (sound, auto-collect)
         //   v5 — adds the number format (settings.notation)
         //   v6 — ascension (meta), quests, view / x-ray / auto-upgrade settings
+        //   v7 — wave boons, tutorial progress, seen tips, difficulty
         snapshot() {
             // Sanitize wave timer on write so a stale game-over value never leaks into saves
             const sanitizedTimer = Math.max(5, Math.min(this.wave.timer || CFG.waveBaseSec, Math.max(CFG.waveBaseSec, 120)));
@@ -648,9 +649,9 @@
                 settings: {
                     sound: !this.audio.muted, autoCollect: this.autoCollect, notation: K.data.state.notation,
                     view: this.settings.view, xray: this.settings.xray, autoUpgrade: this.settings.autoUpgrade,
-                    levelTags: this.settings.levelTags, hints: this.settings.hints,
+                    levelTags: this.settings.levelTags, hints: this.settings.hints, difficulty: this.settings.difficulty,
                 },
-                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver },
+                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen },
                 quests: this.quests.map(q => ({ kind: q.kind, target: q.target, start: q.start, gems: q.gems, done: !!q.done })),
                 // While the tab is hidden the game is frozen, so the clock for
                 // offline earnings starts when it was hidden, not when we saved
@@ -701,6 +702,15 @@
                 d.meta = { crowns: 0, perks: {}, ascensions: 0, crownsEver: 0 };
                 d.quests = [];
             }
+            if (v < 7) {
+                // a player who already has a real kingdom does not need the first-run goals
+                const advanced = (d.stats && (d.stats.upgrades >= 3 || d.stats.built >= 6)) || (d.wave && d.wave.number >= 3);
+                if (!d.meta) d.meta = {};
+                d.meta.tut = { step: 0, done: !!advanced };
+                d.meta.boons = {}; d.meta.tips = {};
+                if (!d.settings) d.settings = {};
+                d.settings.difficulty = 'normal';
+            }
             d.v = CFG.saveVersion;
             return d;
         }
@@ -739,6 +749,7 @@
             for (const k in this.stats) this.stats[k] = 0;
             this.achievements = {};
             this.crowns = 0; this.crownsEver = 0; this.perks = {}; this.ascensions = 0;
+            this.boons = {}; this.tut = { step: 0, done: false }; this.tipsSeen = {};
             this.quests = [];
             this.wave.number = 0; this.wave.timer = 90; this.wave.active = false;
             this.dayTime = 0.25; this.dayCount = 1;
@@ -780,6 +791,7 @@
             this.settings.autoUpgrade = ['off', 'economy', 'defense', 'all'].includes(s.autoUpgrade) ? s.autoUpgrade : 'off';
             this.settings.levelTags = s.levelTags === 'hover' ? 'hover' : 'always';
             this.settings.hints = s.hints !== false;
+            this.settings.difficulty = Object.hasOwn(K.data.DIFFICULTY, s.difficulty) ? s.difficulty : 'normal';
 
             const m = d.meta || {};
             this.crowns = Math.floor(safeNum(m.crowns, 0, 0, 1e9));
@@ -787,6 +799,11 @@
             this.ascensions = Math.floor(safeNum(m.ascensions, 0, 0, 1e6));
             this.perks = {};
             for (const k in PERKS) this.perks[k] = Math.floor(safeNum(m.perks && m.perks[k], 0, 0, PERKS[k].max));
+            this.boons = {};
+            for (const bd of K.data.BOONS) if (!bd.instant) this.boons[bd.id] = Math.floor(safeNum(m.boons && m.boons[bd.id], 0, 0, bd.max));
+            this.tut = { step: Math.floor(safeNum(m.tut && m.tut.step, 0, 0, 20)), done: !!(m.tut && m.tut.done) };
+            this.tipsSeen = {};
+            if (m.tips && typeof m.tips === 'object') for (const k of Object.keys(m.tips).slice(0, 40)) if (m.tips[k] === true) this.tipsSeen[String(k).slice(0, 24)] = true;
 
             this.quests = [];
             if (Array.isArray(d.quests)) {

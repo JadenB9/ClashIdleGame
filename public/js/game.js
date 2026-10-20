@@ -6,7 +6,7 @@
    ============================================================ */
 (function (K) {
     'use strict';
-    const { CFG, VIEWS, BLD, ENEMY, waveTable, PERKS, QUEST_KINDS, ACHS } = K.data;
+    const { CFG, VIEWS, BLD, ENEMY, waveTable, PERKS, QUEST_KINDS, ACHS, DIFFICULTY, BOONS } = K.data;
     const U = K.util;
     const { rand, randi, clamp, fmt, safeNum, compact, alive, tierOf, resColor } = U;
     const A = K.art;
@@ -137,7 +137,7 @@
             this.beams = [];
             this.particles = [];
             this.popups = [];
-            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0, goblins: 0, bosses: 0 };
+            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0, goblins: 0, bosses: 0, boons: 0, freezes: 0 };
             this.achievements = {};
             this.dayTime = 0.25; this.dayCount = 1;
             this.wave = { number: 0, timer: 90, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
@@ -147,7 +147,12 @@
             this.perks = {}; for (const k in PERKS) this.perks[k] = 0;
             this.quests = [];
 
-            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true };
+            this.boons = {};                          // wave boons picked this reign
+            this.tut = { step: 0, done: false };      // first-run goals
+            this.tipsSeen = {};
+            this.opened = {};                         // panels the player has looked at (tutorial)
+            this.weather = { rain: 0, target: 0, timer: rand(150, 300) };
+            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, difficulty: 'normal' };
             this.speed = 1;
 
             this.cam = { x: 0, y: 0, zoom: 1 };
@@ -379,6 +384,21 @@
             }
             return null;
         }
+        // The coin bubble floating over a mine or well that is ready to tap
+        bubbleRect(b) {
+            const sp = this.spriteOf(b); A.maskOf(sp);
+            const c = this.centerOf(b);
+            return { x: c.x - 20, y: c.y + sp.bbox.y0 - 4, r: 13 };
+        }
+        bubbleAtScreen(sx, sy) {
+            const w = this.screenToWorld(sx, sy);
+            for (const b of this.buildings) {
+                if (!this.bubbleReady(b)) continue;
+                const r = this.bubbleRect(b);
+                if (Math.hypot(w.x - r.x, w.y - r.y) <= r.r + (this.input.touch ? 9 : 4) / this.cam.zoom) return b;
+            }
+            return null;
+        }
         upgradeReady(b) {
             const def = BLD[b.type];
             return b.level < def.maxLevel && !!def.upgradeCost && this.canAfford(def.upgradeCost(b.level));
@@ -419,6 +439,8 @@
                 if (this.buildMode && BLD[this.buildMode].drag) { I.paint = true; this.updateHover(); paintAt(p.x, p.y); return; }
                 if (this.buildMode || this.spellMode || this.moveMode) return;
                 if (goblinAt(p.x, p.y)) { I.downTarget = 'goblin'; return; }
+                const bb = this.bubbleAtScreen(p.x, p.y);
+                if (bb) { I.downTarget = 'bubble'; I.downBuilding = bb; return; }
                 const ab = this.arrowAtScreen(p.x, p.y);
                 if (ab) { I.downTarget = 'arrow'; I.downBuilding = ab; return; }
                 I.downBuilding = this.buildingAtScreen(p.x, p.y);
@@ -524,6 +546,7 @@
             else if (k === '0') { this.cam.zoom = CFG.homeZoom; this.centerCamera(); }
             else if (k === 'w' || k === 'W') this.activateWarCry();
             else if (k === 'l' || k === 'L') this.beginSpell();
+            else if (k === 'f' || k === 'F') this.castFreeze();
             else if (k === 'p' || k === 'P') this.togglePause();
             else if (k === 'a' || k === 'A') this.toggleAutoCollect();
             else if (k === 'r' || k === 'R') this.rally();
@@ -532,7 +555,7 @@
             else if (k === 'u' || k === 'U') { if (this.selected) this.upgradeBuilding(this.selected); else this.upgradeCheapest(); }
             else if (k === 'x' || k === 'X') this.cycleSpeed();
             else if (k === 'v' || k === 'V') { const n = Object.keys(VIEWS); this.changeView(n[(n.indexOf(this.settings.view) + 1) % n.length]); }
-            else if (k === '?') this.showShortcuts();
+            else if (k === '?' || k === 'h' || k === 'H') this.showHelp();
             else if (k >= '1' && k <= '5') this.openPanel(['build', 'upgrade', 'kingdom', 'coop', 'menu'][k - 1]);
         }
 
@@ -568,6 +591,7 @@
             if (this.moveMode) { this.commitMove({ tx: t.tx, ty: t.ty }); return; }
 
             if (I.downTarget === 'goblin') { this.catchGoblin(); return; }
+            if (I.downTarget === 'bubble' && I.downBuilding) { this.collectFrom(I.downBuilding); return; }
             if (I.downTarget === 'arrow' && I.downBuilding) { this.upgradeBuilding(I.downBuilding); return; }
 
             const b = I.downBuilding || this.buildingAtScreen(sx, sy);
@@ -577,7 +601,7 @@
                 I.lastTapB = b; I.lastTapT = now;
                 if (shift || dbl) { this.selectBuilding(b, true); this.upgradeBuilding(b); return; }
                 this.selectBuilding(b);
-                if (BLD[b.type].clickBonus) this.collectFrom(b);
+                if (this.bubbleReady(b)) this.collectFrom(b);
                 return;
             }
             this.deselect();
@@ -687,7 +711,9 @@
             else this.toast('Nothing affordable to upgrade yet', 'warn');
         }
 
-        hpFor(type, level) { return Math.floor(BLD[type].baseHP * Math.pow(1.18, level - 1)); }
+        hpFor(type, level) { return Math.floor(BLD[type].baseHP * Math.pow(1.18, level - 1) * (1 + 0.2 * this.boon('masonry'))); }
+        // after a health boon: new maximums, keeping each building's share of health
+        refreshMaxHp() { for (const b of this.buildings) { const f = b.hp / b.maxHp; b.maxHp = this.hpFor(b.type, b.level); b.hp = b.maxHp * f; } }
 
         sellBuilding(b) {
             const def = BLD[b.type];
@@ -749,12 +775,14 @@
         resSymbol(k) { return U.resSymbol(k); }
         resColor(k) { return resColor(k); }
 
+        boon(id) { return this.boons[id] || 0; }
+        diff() { return DIFFICULTY[this.settings.difficulty] || DIFFICULTY.normal; }
         prodMult() { return (1 + 0.1 * this.perks.treasury) * (1 + this.prosperity); }
-        towerMult() { return (1 + 0.08 * this.perks.steel) * (this.warCry.active ? 1.5 : 1); }
+        towerMult() { return (1 + 0.08 * this.perks.steel) * (1 + 0.12 * this.boon('steel')) * (this.warCry.active ? 1.5 : 1); }
 
         recomputeRates() {
             const r = { gold: 0, elixir: 0, dark: 0, gems: 0 };
-            this.capBonus = 0; this.goldMult = 1; this.xpMult = 1 + 0.1 * this.perks.study; this.rallyHeal = 0.2; this.waveGems = 1;
+            this.capBonus = 0; this.goldMult = 1; this.xpMult = 1 + 0.1 * this.perks.study + 0.2 * this.boon('scholar'); this.rallyHeal = 0.2; this.waveGems = 1;
             let pros = 0;
             for (const b of this.buildings) {
                 const def = BLD[b.type];
@@ -771,7 +799,9 @@
             }
             this.prosperity = Math.min(CFG.prosperityCap, pros);
             const pm = this.prodMult();
-            r.gold *= this.goldMult * pm; r.elixir *= pm; r.dark *= pm;
+            r.gold *= this.goldMult * pm * (1 + 0.15 * this.boon('rush'));
+            r.elixir *= pm * (1 + 0.15 * this.boon('brew'));
+            r.dark *= pm * (1 + 0.15 * this.boon('brew'));
             this.rates = r;
         }
 
@@ -827,7 +857,7 @@
             const p = this.worldIso(tx + 0.5, ty + 0.5);
             this.enemies.push({
                 kind, flying: !!T.flying, boss: !!T.boss, size: T.size, tx: tx + 0.5, ty: ty + 0.5, x: p.x, y: p.y, air: 0,
-                hp: T.hp * hpScale, maxHp: T.hp * hpScale, dmg: T.dmg * (1 + this.wave.number * 0.03), spd: T.spd, reach: T.reach || (T.flying ? 0.9 : 0.75),
+                hp: T.hp * hpScale * this.diff().hp, maxHp: T.hp * hpScale * this.diff().hp, dmg: T.dmg * (1 + this.wave.number * 0.03) * this.diff().dmg, spd: T.spd, reach: T.reach || (T.flying ? 0.9 : 0.75),
                 reward: { gold: T.gold, xp: T.xp }, target: null, attackCd: rand(0, 0.6), walk: rand(0, 6), wobble: rand(0, 6), dir: 1,
                 off: { x: rand(-0.28, 0.28), y: rand(-0.28, 0.28) }, slow: 0, slowAmt: 0, hit: 0, atkAnim: 0, retarget: 0,
             });
@@ -918,7 +948,7 @@
                 if (e.hit > 0) e.hit = Math.max(0, e.hit - dt * 4);
                 if (e.atkAnim > 0) e.atkAnim = Math.max(0, e.atkAnim - dt * 3.5);
                 if (e.slow > 0) e.slow -= dt;
-                const spd = e.spd * (e.slow > 0 ? 1 - e.slowAmt : 1);
+                const spd = e.spd * (e.slow > 0 ? 1 - e.slowAmt : 1) * (1 - 0.08 * this.boon('chill'));
                 e.retarget -= dt;
                 if (!e.target || e.target.hp <= 0 || e.retarget <= 0) {
                     const t = this.pickTarget(e);
@@ -953,7 +983,7 @@
                     }
                 }
                 if (attack) {
-                    e.attackCd -= dt;
+                    e.attackCd -= dt * (e.slow > 0 ? 1 - e.slowAmt * 0.7 : 1);
                     const s = BLD[attack.type].size;
                     const ddx = (attack.tx + s / 2) - e.tx, ddy = (attack.ty + s / 2) - e.ty;
                     e.dir = (ddx - ddy) >= 0 ? 1 : -1;
@@ -1048,7 +1078,7 @@
                     let diff = ang - (b.aim ?? 0.5);
                     while (diff > Math.PI) diff -= TAU; while (diff < -Math.PI) diff += TAU;
                     b.aim = (b.aim ?? 0.5) + diff * Math.min(1, dt * 12);
-                    if (b.lastShot <= 0) { b.lastShot = d.cd; this.fireAt(b, target, d); }
+                    if (b.lastShot <= 0) { b.lastShot = d.cd / (1 + 0.1 * this.boon('haste')); this.fireAt(b, target, d); }
                 }
             }
         }
@@ -1160,7 +1190,8 @@
             e.dead = true;
             this.stats.kills++;
             if (e.boss) { this.stats.bosses++; this.res.gems += 5; this.floatText('+5 gems', e.x, e.y - 50, '#5cd8ff'); this.shake = Math.max(this.shake, 8); this.showAlert('GOLEM DEFEATED', 2.5); }
-            this.stats.goldEarned += this.addRes('gold', e.reward.gold);
+            const loot = Math.round(e.reward.gold * (1 + 0.25 * this.boon('loot')) * this.diff().loot);
+            this.stats.goldEarned += this.addRes('gold', loot);
             this.gainXp(e.reward.xp);
             if (Math.random() < 0.05) { this.res.gems += 1; this.floatText('+1 gem', e.x, e.y - 40, '#5cd8ff'); }
             this.audio.die();
@@ -1168,7 +1199,7 @@
             this.particles.push({ x: e.x, y: e.y - e.size * 0.6, vx: 0, vy: -20, life: 0.9, max: 0.9, color: 'rgba(230,230,235,', size: e.size * 0.9, kind: 'smoke' });
             // a coin spills out
             this.particles.push({ x: e.x, y: e.y - e.size, vx: rand(-30, 30), vy: -rand(110, 150), life: 0.9, max: 0.9, color: '#ffd34a', size: 4, kind: 'coin' });
-            this.floatText(`+${e.reward.gold}`, e.x, e.y - e.size * 2.6, '#ffc857');
+            this.floatText(`+${loot}`, e.x, e.y - e.size * 2.6, '#ffc857');
             this.checkAchievements();
         }
 
@@ -1194,51 +1225,65 @@
         }
 
         // ---------- clicks, spells, abilities ----------
-        collectFrom(b) {
+        // ---- tap-to-collect bubbles ----
+        // Every mine and well fills a bubble over a few seconds. Tapping it pays a burst on top
+        // of the steady income. Tapping several quickly builds a combo; Collect All is the
+        // lazy version (no combo) and Auto-collect pays a bit less again.
+        bubbleSec() { return CFG.bubbleSec / (1 + 0.2 * this.boon('bubble')); }
+        bubbleReady(b) { return BLD[b.type].clickBonus && (b.charge ?? 0) >= this.bubbleSec(); }
+        readyCount() { let n = 0; for (const b of this.buildings) if (this.bubbleReady(b)) n++; return n; }
+
+        collectFrom(b, opt = {}) {
             const def = BLD[b.type];
-            if (!def.clickBonus) return;
-            if (this.combo.time > 0) this.combo.count++; else this.combo.count = 1;
-            this.combo.time = CFG.comboWindow;
-            this.combo.mult = this.combo.count >= 10 ? 3 : this.combo.count >= 6 ? 2 : this.combo.count >= 3 ? 1.5 : 1;
-            if (this.combo.count > this.stats.maxCombo) this.stats.maxCombo = this.combo.count;
+            if (!def.clickBonus) return false;
+            if (!this.bubbleReady(b)) {
+                if (!opt.quiet) {
+                    const p = this.centerOf(b);
+                    this.floatText('Recharging…', p.x, p.y - 48, '#b8c4e8');
+                    this.audio.error();
+                }
+                return false;
+            }
+            b.charge = 0;
+            const mult = opt.mult ?? 1;
+            if (!opt.noCombo) {
+                if (this.combo.time > 0) this.combo.count++; else this.combo.count = 1;
+                this.combo.time = CFG.comboWindow;
+                this.combo.mult = this.combo.count >= 10 ? 3 : this.combo.count >= 6 ? 2 : this.combo.count >= 3 ? 1.5 : 1;
+                if (this.combo.count > this.stats.maxCombo) this.stats.maxCombo = this.combo.count;
+            }
+            const cm = opt.noCombo ? 1 : this.combo.mult;
             const p = this.centerOf(b);
             const bonus = def.clickBonus(b.level);
-            let i = 0;
+            let i = 0, firstKey = null;
             for (const [k, v] of Object.entries(bonus)) {
-                const mul = this.boost.mult * this.combo.mult * (k === 'gold' ? this.goldMult : 1) * this.prodMult();
-                const amt = Math.floor(v * mul);
+                const m = this.boost.mult * cm * mult * (k === 'gold' ? this.goldMult : 1) * this.prodMult();
+                const amt = Math.floor(v * m);
                 const got = this.addRes(k, amt);
                 if (k === 'gold') this.stats.goldEarned += got;
-                this.floatText(got < amt && got === 0 ? 'FULL' : `+${fmt(amt)}`, p.x, p.y - 48 - i * 14, got === 0 ? '#ff9a6b' : this.resColor(k));
-                for (let n = 0; n < 4; n++) this.particles.push({ x: p.x + rand(-8, 8), y: p.y - 24, vx: rand(-40, 40), vy: -rand(90, 150), life: 0.9, max: 0.9, color: this.resColor(k), size: 4, kind: 'coin' });
-                i++;
+                this.floatText(got === 0 ? 'FULL' : `+${fmt(amt)}`, p.x, p.y - 48 - i * 14, got === 0 ? '#ff9a6b' : this.resColor(k));
+                if (!opt.quiet) for (let n = 0; n < 4; n++) this.particles.push({ x: p.x + rand(-8, 8), y: p.y - 24, vx: rand(-40, 40), vy: -rand(90, 150), life: 0.9, max: 0.9, color: this.resColor(k), size: 4, kind: 'coin' });
+                firstKey = firstKey || k; i++;
             }
-            if (this.combo.count >= 3) { this.floatText(`COMBO x${this.combo.mult}`, p.x, p.y - 76, '#ffc857'); this.audio.combo(); }
+            if (!opt.noCombo && this.combo.count >= 3) { this.floatText(`COMBO x${this.combo.mult}`, p.x, p.y - 76, '#ffc857'); this.audio.combo(); }
             this.stats.clicks++;
             b.pop = 1;
-            this.audio.coin();
-            this.pulseRes(Object.keys(bonus)[0]);
-            this.updateUI(); this.checkAchievements();
+            if (!opt.quiet) this.audio.coin();
+            this.pulseRes(firstKey);
+            if (!opt.quiet) { this.updateUI(); this.checkAchievements(); }
+            return true;
         }
 
-        collectAll(quiet = false) {
-            let total = 0;
-            for (const b of this.buildings) {
-                const def = BLD[b.type];
-                if (!def.clickBonus) continue;
-                const bonus = def.clickBonus(b.level);
-                for (const k in bonus) {
-                    const amt = Math.floor(bonus[k] * this.boost.mult * 0.5 * (k === 'gold' ? this.goldMult : 1) * this.prodMult());
-                    const got = this.addRes(k, amt);
-                    if (k === 'gold') { this.stats.goldEarned += got; total += got; }
-                    if (got > 0) { const p = this.centerOf(b); this.floatText(`+${fmt(got)}`, p.x, p.y - 44, this.resColor(k)); b.pop = 1; }
-                }
-            }
-            if (total > 0) {
+        collectAll(quiet = false, mult = 1) {
+            let n = 0;
+            for (const b of this.buildings) if (this.bubbleReady(b) && this.collectFrom(b, { noCombo: true, quiet: true, mult })) n++;
+            if (n) {
                 this.audio.coin(); this.pulseRes('gold');
-                if (!quiet) this.toast(`Collected ${fmt(total)} gold`, 'success');
+                if (!quiet) this.toast(`Collected from ${n} building${n > 1 ? 's' : ''}`, 'success');
+                this.checkAchievements();
             } else if (!quiet) {
-                this.toast(this.res.gold >= this.cap() ? 'Storage is full. Upgrade the Town Hall or build a Vault.' : 'Nothing to collect', 'warn');
+                const full = this.res.gold >= this.cap() * 0.98;
+                this.toast(full ? 'Storage is full. Upgrade the Town Hall or build a Vault.' : 'Nothing is ready yet. Wait for the coin bubbles.', 'warn');
             }
             this.updateUI();
         }
@@ -1397,7 +1442,7 @@
         // ---------- ascension ----------
         ascendGain() {
             const w = Math.max(0, this.wave.number - 1);
-            return Math.floor(w / 3 + this.player.level / 4 + this.stats.upgrades / 60);
+            return Math.max(0, Math.floor((w / 3 + this.player.level / 4 + this.stats.upgrades / 60) * this.diff().crowns));
         }
         canAscend() { return this.wave.number >= CFG.ascendMinWave; }
         perkRank(k) { return this.perks[k] || 0; }
@@ -1416,6 +1461,7 @@
             this.res = { gold: 500 + 500 * this.perks.headstart, elixir: 150, dark: 0, gems: 5 + this.ascensions };
             this.player.level = 1; this.player.xp = 0;
             this.buildings = []; this.enemies = []; this.projectiles = []; this.beams = []; this.goblin = null;
+            this.boons = {};
             this.wave = { number: 0, timer: 90, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
             this.dayTime = 0.25; this.dayCount = 1;
             this.boost = { mult: 1, timeLeft: 0 }; this.warCry = { active: false, timeLeft: 0, cooldown: 0 };
@@ -1504,6 +1550,7 @@
                 if (b.build < 1) b.build = Math.min(1, (b.build ?? 1) + dt * 2.2);
                 if (b.upg > 0) b.upg = Math.max(0, b.upg - dt * 2.2);
                 if (b.pop > 0) b.pop = Math.max(0, b.pop - dt * 5);
+                if (BLD[b.type].clickBonus && b.build >= 1) b.charge = Math.min(this.bubbleSec(), (b.charge ?? rand(0, this.bubbleSec())) + dt * (this.boost.timeLeft > 0 ? 1.5 : 1));
             }
 
             if (this.wave.active) {
@@ -1521,6 +1568,7 @@
                     this.toast(`Wave ${this.wave.number} cleared  +${g} gems`, 'success');
                     this.showAlert('WAVE CLEARED', 2);
                     this.checkAchievements();
+                    setTimeout(() => { if (!this.gameOverShown && !this.wave.active) this.offerBoons(); }, 1100);
                 }
             } else {
                 this.wave.timer -= dt;
@@ -1531,6 +1579,7 @@
             this.enemyTick(dt);
             this.projectileTick(dt);
             this.goblinTick(dt);
+            this.updateWeather(dt);
 
             if (this.particles.length > 420) this.particles.splice(0, this.particles.length - 420);
             for (const p of this.particles) {
@@ -1543,11 +1592,11 @@
             compact(this.popups, alive);
 
             if (this.alertTimer > 0) { this.alertTimer -= dt; if (this.alertTimer <= 0) this.hideAlert(); }
-            if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 2);
+            if (this.flash > 0) { this.flash = Math.max(0, this.flash - dt * 2); if (this.flash === 0) this.flashTint = null; }
             if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 18);
             if (this.selPulse > 0) this.selPulse = Math.max(0, this.selPulse - dt * 0.8);
 
-            if (this.autoCollect) { this._autoCollectAcc += dt; if (this._autoCollectAcc >= 5) { this._autoCollectAcc = 0; this.collectAll(true); } }
+            if (this.autoCollect) { this._autoCollectAcc += dt; if (this._autoCollectAcc >= 5) { this._autoCollectAcc = 0; this.collectAll(true, CFG.autoCollectRate); } }
             if (this.settings.autoUpgrade !== 'off') {
                 this._autoUpAcc += dt;
                 if (this._autoUpAcc >= 1.5) { this._autoUpAcc = 0; this.upgradeCheapest(this.settings.autoUpgrade, true); }
@@ -1555,6 +1604,8 @@
 
             this._uiAcc = (this._uiAcc || 0) + dt;
             if (this._uiAcc >= 0.1) { this._uiAcc = 0; this.updateUI(); }
+            this._tipAcc = (this._tipAcc || 0) + dt;
+            if (this._tipAcc >= 0.5) { this._tipAcc = 0; this.tutCheck(); this.tipCheck(); }
         }
 
         // ---------- rendering ----------
@@ -1621,6 +1672,7 @@
             this.drawParticles(g);
             this.drawBadges(g, t);
             A.world.drawClouds(g, t, this.cam, this.vw, this.vh, 1 - night * 0.6);
+            this.drawBirds(g, t, night);
             this.drawAmbient(g, t, night);
             this.drawPopups(g);
             g.restore();
@@ -1640,7 +1692,8 @@
                 this._vig = gr; this._vigW = this.vw; this._vigH = this.vh;
             }
             g.fillStyle = this._vig; g.fillRect(0, 0, this.vw, this.vh);
-            if (this.flash > 0) { g.fillStyle = `rgba(255,255,255,${this.flash})`; g.fillRect(0, 0, this.vw, this.vh); }
+            this.drawWeather(g);
+            if (this.flash > 0) { g.fillStyle = `rgba(${this.flashTint || '255,255,255'},${this.flash})`; g.fillRect(0, 0, this.vw, this.vh); }
         }
 
         drawDayTint(g, night) {
@@ -1788,12 +1841,13 @@
             }
             g.restore();
             if (sp.lights.length) this._lightQ.push({ sp, x: c.x, y: c.y });
-            if (b.type === 'storage' || b.type === 'goldmine') { /* reserved for fill-level art */ }
+            if (alpha > 0.6) this.drawBuildingFx(g, b, sp, c, t);
         }
 
         // level tags, hp bars and upgrade arrows, drawn above everything on the map
         drawBadges(g, t) {
             const zoom = this.cam.zoom;
+            const tt = this.tutTarget();
             const small = zoom < 0.9;
             for (const b of this.buildings) {
                 const def = BLD[b.type];
@@ -1836,6 +1890,47 @@
                     g.beginPath(); g.arc(0, 0, r.r, 0, TAU); g.fill(); g.stroke();
                     g.fillStyle = '#ffffff'; g.strokeStyle = '#0e3a14'; g.lineWidth = 0.9;
                     g.beginPath(); g.moveTo(0, -6.4); g.lineTo(6, 0.4); g.lineTo(2.4, 0.4); g.lineTo(2.4, 6); g.lineTo(-2.4, 6); g.lineTo(-2.4, 0.4); g.lineTo(-6, 0.4); g.closePath(); g.fill(); g.stroke();
+                    g.restore();
+                }
+                // coin bubble (or a thin ring while it refills)
+                if (def.clickBonus && b.build >= 1) {
+                    const r = this.bubbleRect(b);
+                    const ready = this.bubbleReady(b);
+                    if (ready) {
+                        const bob = Math.sin(t * 3.4 + b.tx * 1.7) * 2.6, pulse = 1 + 0.06 * Math.sin(t * 6 + b.ty);
+                        const key = Object.keys(def.clickBonus(1))[0], col = this.resColor(key);
+                        g.save(); g.translate(r.x, r.y + bob); g.scale(pulse, pulse);
+                        g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(0, 17, 7, 2.4, 0, 0, TAU); g.fill();
+                        const gr = g.createRadialGradient(-4, -5, 1, 0, 0, r.r);
+                        gr.addColorStop(0, 'rgba(255,255,255,0.95)'); gr.addColorStop(1, 'rgba(210,225,255,0.82)');
+                        g.fillStyle = gr; g.strokeStyle = '#1a2240'; g.lineWidth = 1.8;
+                        g.beginPath(); g.arc(0, 0, r.r, 0, TAU); g.fill(); g.stroke();
+                        g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); g.arc(0, 0, r.r - 2.6, 0, TAU); g.stroke();
+                        if (key === 'gold') {
+                            g.fillStyle = '#ffd34a'; g.strokeStyle = '#7a4a00'; g.lineWidth = 1.2; g.beginPath(); g.arc(0, 0, 6.2, 0, TAU); g.fill(); g.stroke();
+                            g.fillStyle = '#9a5c00'; g.font = '700 9px "Lilita One", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('$', 0, 0.5);
+                        } else {
+                            g.fillStyle = col; g.strokeStyle = '#2a0a50'; g.lineWidth = 1.2;
+                            g.beginPath(); g.moveTo(0, -7); g.quadraticCurveTo(7, 1, 0, 7); g.quadraticCurveTo(-7, 1, 0, -7); g.fill(); g.stroke();
+                        }
+                        g.restore();
+                    } else if (b.charge !== undefined) {
+                        const f = Math.min(1, b.charge / this.bubbleSec());
+                        g.save(); g.translate(r.x, r.y);
+                        g.strokeStyle = 'rgba(0,0,0,0.45)'; g.lineWidth = 3.4; g.beginPath(); g.arc(0, 0, 6, 0, TAU); g.stroke();
+                        g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 2.2; g.beginPath(); g.arc(0, 0, 6, -Math.PI / 2, -Math.PI / 2 + TAU * f); g.stroke();
+                        g.restore();
+                    }
+                }
+                // first-run goal marker
+                if (tt.b === b) {
+                    const pulse = (t * 1.4) % 1;
+                    g.save();
+                    g.strokeStyle = `rgba(255,236,120,${1 - pulse})`; g.lineWidth = 3;
+                    g.beginPath(); g.ellipse(c.x, c.y + 6, 30 + pulse * 34, 15 + pulse * 17, 0, 0, TAU); g.stroke();
+                    const by = c.y + sp.bbox.y0 - 56 + Math.sin(t * 6) * 5;
+                    g.fillStyle = '#fff6b0'; g.strokeStyle = '#6a4200'; g.lineWidth = 2;
+                    g.beginPath(); g.moveTo(c.x, by + 14); g.lineTo(c.x - 11, by - 4); g.lineTo(c.x - 4, by - 4); g.lineTo(c.x - 4, by - 16); g.lineTo(c.x + 4, by - 16); g.lineTo(c.x + 4, by - 4); g.lineTo(c.x + 11, by - 4); g.closePath(); g.fill(); g.stroke();
                     g.restore();
                 }
                 // selection marker: a bouncing chevron when something is selected

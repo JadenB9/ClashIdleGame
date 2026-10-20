@@ -16,7 +16,7 @@
         zoomMin: 0.7,
         zoomMax: 2.2,
         saveKey: 'kingdomOfEmber.v3',   // key stays put so old saves still load; the format version lives in the data
-        saveVersion: 6,
+        saveVersion: 7,
         autoSaveMs: 15000,
         offlineMaxSec: 4 * 60 * 60,
         offlineRate: 0.5,
@@ -33,6 +33,8 @@
         spellBaseDmg: 260,
         prosperityCap: 0.15,         // decorations stop adding production past +15%
         ascendMinWave: 10,           // waves survived before the kingdom can ascend
+        bubbleSec: 7,                // a mine or well refills its tap-to-collect bubble this often
+        autoCollectRate: 0.6,        // auto-collect pays this share of a manual tap
     };
 
     // Camera tilt presets. tileH/tileW is the sine of the camera elevation, so a
@@ -251,6 +253,31 @@
         return t;
     };
 
+    // ---------- DIFFICULTY ----------
+    const DIFFICULTY = {
+        easy:   { label: 'Relaxed', hp: 0.75, dmg: 0.7,  loot: 1.0, crowns: 0.8, desc: 'Weaker raiders. Good for idling.' },
+        normal: { label: 'Normal',  hp: 1,    dmg: 1,    loot: 1.0, crowns: 1.0, desc: 'The intended challenge.' },
+        hard:   { label: 'Hard',    hp: 1.35, dmg: 1.3,  loot: 1.2, crowns: 1.3, desc: 'Tougher raiders, better loot and crowns.' },
+    };
+
+    // ---------- WAVE BOONS ----------
+    // After every cleared wave you pick one of three. Stacking ones last for the reign;
+    // instant ones just pay out. A reign resets when you ascend.
+    const BOONS = [
+        { id: 'steel',   name: 'Sharpened Steel', desc: 'Towers hit 12% harder.',                 ico: 'sword',  max: 6 },
+        { id: 'rush',    name: 'Gold Rush',       desc: '+15% gold production.',                  ico: 'coin',   max: 6 },
+        { id: 'brew',    name: 'Elixir Brew',     desc: '+15% elixir and dark elixir.',           ico: 'elixir', max: 6 },
+        { id: 'masonry', name: 'Strong Walls',    desc: 'Every building gets +20% health.',       ico: 'shield', max: 5 },
+        { id: 'haste',   name: 'Quick Hands',     desc: 'Towers fire 10% faster.',                ico: 'bolt',   max: 5 },
+        { id: 'loot',    name: 'Plunder',         desc: 'Raiders drop 25% more gold.',            ico: 'sack',   max: 5 },
+        { id: 'scholar', name: 'Scholar',         desc: '+20% XP from everything.',               ico: 'star',   max: 5 },
+        { id: 'bubble',  name: 'Bright Coins',    desc: 'Collect bubbles refill 20% faster.',     ico: 'coin',   max: 4 },
+        { id: 'chill',   name: 'Cold Snap',       desc: 'Raiders walk 8% slower.',                ico: 'snow',   max: 4 },
+        { id: 'chest',   name: 'Treasure Chest',  desc: 'Gold worth about 90 seconds of income.', ico: 'sack',   instant: true },
+        { id: 'medic',   name: 'Field Medics',    desc: 'Fully repair every building.',           ico: 'heart',  instant: true },
+        { id: 'gems',    name: 'Gem Cache',       desc: '+3 gems.',                               ico: 'gem',    instant: true },
+    ];
+
     // ---------- ASCENSION PERKS ----------
     const PERKS = {
         treasury: { name: 'Royal Treasury', desc: '+10% gold, elixir and dark production per rank', max: 20, ico: 'coin' },
@@ -293,6 +320,8 @@
         { id: 'boss_1',       name: 'Giant Killer',      desc: 'Topple a Stone Golem',           check: (g) => g.stats.bosses >= 1 },
         { id: 'ascend_1',     name: 'Reborn',            desc: 'Ascend for the first time',      check: (g) => g.ascensions >= 1 },
         { id: 'beauty',       name: 'Garden Kingdom',    desc: 'Place 8 decorations',            check: (g) => g.decorCount() >= 8 },
+        { id: 'boon_5',       name: 'Spoils of War',     desc: 'Pick 5 wave boons',              check: (g) => g.stats.boons >= 5 },
+        { id: 'freeze_1',     name: 'Cold Open',         desc: 'Freeze a raiding party',         check: (g) => g.stats.freezes >= 1 },
     ];
 
     // ---------- SMALL HELPERS (shared by every file) ----------
@@ -353,7 +382,7 @@
     };
 
     K.data = {
-        CFG, VIEWS, BLD, CATS, ENEMY, waveTable, PERKS, perkCost, QUEST_KINDS, ACHS,
+        CFG, VIEWS, BLD, CATS, ENEMY, waveTable, PERKS, perkCost, QUEST_KINDS, ACHS, DIFFICULTY, BOONS,
         NOTATIONS, state,
     };
     K.util = {

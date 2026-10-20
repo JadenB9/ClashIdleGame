@@ -8,7 +8,7 @@
    ============================================================ */
 (function (K) {
     'use strict';
-    const { CFG, VIEWS, BLD, CATS, ENEMY, PERKS, perkCost, QUEST_KINDS, ACHS, NOTATIONS } = K.data;
+    const { CFG, VIEWS, BLD, CATS, ENEMY, PERKS, perkCost, QUEST_KINDS, ACHS, NOTATIONS, DIFFICULTY, BOONS } = K.data;
     const U = K.util;
     const { fmt, fmtRate, fmtTime, fmtDuration, tierOf } = U;
     const A = K.art;
@@ -42,6 +42,7 @@
                 sel: $('selCard'), drawer: $('drawer'), app: $('app'),
                 dotUp: $('dotUpgrade'), dotKing: $('dotKingdom'),
                 alert: $('alertPanel'), pause: $('actPause'), veil: $('pauseVeil'), speedTag: $('speedTag'),
+                goal: $('goalCard'), hint: $('modeHint'), collect: $('actCollect'), collectDot: $('collectDot'), freeze: $('actFreeze'),
             };
             this.panel = null;
             this.buildCat = 'economy';
@@ -94,6 +95,11 @@
             click('actRally', () => this.rally());
             click('actBoost', () => this.activateBoost());
             click('actSpell', () => this.beginSpell());
+            click('actFreeze', () => this.castFreeze());
+            click('btnHelp', () => this.showHelp());
+            click('btnHowTo', () => this.showHelp());
+            document.querySelectorAll('#diffSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.settings.difficulty = b.dataset.diff; this.syncSettingsUI(); this.save(); this.toast(`Difficulty: ${DIFFICULTY[b.dataset.diff].label}. ${DIFFICULTY[b.dataset.diff].desc}`, 'success'); }));
+            this.el.goal.addEventListener('click', (e) => { const a = e.target.closest('[data-goal]'); if (!a) return; this.audio.click(); if (a.dataset.goal === 'skip') this.tutSkip(); else this.tutAdvance(); });
             click('actWarCry', () => this.activateWarCry());
             click('actCancel', () => this.cancelModes());
             click('actPause', () => this.togglePause());
@@ -183,6 +189,7 @@
             if (!PANEL_TITLES[name]) return;
             if (toggle && this.panel === name) { this.closePanel(); return; }
             this.panel = name;
+            this.opened[name] = true;
             $('drawerTitle').textContent = PANEL_TITLES[name];
             document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.dataset.tab === name));
             document.querySelectorAll('.dock-btn').forEach(b => { const on = b.dataset.tab === name; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
@@ -228,6 +235,7 @@
             this.canvas.classList.toggle('pointing', !busy && !!this.hoverBuilding);
             this.el.cancel.hidden = !busy;
             this.el.app.classList.toggle('carrying', busy);
+            this.updateHint();
         }
 
         thumbURL(type) {
@@ -389,10 +397,17 @@
             el.spell.classList.toggle('active', this.spellMode);
 
             // dock badges
-            const ready = this.buildings.filter(b => this.upgradeReady(b)).length;
+            const upReady = this.buildings.filter(b => this.upgradeReady(b)).length;
             const claim = this.quests.filter(q => q.done).length;
-            if (el.dotUp._n !== ready) { el.dotUp._n = ready; el.dotUp.textContent = String(ready); el.dotUp.hidden = ready === 0; }
+            if (el.dotUp._n !== upReady) { el.dotUp._n = upReady; el.dotUp.textContent = String(upReady); el.dotUp.hidden = upReady === 0; }
             if (el.dotKing._n !== claim) { el.dotKing._n = claim; el.dotKing.textContent = String(claim); el.dotKing.hidden = claim === 0; }
+
+            // coin bubbles ready to tap
+            const ready = this.readyCount();
+            el.collect.classList.toggle('glow', ready > 0);
+            if (el.collectDot._n !== ready) { el.collectDot._n = ready; el.collectDot.textContent = String(ready); el.collectDot.hidden = ready === 0; }
+            el.freeze.classList.toggle('dim', this.res.gems < 1 || this.enemies.length === 0);
+            this.renderGoal();
 
             this.updateSelectionLive();
             if (this.panel === 'build') this.buildMenu();
@@ -479,7 +494,15 @@
                 if (fill._w !== w) { fill._w = w; fill.style.width = w + '%'; fill.className = f > 0.5 ? 'hi' : f > 0.25 ? 'mid' : 'lo'; }
                 setText(txt, `${fmt(Math.ceil(b.hp))} / ${fmt(b.maxHp)}`);
             }
+            const col = sel.querySelector('[data-act="collect"]');
+            if (col) {
+                const r = this.bubbleReady(b), left = Math.max(0, Math.ceil(this.bubbleSec() - (b.charge || 0)));
+                col.disabled = !r;
+                const lab = r ? 'Collect' : `Ready in ${left}s`;
+                if (col._lab !== lab) { col._lab = lab; col.innerHTML = `${ico('sack')}${lab}`; }
+            }
             const up = $('selUp');
+            if (up) up.classList.toggle('tut-pulse', this.tutTarget().sel === 'upgrade');
             if (up && b.level < def.maxLevel) {
                 const cost = def.upgradeCost(b.level), ok = this.canAfford(cost);
                 up.classList.toggle('cant', !ok);
@@ -562,6 +585,10 @@
                 <div class="perks">${perks}</div>`;
             setHtml($('ascendBox'), asc);
 
+            // boons
+            const owned = BOONS.filter(b => !b.instant && this.boon(b.id) > 0);
+            setHtml($('boonList'), owned.length ? owned.map(b => `<div class="boon-chip" title="${esc(b.desc)}">${ico(b.ico)}<span>${b.name}</span><b>x${this.boon(b.id)}</b></div>`).join('') : '<p class="hint">Pick a boon after each raid. They show up here.</p>');
+
             // defenses
             const defCount = {}; let dps = 0;
             for (const b of this.buildings) { const def = BLD[b.type]; if (def.defense) { defCount[def.name] = (defCount[def.name] || 0) + 1; const d = def.defense(b.level); dps += d.dmg / d.cd; } }
@@ -621,12 +648,12 @@
             const c = $('toasts');
             const el = document.createElement('div');
             el.className = 'toast ' + type;
-            const icon = type === 'success' ? 'check' : (type === 'error' ? 'skull' : (type === 'warn' ? 'warn' : 'info'));
+            const icon = type === 'success' ? 'check' : (type === 'error' ? 'skull' : (type === 'warn' ? 'warn' : (type === 'tip' ? 'help' : 'info')));
             el.innerHTML = `${ico(icon)}<span></span>`;
             el.lastChild.textContent = msg;
             c.appendChild(el);
             while (c.children.length > 4) c.firstElementChild.remove();
-            setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, 2600);
+            setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, type === 'tip' ? 6500 : 2600);
         }
         showAlert(text, dur = 2, boss = false) {
             const p = this.el.alert;
@@ -645,7 +672,7 @@
         // ---------- toggles and settings ----------
         syncToggles() {
             const auto = $('actAutoCollect');
-            if (auto) { setText($('autoLabel'), this.autoCollect ? 'Auto: On' : 'Auto: Off'); auto.classList.toggle('active', this.autoCollect); auto.setAttribute('aria-pressed', String(this.autoCollect)); }
+            if (auto) { setText($('autoLabel'), this.autoCollect ? 'on' : 'off'); auto.classList.toggle('on', this.autoCollect); auto.setAttribute('aria-pressed', String(this.autoCollect)); }
             const snd = $('btnSound');
             if (snd) { snd.textContent = this.audio.muted ? 'Off' : 'On'; snd.setAttribute('aria-pressed', String(!this.audio.muted)); }
             const p = this.el.pause;
@@ -663,6 +690,7 @@
             document.querySelectorAll('#autoUpSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.autoup === S.autoUpgrade)));
             const set = (id, on) => { const e = $(id); if (e) { e.textContent = on ? 'On' : 'Off'; e.setAttribute('aria-pressed', String(on)); } };
             set('btnXray', S.xray); set('btnHints', S.hints);
+            document.querySelectorAll('#diffSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.diff === S.difficulty)));
         }
         toggleAutoCollect() { this.autoCollect = !this.autoCollect; this.syncToggles(); this.toast(this.autoCollect ? 'Auto-collect on' : 'Auto-collect off', 'success'); }
         toggleSound() { this.audio.muted = !this.audio.muted; this.syncToggles(); this.audio.click(); this.save(); }
@@ -686,21 +714,101 @@
         }
         closeModal() {
             const modal = $('modal');
+            if (this.boonOpen) return;
             if (!modal.classList.contains('open')) return;
             modal.classList.remove('open');
             this.modalBuilding = null;
             if (this._modalReturnFocus && document.contains(this._modalReturnFocus)) this._modalReturnFocus.focus();
             this._modalReturnFocus = null;
         }
+        // ---------- first-run goal card ----------
+        renderGoal() {
+            const el = this.el.goal;
+            const s = this.tutCurrent();
+            if (!s) { el.hidden = true; this.setDockPulse(null); return; }
+            el.hidden = false;
+            const steps = this.tutSteps();
+            const dots = steps.map((_, i) => `<i class="${i < this.tut.step ? 'done' : (i === this.tut.step ? 'now' : '')}"></i>`).join('');
+            setHtml(el, `<div class="goal-top"><b>Goal ${this.tut.step + 1} of ${steps.length}</b><button type="button" data-goal="skip" title="Hide the goals">Skip</button></div>
+                <div class="goal-title">${s.title}</div><div class="goal-sub">${s.sub}</div>
+                <div class="goal-dots">${dots}</div>${s.manual ? '<button type="button" class="btn small good" data-goal="next">Got it</button>' : ''}`);
+            this.setDockPulse(this.tutTarget().dock || null);
+        }
+        setDockPulse(tab) {
+            document.querySelectorAll('.dock-btn').forEach(b => b.classList.toggle('tut-pulse', !!tab && b.dataset.tab === tab && this.panel !== tab));
+        }
+
+        // The one-line banner that says what a tap will do right now
+        updateHint() {
+            const h = this.el.hint;
+            let text = '';
+            if (this.buildMode) { const d = BLD[this.buildMode]; text = `Tap the grass to place the ${d.name}.${d.drag ? ' Drag to paint a line.' : ''} Esc cancels.`; }
+            else if (this.moveMode) text = `Tap an empty tile to move the ${BLD[this.moveMode.type].name}. Esc cancels.`;
+            else if (this.spellMode) text = 'Tap the map to call down lightning. Esc cancels.';
+            h.hidden = !text;
+            if (text) setText(h, text);
+        }
+
+        // ---------- how to play ----------
+        showHelp() {
+            const row = (icon, title, body) => `<div class="help-row">${ico(icon)}<div><b>${title}</b><span>${body}</span></div></div>`;
+            this.openPlainModal(`<h2 id="modalTitle">How to play</h2>
+                <div class="subtitle">Your kingdom earns on its own. You make it stronger and keep raiders out.</div>
+                <div class="help-list">
+                    ${row('sack', 'Collect', 'Mines and wells fill a coin bubble every few seconds. Tap it for a bonus. Tap several quickly for a combo. <b>Space</b> collects every ready bubble.')}
+                    ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
+                    ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Walls and decorations can be painted by dragging.')}
+                    ${row('sword', 'Defend', 'Raiders arrive when the timer on the left runs out. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
+                    ${row('star', 'Boons', 'After every raid you pick one of three rewards. They stack and last until you ascend.')}
+                    ${row('gem', 'Gems', 'Spend them on <b>Boost</b> (double income), <b>Lightning</b> and <b>Freeze</b>. Earn them from waves, quests and goblins.')}
+                    ${row('crown', 'Ascend', 'From wave 10, Ascend in the Kingdom tab: the kingdom restarts and you keep crowns that buy permanent perks.')}
+                </div>
+                <div class="modal-actions"><button class="btn small" id="helpKeys" type="button">Keyboard shortcuts</button><button class="btn small" id="helpGoals" type="button">Replay the goals</button></div>`);
+            $('helpKeys').addEventListener('click', () => this.showShortcuts());
+            $('helpGoals').addEventListener('click', () => { this.tut = { step: 0, done: false }; this.opened = {}; this.closeModal(); this.updateUI(); this.toast('Goals restarted', 'success'); });
+        }
+
+        // ---------- wave boons ----------
+        showBoons(picks) {
+            if (this.boonOpen || this.gameOverShown) return;
+            const wasPaused = this.paused;
+            this.boonOpen = true; this.modalBlocking = true;
+            this.paused = true; this.syncToggles();
+            this.audio.levelup();
+            const cards = picks.map((b, i) => {
+                const n = this.boon(b.id);
+                return `<button type="button" class="boon-card" data-boon="${b.id}">
+                    <span class="boon-key">${i + 1}</span>${ico(b.ico)}
+                    <b>${b.name}</b><span>${b.desc}</span>
+                    <em>${b.instant ? 'Right now' : (n ? `You have x${n}` : 'Lasts this reign')}</em></button>`;
+            }).join('');
+            this.openPlainModal(`<h2 id="modalTitle">Raid spoils</h2>
+                <div class="subtitle">Wave ${this.wave.number} is done. Pick one reward.</div>
+                <div class="boon-row">${cards}</div>`);
+            $('modalClose').hidden = true;
+            const finish = (id) => {
+                document.removeEventListener('keydown', onKey, true);
+                this.boonOpen = false; this.modalBlocking = false;
+                $('modalClose').hidden = false;
+                this.closeModal();
+                this.pickBoon(id);
+                this.paused = wasPaused; this.lastTime = performance.now(); this.syncToggles();
+            };
+            const onKey = (e) => { const i = '123'.indexOf(e.key); if (i >= 0 && picks[i]) { e.preventDefault(); e.stopPropagation(); finish(picks[i].id); } };
+            document.addEventListener('keydown', onKey, true);
+            this.el.modalBody.querySelectorAll('[data-boon]').forEach(btn => btn.addEventListener('click', () => finish(btn.dataset.boon)));
+            const first = this.el.modalBody.querySelector('[data-boon]'); if (first) first.focus({ preventScroll: true });
+        }
+
         showShortcuts() {
             const rows = [
-                [['Space'], 'Collect from every mine and well'], [['U'], 'Upgrade the selected building (or the cheapest one)'],
+                [['Space'], 'Collect every ready coin bubble'], [['F'], 'Freeze all raiders'], [['U'], 'Upgrade the selected building (or the cheapest one)'],
                 [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
                 [['A'], 'Auto-collect on / off'], [['R'], 'Rally defenses'], [['M'], 'Sound on / off'], [['T'], 'Light / dark theme'],
                 [['V'], 'Cycle the camera angle'], [['1', '2', '3', '4', '5'], 'Build · Upgrade · Kingdom · Co-op · Menu'],
                 [['+', '−'], 'Zoom'], [['0'], 'Back to the Town Hall'], [['Esc'], 'Cancel, deselect, close'],
                 [['Click'], 'Select a building (anywhere on its picture)'], [['Double-click'], 'Upgrade it right away'],
-                [['Drag'], 'Pan the map, or move the selected building'], [['?'], 'This list'],
+                [['Drag'], 'Pan the map, or move the selected building'], [['?'], 'How to play'],
             ];
             this.openPlainModal(`<h2 id="modalTitle">Keyboard and mouse</h2><div class="subtitle">Shortcuts work whenever you are not typing in a box.</div>
                 <table class="keys">${rows.map(([k, w]) => `<tr><td>${k.map(x => `<kbd>${x}</kbd>`).join('')}</td><td>${w}</td></tr>`).join('')}</table>`);
