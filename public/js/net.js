@@ -658,7 +658,7 @@
                     view: this.settings.view, xray: this.settings.xray, autoUpgrade: this.settings.autoUpgrade,
                     levelTags: this.settings.levelTags, hints: this.settings.hints, difficulty: this.settings.difficulty,
                 },
-                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen, pending: this.pendingBoon, reignCrowns: this.reignCrowns },
+                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen, pending: this.pendingBoon, reignCrowns: this.reignCrowns, sides: this.wave.active ? this.wave.sides : this.wave.nextSides },
                 quests: this.quests.map(q => ({ kind: q.kind, target: q.target, start: q.start, gems: q.gems, done: !!q.done })),
                 // While the tab is hidden the game is frozen, so the clock for
                 // offline earnings starts when it was hidden, not when we saved
@@ -812,6 +812,8 @@
             for (const bd of K.data.BOONS) if (!bd.instant) this.boons[bd.id] = Math.floor(safeNum(m.boons && m.boons[bd.id], 0, 0, bd.max));
             this.tut = { step: Math.floor(safeNum(m.tut && m.tut.step, 0, 0, 20)), done: !!(m.tut && m.tut.done) };
             this.pendingBoon = m.pending === true;
+            // keep the telegraphed raid sides across a reload (a mid-raid save replays the same wave)
+            this._loadedSides = Array.isArray(m.sides) ? [...new Set(m.sides.map(Number).filter(s => s >= 0 && s <= 3))].slice(0, 3) : null;
             this.reignCrowns = safeNum(m.reignCrowns, 1, 0.5, 2);
             if (this.pendingBoon) setTimeout(() => this.offerPendingBoon(), 1500);
             this.tipsSeen = {};

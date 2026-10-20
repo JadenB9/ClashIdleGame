@@ -371,7 +371,7 @@
             } else {
                 setText(el.waveTimer, fmtTime(this.wave.timer));
                 el.waveTimer.classList.toggle('danger', this.wave.timer < 10);
-                setText(el.waveInfo, `Next: wave ${this.wave.number + 1} · ${this.sideNames(this.wave.nextSides)}`);
+                setText(el.waveInfo, `Next ${this.wave.number + 1} · ${this.sideNames(this.wave.nextSides)}`);
             }
             const counts = {};
             const src = this.wave.active ? this.enemies.map(e => e.kind).concat(this.wave.queue.slice(this.wave.total - this.wave.spawnLeft)) : this.wave.next;

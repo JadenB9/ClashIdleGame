@@ -146,7 +146,7 @@
             for (let i = all.length - 1; i > 0; i--) { const j = randi(0, i + 1); [all[i], all[j]] = [all[j], all[i]]; }
             return all.slice(0, count);
         }
-        sideNames(sides) { return (sides || []).map(s => ['NE', 'SE', 'SW', 'NW'][s]).join(' + '); }
+        sideNames(sides) { return (sides || []).map(s => ['NE', 'SE', 'SW', 'NW'][s]).join('+'); }
         // Red markers: on the map near the edge, or pinned to the screen border when that edge is out of view
         drawRaidSides(g) {
             const show = this.wave.active || this.wave.timer < 25;

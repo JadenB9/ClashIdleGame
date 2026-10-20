@@ -201,7 +201,8 @@
             if (!this.hadSave) this.cam.zoom = this.homeZoom();
             this.centerCamera();
             this.wave.next = this.buildQueue(this.wave.number + 1);
-            this.wave.nextSides = this.pickSides(this.wave.number + 1);
+            this.wave.nextSides = (this._loadedSides && this._loadedSides.length) ? this._loadedSides : this.pickSides(this.wave.number + 1);
+            this._loadedSides = null;
 
             this.lastTime = performance.now();
             requestAnimationFrame((t) => this.loop(t));

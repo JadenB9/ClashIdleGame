@@ -695,3 +695,13 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
 @media (max-width: 560px) {
     #app.has-sel .toasts, #app.drawer-open .toasts { top: 120px; bottom: auto; width: 64%; }
 }
+
+/* raid text stays on one line; on phones the preview icons give way so the card stays small */
+#waveInfo { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 560px) {
+    .hud-left { width: 150px; }
+    .wave-head { font-size: 12px; }
+    .wave-preview { display: none; }
+    .wave-timer { font-size: 20px; }
+}
+#waveInfo { min-width: 0; }
