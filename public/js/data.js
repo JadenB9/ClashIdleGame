@@ -32,8 +32,8 @@
         spellRadius: 3.2,
         spellBaseDmg: 260,
         prosperityCap: 0.15,         // decorations stop adding production past +15%
-        ascendMinWave: 15,           // waves survived before the kingdom can ascend
-        boostCost: 2,                // gems for a minute of double income
+        ascendMinWave: 18,           // waves survived before the kingdom can ascend
+        boostCost: 3,                // gems for a minute of double income
         freezeCost: 2,               // gems to freeze every raider for four seconds
         bubbleSec: 7,                // a mine or well refills its tap-to-collect bubble this often
         autoCollectRate: 0.8,        // auto-collect pays this share of a manual tap
@@ -59,7 +59,7 @@
             provides: (lv) => ({ cap: 3000 + lv * 2500 }),
         },
         goldmine: {
-            name: 'Gold Mine', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 1, costScale: 1.3,
+            name: 'Gold Mine', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 1, costScale: 1.3, maxCount: 6,
             baseCost: { gold: 300 }, baseHP: 500, tone: '#d9b34e',
             desc: 'Digs gold around the clock. Tap it for a bonus burst.',
             upgradeCost: (lv) => ({ gold: 400 * Math.pow(1.55, lv - 1), elixir: 25 * Math.pow(1.5, lv - 1) }),
@@ -67,7 +67,7 @@
             clickBonus: (lv) => ({ gold: 15 + lv * 12 }),
         },
         elixirwell: {
-            name: 'Elixir Well', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 2, costScale: 1.3,
+            name: 'Elixir Well', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 2, costScale: 1.3, maxCount: 4,
             baseCost: { gold: 650 }, baseHP: 500, tone: '#c471ed',
             desc: 'Pumps magical elixir from deep underground. Tap for a burst.',
             upgradeCost: (lv) => ({ gold: 600 * Math.pow(1.55, lv - 1), elixir: 80 * Math.pow(1.5, lv - 1) }),
@@ -75,7 +75,7 @@
             clickBonus: (lv) => ({ elixir: 10 + lv * 8 }),
         },
         darkdrill: {
-            name: 'Dark Drill', cat: 'economy', size: 1, maxLevel: 20, unlockLevel: 6, costScale: 1.35,
+            name: 'Dark Drill', cat: 'economy', size: 1, maxLevel: 20, unlockLevel: 6, costScale: 1.35, maxCount: 3,
             baseCost: { gold: 4500, elixir: 1200 }, baseHP: 700, tone: '#6b2cc9',
             desc: 'Bores for rare dark elixir, the fuel of the strongest defenses.',
             upgradeCost: (lv) => ({ gold: 5000 * Math.pow(1.7, lv - 1), elixir: 1500 * Math.pow(1.6, lv - 1) }),
@@ -142,7 +142,7 @@
             name: 'Wizard Tower', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 6,
             baseCost: { gold: 3200, elixir: 900 }, baseHP: 420, tone: '#5c9de0',
             desc: 'Arcane bolts that splash across a crowd.',
-            upgradeCost: (lv) => ({ gold: 3500 * Math.pow(1.6, lv - 1), elixir: 1100 * Math.pow(1.55, lv - 1) }),
+            upgradeCost: (lv) => ({ gold: 3500 * Math.pow(1.6, lv - 1), elixir: 1100 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 8 * Math.pow(1.45, lv - 3) } : {}) }),
             defense: (lv) => ({ range: 4.5, dmg: 40 + lv * 20, cd: 1.8, splash: 1.2 }),
         },
         frost: {
@@ -156,14 +156,14 @@
             name: 'Hidden Tesla', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 7,
             baseCost: { gold: 4200, elixir: 1400 }, baseHP: 600, tone: '#7aa6ff',
             desc: 'Crackling coil that fires very fast.',
-            upgradeCost: (lv) => ({ gold: 4500 * Math.pow(1.6, lv - 1), elixir: 1500 * Math.pow(1.55, lv - 1) }),
+            upgradeCost: (lv) => ({ gold: 4500 * Math.pow(1.6, lv - 1), elixir: 1500 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 10 * Math.pow(1.45, lv - 3) } : {}) }),
             defense: (lv) => ({ range: 5, dmg: 28 + lv * 16, cd: 0.55, splash: 0 }),
         },
         xbow: {
             name: 'X-Bow', cat: 'defense', size: 1, maxLevel: 18, unlockLevel: 8,
             baseCost: { gold: 6000, elixir: 2000 }, baseHP: 520, tone: '#a67c4a',
             desc: 'A siege crossbow with enormous range.',
-            upgradeCost: (lv) => ({ gold: 6500 * Math.pow(1.6, lv - 1), elixir: 2200 * Math.pow(1.55, lv - 1) }),
+            upgradeCost: (lv) => ({ gold: 6500 * Math.pow(1.6, lv - 1), elixir: 2200 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 12 * Math.pow(1.45, lv - 3) } : {}) }),
             defense: (lv) => ({ range: 9, dmg: 22 + lv * 12, cd: 0.35, splash: 0 }),
         },
         inferno: {
@@ -176,9 +176,9 @@
         clancastle: {
             name: 'Clan Castle', cat: 'defense', size: 2, maxLevel: 18, unlockLevel: 5, maxCount: 1,
             baseCost: { gold: 5500, elixir: 1200 }, baseHP: 1600, tone: '#8f95b2',
-            desc: 'A fortress that defends itself and pays +1 gem per wave per level.',
+            desc: 'A fortress that defends itself and pays a gem every wave for every two levels.',
             upgradeCost: (lv) => ({ gold: 6500 * Math.pow(1.6, lv - 1), elixir: 1500 * Math.pow(1.55, lv - 1) }),
-            provides: (lv) => ({ waveGems: lv }),
+            provides: (lv) => ({ waveGems: Math.ceil(lv / 2) }),
             defense: (lv) => ({ range: 4, dmg: 30 + lv * 15, cd: 1.5, splash: 0.8 }),
         },
         armycamp: {
@@ -237,7 +237,7 @@
         skeleton: { name: 'Skeleton', hp: 80,   dmg: 14, spd: 1.2, gold: 34,  xp: 6,  size: 10, prefers: 'defense', reach: 3 },
         troll:    { name: 'Troll',    hp: 280,  dmg: 32, spd: 0.8, gold: 85,  xp: 12, size: 15, prefers: 'defense' },
         ogre:     { name: 'Ogre',     hp: 620,  dmg: 55, spd: 0.6, gold: 180, xp: 24, size: 18, prefers: 'defense' },
-        golem:    { name: 'Stone Golem', hp: 4200, dmg: 90, spd: 0.45, gold: 900, xp: 120, size: 26, prefers: 'core', boss: true },
+        golem:    { name: 'Stone Golem', hp: 6000, dmg: 100, spd: 0.45, gold: 900, xp: 120, size: 26, prefers: 'core', boss: true },
         bat:      { name: 'Bat',      hp: 30,   dmg: 6,  spd: 2.0, gold: 25,  xp: 5,  size: 8,  flying: true, prefers: 'economy' },
         dragon:   { name: 'Dragon',   hp: 200,  dmg: 28, spd: 1.2, gold: 100, xp: 15, size: 20, flying: true, prefers: 'any' },
     };
@@ -259,7 +259,7 @@
     const DIFFICULTY = {
         easy:   { label: 'Relaxed', hp: 0.7, dmg: 0.6,  loot: 1.0, crowns: 0.8, desc: 'Weaker raiders. Good for idling.' },
         normal: { label: 'Normal',  hp: 1,    dmg: 1,    loot: 1.0, crowns: 1.0, desc: 'The intended challenge.' },
-        hard:   { label: 'Hard',    hp: 1.6, dmg: 1.5,  loot: 1.2, crowns: 1.3, desc: 'Tougher raiders, better loot and crowns.' },
+        hard:   { label: 'Hard',    hp: 2.2, dmg: 1.8,  loot: 1.2, crowns: 1.4, desc: 'Tougher raiders, better loot and crowns.' },
     };
 
     // ---------- WAVE BOONS ----------

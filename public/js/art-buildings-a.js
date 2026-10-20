@@ -142,6 +142,25 @@
         g.closePath(); g.fill();
         g.strokeStyle = 'rgba(10,30,10,0.45)'; g.lineWidth = 0.9; g.stroke();
     };
+    // A metal rim that shows the tier: silver, then gold, then gold with gems at the corners.
+    // top is the y of the diamond the rim follows (negative = raised).
+    const rimTrim = (g, geo, scale, top) => {
+        const tier = geo.tier || 1;
+        if (tier < 2) return;
+        const rim = tier === 2 ? '#d4d8e4' : '#f0c040', X = geo.fw * scale, Y = geo.fh * scale;
+        g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
+        g.strokeStyle = 'rgba(40,24,6,0.8)'; g.lineWidth = 3.4;
+        g.beginPath(); g.moveTo(-X, top); g.lineTo(0, Y + top); g.lineTo(X, top); g.stroke();
+        g.strokeStyle = rim; g.lineWidth = 1.9; g.stroke();
+        if (tier === 4) {
+            for (const [gx, gy, col] of [[-X, top, '#ff5a5a'], [0, Y + top, '#5cd8ff'], [X, top, '#7adf6a']]) {
+                g.fillStyle = col; g.strokeStyle = 'rgba(20,10,10,0.9)'; g.lineWidth = 1;
+                g.beginPath(); g.arc(gx, gy, 2.8, 0, 7); g.fill(); g.stroke();
+                g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.arc(gx - 0.8, gy - 0.9, 0.9, 0, 7); g.fill();
+            }
+        }
+        g.restore();
+    };
     // Low cobbled plinth that every building stands on
     const plate = (g, geo, scale = 0.98, color = '#8c8576', h = 3) => {
         const { fw, fh, hk } = geo;
@@ -151,23 +170,7 @@
             R: T.stone(96, 20, shade(color, 0.85), { rows: 2, seed: 3 }),
             top: T.stone(128, 128, shade(color, 0.92), { rows: 9, aspect: 1.1, seed: 5 }),
         });
-        // the plinth earns a metal rim as the building levels: silver, then gold, then gold with gems
-        const tier = geo.tier || 1;
-        if (tier >= 2) {
-            const rim = tier === 2 ? '#d4d8e4' : '#f0c040', top = -h * hk, X = fw * scale, Y = fh * scale;
-            g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
-            g.strokeStyle = 'rgba(40,24,6,0.8)'; g.lineWidth = 3.4;
-            g.beginPath(); g.moveTo(-X, top); g.lineTo(0, Y + top); g.lineTo(X, top); g.stroke();
-            g.strokeStyle = rim; g.lineWidth = 1.9; g.stroke();
-            if (tier === 4) {
-                for (const [gx, gy, col] of [[-X, top, '#ff5a5a'], [0, Y + top, '#5cd8ff'], [X, top, '#7adf6a']]) {
-                    g.fillStyle = col; g.strokeStyle = 'rgba(20,10,10,0.9)'; g.lineWidth = 1;
-                    g.beginPath(); g.arc(gx, gy, 2.8, 0, 7); g.fill(); g.stroke();
-                    g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.arc(gx - 0.8, gy - 0.9, 0.9, 0, 7); g.fill();
-                }
-            }
-            g.restore();
-        }
+        rimTrim(g, geo, scale, -h * hk);
     };
     // General prism along the tile axes (walls, fences). a,b = half extents in tiles.
     const prism = (g, o) => {
@@ -207,7 +210,7 @@
         }
     };
 
-    A.h = { onFace, faceWorld, glowAt, windowF, doorF, timberF, coinPile, flagPole, leafBlob, plate, prism, archPath, faceSpace };
+    A.h = { rimTrim, onFace, faceWorld, glowAt, windowF, doorF, timberF, coinPile, flagPole, leafBlob, plate, prism, archPath, faceSpace };
 
     // =========================================================
     // TOWN HALL (2x2)
@@ -289,6 +292,7 @@
         diamondPath(g, 0, 2, fw * 0.98, fh * 0.98);
         g.fillStyle = '#7d5d3a'; g.fill();
         g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 1; g.stroke();
+        rimTrim(g, geo, 0.98, 2);
         // rocky hill
         const pts = [[-0.96, 0.05, 0], [-0.8, -0.1, 18], [-0.5, -0.3, 30], [-0.15, -0.42, 40], [0.2, -0.38, 36], [0.55, -0.2, 24], [0.92, 0.02, 8], [0.7, 0.45, 0], [0.0, 0.8, 0], [-0.7, 0.45, 0]];
         const P2 = pts.map(([x, y, h]) => ({ x: x * fw, y: y * fh * 1.0 - H(h) * 0.0 - H(h) }));
@@ -442,6 +446,7 @@
         // sunken pit
         diamondPath(g, 0, 2, fw * 0.98, fh * 0.98);
         g.fillStyle = '#6e6a76'; g.fill(); g.strokeStyle = 'rgba(0,0,0,0.4)'; g.lineWidth = 1; g.stroke();
+        rimTrim(g, geo, 0.98, 2);
         g.save(); diamondPath(g, 0, 2, fw * 0.98, fh * 0.98); g.clip();
         g.drawImage(T.rock(96, 64, '#7a7684', 21), -fw, -fh, fw * 2, fh * 2.1);
         g.restore();
@@ -613,6 +618,7 @@
         geo.shadowAt(8, 5, fw * 1.5, fh * 1.5, 0.9);
         diamondPath(g, 0, 2, fw * 0.98, fh * 0.98);
         g.fillStyle = '#7d6a48'; g.fill(); g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 1; g.stroke();
+        rimTrim(g, geo, 0.98, 2);
         g.save(); diamondPath(g, 0, 2, fw * 0.98, fh * 0.98); g.clip();
         g.globalAlpha = 0.55; g.drawImage(T.rock(96, 64, '#8a7650', 31), -fw, -fh, fw * 2, fh * 2.1); g.restore();
         // tent: front-facing pyramid of canvas with stripes

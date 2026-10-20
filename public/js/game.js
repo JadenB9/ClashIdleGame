@@ -140,7 +140,7 @@
             this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0, goblins: 0, bosses: 0, boons: 0, freezes: 0, collects: 0 };
             this.achievements = {};
             this.dayTime = 0.25; this.dayCount = 1;
-            this.wave = { number: 0, timer: 90, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
+            this.wave = { number: 0, timer: 120, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
 
             // ascension and quests
             this.crowns = 0; this.crownsEver = 0; this.ascensions = 0;
@@ -198,9 +198,10 @@
             this.buildMenu();
             this.bindUI();
             this.initTheme();
-            if (!this.hadSave) this.cam.zoom = CFG.homeZoom;
+            if (!this.hadSave) this.cam.zoom = this.homeZoom();
             this.centerCamera();
             this.wave.next = this.buildQueue(this.wave.number + 1);
+            this.wave.nextSides = this.pickSides(this.wave.number + 1);
 
             this.lastTime = performance.now();
             requestAnimationFrame((t) => this.loop(t));
@@ -256,6 +257,8 @@
             this.syncSettingsUI();
         }
 
+        // phones need to see more of the map than a desktop does
+        homeZoom() { return CFG.homeZoom * (this.vw < 600 ? 0.62 : this.vw < 900 ? 0.8 : 1); }
         centerCamera() {
             const mid = this.worldIso(CFG.gridW / 2, CFG.gridH / 2);
             this.cam.x = this.vw / 2 - mid.x * this.cam.zoom;
@@ -536,6 +539,7 @@
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             const dialogOpen = document.getElementById('modal').classList.contains('open') || document.querySelector('.confirm-dialog.open');
             if (dialogOpen && e.key !== 'Escape') return;
+            if (this.welcomeOpen) return;
             const k = e.key;
             if (e.repeat && 'frwulp x'.includes(k.toLowerCase()) && k !== 'Escape') return;
             if (k === 'Escape') {
@@ -548,7 +552,7 @@
             if (k === ' ' && tag !== 'BUTTON') { e.preventDefault(); this.collectAll(); }
             else if (k === '+' || k === '=') this.zoomBy(1.15, this.vw / 2, this.vh / 2);
             else if (k === '-' || k === '_') this.zoomBy(1 / 1.15, this.vw / 2, this.vh / 2);
-            else if (k === '0') { this.cam.zoom = CFG.homeZoom; this.centerCamera(); }
+            else if (k === '0') { this.cam.zoom = this.homeZoom(); this.centerCamera(); }
             else if (k === 'w' || k === 'W') this.activateWarCry();
             else if (k === 'l' || k === 'L') this.beginSpell();
             else if (k === 'f' || k === 'F') this.castFreeze();
@@ -614,6 +618,7 @@
         }
 
         selectBuilding(b, quiet = false) {
+            if (this.panel && this.isNarrow && this.isNarrow()) this.closePanel();
             this.selected = b;
             this.selPulse = 1;
             if (!quiet) this.audio.click();
@@ -836,7 +841,7 @@
         // ---------- combat ----------
         buildQueue(n) {
             const table = waveTable(n);
-            const total = Math.min(4 + n * 2, 60);
+            const total = n === 1 ? 4 : n === 2 ? 6 : Math.min(4 + n * 2, 60);
             const sum = table.reduce((s, e) => s + e.w, 0);
             const q = [];
             for (let i = 0; i < total; i++) {
@@ -855,8 +860,11 @@
             this.wave.total = this.wave.queue.length;
             this.wave.spawnLeft = this.wave.queue.length;
             this.wave.spawnCd = 0.8;
+            this.wave.sides = (this.wave.nextSides && this.wave.nextSides.length) ? this.wave.nextSides : this.pickSides(this.wave.number);
+            this.wave.nextSides = this.pickSides(this.wave.number + 1);
             this.wave.next = this.buildQueue(this.wave.number + 1);
             this.audio.wave();
+            if (!this.tipsSeen.sides) { this.tipsSeen.sides = true; setTimeout(() => this.toast('Red arrows show which side the raid comes from. Put towers and walls there.', 'tip'), 1500); }
             const boss = this.wave.queue.includes('golem');
             this.toast(boss ? `Wave ${this.wave.number}: a Stone Golem approaches!` : `Wave ${this.wave.number}: ${this.wave.total} raiders incoming`, 'warn');
             this.showAlert(boss ? `BOSS WAVE ${this.wave.number}` : `WAVE ${this.wave.number}`, 3, boss);
@@ -864,7 +872,8 @@
 
         spawnEnemy(kind) {
             const T = ENEMY[kind];
-            const edge = randi(0, 4);
+            const sides = (this.wave.sides && this.wave.sides.length) ? this.wave.sides : [0, 1, 2, 3];
+            const edge = sides[randi(0, sides.length)];
             let tx, ty;
             if (edge === 0)      { tx = randi(0, CFG.gridW); ty = -2; }
             else if (edge === 1) { tx = CFG.gridW + 1; ty = randi(0, CFG.gridH); }
@@ -1393,6 +1402,7 @@
             const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy);
             this.goblin = { tx: a[0], ty: a[1], vx: dx / d * 1.9, vy: dy / d * 1.9, x: 0, y: 0, dir: 1, ph: 0, left: d / 1.9 + 1, gone: false };
             this.showAlert('A TREASURE GOBLIN!', 2.2);
+            if (!this.tipsSeen.goblin) { this.tipsSeen.goblin = true; this.toast('Tap the Treasure Goblin before it escapes: gold and gems!', 'tip'); }
             this.audio.beep(1568, 0.12, 'triangle', 0.3); setTimeout(() => this.audio.beep(2093, 0.16, 'triangle', 0.3), 120);
         }
         goblinTick(dt) {
@@ -1487,18 +1497,18 @@
             const gain = skipGain ? 0 : this.ascendGain();
             this.crowns += gain; this.crownsEver += gain; if (!skipGain) this.ascensions++;
             // a fresh reign: kingdom, wave and level restart; crowns, perks, achievements and lifetime stats stay
-            this.res = { gold: 500 + 500 * this.perks.headstart, elixir: 150, dark: 0, gems: this.res.gems + 2 };
+            this.res = { gold: 500 + 500 * this.perks.headstart, elixir: 150, dark: 0, gems: this.res.gems + (skipGain ? 0 : 2) };
             this.reignCrowns = this.diff().crowns; this.pendingBoon = false;
             this.player.level = 1; this.player.xp = 0;
             this.buildings = []; this.enemies = []; this.projectiles = []; this.beams = []; this.goblin = null;
             this.boons = {};
-            this.wave = { number: 0, timer: 90, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
+            this.wave = { number: 0, timer: 120, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
             this.dayTime = 0.25; this.dayCount = 1;
             this.boost = { mult: 1, timeLeft: 0 }; this.warCry = { active: false, timeLeft: 0, cooldown: 0 };
             this.selected = null; this.hoverBuilding = null; this.gameOverShown = false; this.paused = false;
             this.quests = []; this.fillQuests();
             this.placeInitial();
-            this.wave.next = this.buildQueue(1);
+            this.wave.next = this.buildQueue(1); this.wave.nextSides = this.pickSides(1);
             this.checkAchievements();
             this.buildMenu(true); this.refreshSelection(); this.updateUI();
             this.centerCamera();
@@ -1593,9 +1603,9 @@
                 // a raider stuck outside tower range must not hold the next wave hostage forever
                 if (this.wave.spawnLeft <= 0 && this.enemies.length > 0) {
                     this.wave.stall = (this.wave.stall || 0) + dt;
-                    if (this.wave.stall > 100) {
+                    if (this.wave.stall > 60) {
                         if (!this.wave.stallWarned) { this.wave.stallWarned = true; this.toast('The last raiders lose heart and flee', 'warn'); }
-                        for (const e of this.enemies) if (e.hp > 0) { e.hp -= e.maxHp * 0.03 * dt; if (e.hp <= 0) this.killEnemy(e); }
+                        for (const e of this.enemies) if (e.hp > 0) { e.hp -= e.maxHp * 0.05 * dt; if (e.hp <= 0) this.killEnemy(e); }
                     }
                 } else this.wave.stall = 0;
                 if (this.wave.spawnLeft <= 0 && this.enemies.length === 0) {
@@ -1735,6 +1745,7 @@
                 this._vig = gr; this._vigW = this.vw; this._vigH = this.vh;
             }
             g.fillStyle = this._vig; g.fillRect(0, 0, this.vw, this.vh);
+            this.drawRaidSides(g);
             this.drawWeather(g);
             if (this.flash > 0) { g.fillStyle = `rgba(${this.flashTint || '255,255,255'},${this.flash})`; g.fillRect(0, 0, this.vw, this.vh); }
         }

@@ -26,9 +26,9 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   cheapest" and "upgrade all you can", and an optional auto-upgrade
   (economy, defense or everything).
 - **Reset and Ascension.** Menu → Reset everything wipes the save (two
-  confirmations). Reach wave 10 and **Ascend** for crowns instead: the
+  confirmations). Survive 15 waves and **Ascend** for crowns instead: the
   kingdom restarts and crowns buy permanent perks (production, tower
-  damage, XP, starting gold).
+  damage, XP, starting gold). Gems, crowns, perks and achievements stay.
 - **More to build.** 18 original structures plus the Frost Spire (slows
   raiders), Gem Quarry and four decorations (oak, garden, fountain, hero
   statue) that add a little production each. Walls connect to each other
@@ -38,10 +38,25 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   only chew through when walking is much worse. Wolves, skeleton archers
   and the Stone Golem boss (every tenth wave) join the goblins, orcs,
   trolls, ogres, bats and dragons. The raid card previews the next wave.
+- **Clear from the first minute.** A goal card walks a new player through
+  eight steps (tap a coin bubble, upgrade, build a cannon, survive a raid,
+  pick a boon, the Upgrade tab, quests, the long-term goal), pointing at what
+  to press. A hint banner says what the next tap will do while you place or
+  aim something, a few one-time tips cover storage, night, flyers and
+  damage, and `?` / the help button opens a one-screen How to play.
+- **Coin bubbles.** Mines and wells fill a bubble every few seconds. Tap it
+  for a bonus; tap several in a row for a combo. Collect All grabs every
+  ready one (no combo) and Auto-collect pays 80%.
+- **Raid spoils.** After every wave pick one of three boons (stronger
+  towers, more income, tougher walls, treasure, repairs…). Stacking ones
+  last for the reign.
 - **Things to do.** Three rotating quests for gems, achievements, a Treasure
-  Goblin that runs across the map (click it), combo clicks, War Cry,
-  lightning, gem boost, 1x/2x/3x game speed.
-- **Saves.** `localStorage`, versioned (v6) with a backup slot, corrupt-save
+  Goblin that runs across the map (click it), War Cry, Lightning, Freeze,
+  gem Boost, 1x/2x/3x game speed, and a Relaxed / Normal / Hard setting.
+- **Alive map.** Rain comes and goes, birds cross the sky, hurt buildings
+  smoke and then burn, maxed buildings shine, and every upgrade tier adds a
+  metal trim to the plinth plus extra crystals, coils or barrels.
+- **Saves.** `localStorage`, versioned (v7) with a backup slot, corrupt-save
   recovery and export / import. The tab pauses when hidden; time away
   pays half rate for up to 4 hours. Old saves load unchanged.
 - **Themes.** Light and dark follow the site's `localStorage.theme`. Number
@@ -50,8 +65,8 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
 - **Phones.** Pinch to zoom, one-finger pan, panels become a bottom sheet.
 
 Keyboard: Space collect, U upgrade, P pause, X speed, V camera, W War Cry,
-L lightning, A auto-collect, R rally, M mute, T theme, 1–5 panels, +/− zoom,
-0 home, Esc cancel, ? list.
+L lightning, F freeze, A auto-collect, R rally, M mute, T theme, 1–5 panels,
++/− zoom, 0 home, Esc cancel, ? or H how to play.
 
 ## Running it
 
@@ -83,7 +98,8 @@ Cloudflare Pages publishes at `j4den.com/clashidle`. Details in
 - `public/js/art-world.js`: island, meadow, scenery, clouds
 - `public/js/art-units.js`: raiders, turret parts, flags and fire
 - `public/js/game.js`: state, combat, economy, input, rendering
-- `public/js/ui.js`: panels, selection card, dialogs
+- `public/js/ui.js`: panels, selection card, dialogs, goal card, boon picker
+- `public/js/features.js`: first-run goals, tips, boons, freeze, weather, birds, damage effects
 - `public/js/net.js`: co-op and save / load
 - `public/css/style.css`: the HUD (dark tokens on `:root`, light on
   `:root[data-theme="light"]`)

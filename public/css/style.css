@@ -678,3 +678,14 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
     .toasts { top: auto; bottom: 186px; }
     .goal-card { max-width: 170px; }
 }
+
+/* phones: the selection card and goal card step aside for an open panel */
+@media (max-width: 880px) {
+    #app.drawer-open .sel-card, #app.drawer-open .goal-card { display: none; }
+    .boon-card { display: grid; grid-template-columns: 44px 1fr; grid-template-rows: auto auto auto; column-gap: 12px; row-gap: 2px; align-items: center; text-align: left; }
+    .boon-card .ico { grid-row: 1 / 4; width: 40px; height: 40px; }
+    .boon-card span { flex: none; }
+}
+@media (max-width: 560px) {
+    .mode-hint { top: auto; bottom: 182px; max-width: 94%; }
+}

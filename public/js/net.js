@@ -649,7 +649,7 @@
                 stats: this.stats,
                 achievements: this.achievements,
                 // reloading mid-raid replays that wave soon instead of silently skipping it
-                wave: { number: this.wave.active ? Math.max(0, this.wave.number - 1) : this.wave.number, timer: this.wave.active ? 8 : sanitizedTimer },
+                wave: { number: this.wave.active ? Math.max(0, this.wave.number - 1) : this.wave.number, timer: this.wave.active ? 18 : sanitizedTimer },
                 dayTime: this.dayTime,
                 dayCount: this.dayCount,
                 cam: { zoom: this.cam.zoom },
@@ -760,7 +760,7 @@
             this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, difficulty: 'normal' };
             this.boons = {}; this.tut = { step: 0, done: false }; this.tipsSeen = {};
             this.quests = [];
-            this.wave.number = 0; this.wave.timer = 90; this.wave.active = false;
+            this.wave.number = 0; this.wave.timer = 120; this.wave.active = false;
             this.dayTime = 0.25; this.dayCount = 1;
             this.cam.zoom = 1;
             this.audio.muted = false; this.autoCollect = false;
@@ -837,7 +837,7 @@
                 const def = BLD[sb.type];
                 if (!Number.isInteger(sb.tx) || !Number.isInteger(sb.ty)) continue;
                 if (!this.canPlace(sb.type, sb.tx, sb.ty)) continue;
-                if (def.maxCount && this.countOf(sb.type) >= def.maxCount) continue;
+                if (def.cat === 'core' && def.maxCount && this.countOf(sb.type) >= def.maxCount) continue;   // older saves may hold more mines than the new limit; they are kept
                 const level = Math.floor(safeNum(sb.level, 1, 1, def.maxLevel));
                 const maxHp = this.hpFor(sb.type, level);
                 const hp = safeNum(sb.hp, maxHp, 0, maxHp);

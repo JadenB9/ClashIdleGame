@@ -137,6 +137,46 @@
             this.checkAchievements(); this.updateUI(); this.save();
         }
 
+        // ---------- raid directions ----------
+        // Each wave comes from one to three sides of the island, shown ahead of time.
+        // Edge 0 is the top-right edge of the map, then clockwise.
+        pickSides(n) {
+            const count = n % 10 === 0 ? 2 : n < 6 ? 1 : n < 15 ? 2 : 3;
+            const all = [0, 1, 2, 3];
+            for (let i = all.length - 1; i > 0; i--) { const j = randi(0, i + 1); [all[i], all[j]] = [all[j], all[i]]; }
+            return all.slice(0, count);
+        }
+        sideNames(sides) { return (sides || []).map(s => ['NE', 'SE', 'SW', 'NW'][s]).join(' + '); }
+        // Red markers: on the map near the edge, or pinned to the screen border when that edge is out of view
+        drawRaidSides(g) {
+            const show = this.wave.active || this.wave.timer < 25;
+            const sides = this.wave.active ? this.wave.sides : this.wave.nextSides;
+            if (!show || !sides || !sides.length || this.gameOverShown) return;
+            const gw = CFG.gridW, gh = CFG.gridH, t = this.tnow;
+            const spots = [[gw / 2, -1.4], [gw + 1.4, gh / 2], [gw / 2, gh + 1.4], [-1.4, gh / 2]];
+            const c = this.worldIso(gw / 2, gh / 2);
+            const cs = { x: this.cam.x + c.x * this.cam.zoom, y: this.cam.y + c.y * this.cam.zoom };
+            const m = 46, top = 108, bot = this.vh - 100;
+            for (const s of sides) {
+                const w = this.worldIso(spots[s][0], spots[s][1]);
+                let x = this.cam.x + w.x * this.cam.zoom, y = this.cam.y + w.y * this.cam.zoom;
+                const off = x < m || x > this.vw - m || y < top || y > bot;
+                const ux = x, uy = y;
+                x = Math.max(m, Math.min(this.vw - 86, x)); y = Math.max(top, Math.min(bot, y));
+                // arrow points at the marker when it is off-screen, otherwise inward toward the village
+                let dx = off ? ux - x : cs.x - x, dy = off ? uy - y : cs.y - y;
+                const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+                const pulse = 0.5 + 0.5 * Math.sin(t * 6);
+                g.save(); g.translate(x, y);
+                g.fillStyle = `rgba(255,70,60,${0.25 + pulse * 0.2})`; g.beginPath(); g.arc(0, 0, 26 + pulse * 5, 0, TAU); g.fill();
+                g.fillStyle = '#c8302a'; g.strokeStyle = '#ffe0d8'; g.lineWidth = 2.6; g.beginPath(); g.arc(0, 0, 19, 0, TAU); g.fill(); g.stroke();
+                g.rotate(Math.atan2(dy, dx));
+                g.fillStyle = '#fff'; g.strokeStyle = '#4a0808'; g.lineWidth = 1.6;
+                g.beginPath(); g.moveTo(9, 0); g.lineTo(-2, -9); g.lineTo(-2, -3.6); g.lineTo(-9, -3.6); g.lineTo(-9, 3.6); g.lineTo(-2, 3.6); g.lineTo(-2, 9); g.closePath(); g.fill(); g.stroke();
+                g.restore();
+            }
+        }
+
         // ---------- freeze ----------
         castFreeze() {
             if (!this.enemies.length) { this.toast('No raiders to freeze right now', 'warn'); this.audio.error(); return; }

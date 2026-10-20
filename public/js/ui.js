@@ -106,7 +106,7 @@
             click('btnSpeed', () => this.cycleSpeed());
             click('zoomIn', () => this.zoomBy(1.2, this.vw / 2, this.vh / 2));
             click('zoomOut', () => this.zoomBy(1 / 1.2, this.vw / 2, this.vh / 2));
-            click('zoomReset', () => { this.cam.zoom = CFG.homeZoom; this.centerCamera(); });
+            click('zoomReset', () => { this.cam.zoom = this.homeZoom(); this.centerCamera(); });
 
             // settings
             click('btnSound', () => this.toggleSound());
@@ -367,11 +367,11 @@
             if (this.wave.active) {
                 const left = this.enemies.length + this.wave.spawnLeft;
                 setText(el.waveTimer, `${left} left`); el.waveTimer.classList.add('danger');
-                setText(el.waveInfo, `Wave ${this.wave.number}`);
+                setText(el.waveInfo, `Wave ${this.wave.number} · ${this.sideNames(this.wave.sides)}`);
             } else {
                 setText(el.waveTimer, fmtTime(this.wave.timer));
                 el.waveTimer.classList.toggle('danger', this.wave.timer < 10);
-                setText(el.waveInfo, `Next: wave ${this.wave.number + 1}`);
+                setText(el.waveInfo, `Next: wave ${this.wave.number + 1} · ${this.sideNames(this.wave.nextSides)}`);
             }
             const counts = {};
             const src = this.wave.active ? this.enemies.map(e => e.kind).concat(this.wave.queue.slice(this.wave.total - this.wave.spawnLeft)) : this.wave.next;
@@ -383,7 +383,7 @@
             setText(el.dayTime, `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`);
             setText(el.dayCount, this.isNight() ? `Day ${this.dayCount} · +25%` : `Day ${this.dayCount}`);
             el.dayPanel.classList.toggle('night', this.isNight());
-            setText(el.zoom, `${Math.round(this.cam.zoom / CFG.homeZoom * 100)}%`);
+            setText(el.zoom, `${Math.round(this.cam.zoom / this.homeZoom() * 100)}%`);
 
             if (el.combo) {
                 if (this.combo.count >= 3) { setText(el.combo, `COMBO x${this.combo.mult}`); el.combo.classList.add('show'); } else el.combo.classList.remove('show');
@@ -589,7 +589,7 @@
                 return `<div class="quest${q.done ? ' done' : ''}">
                     <div class="quest-text">${kind.text(fmt(q.target)).replace(/(\d[\d.,KMBT]*)/, '<b>$1</b>')}</div>
                     <div class="bar"><span data-w="${pct}"></span><em>${fmt(prog)} / ${fmt(q.target)}</em></div>
-                    <button type="button" class="btn small ${q.done ? 'gold' : ''}" ${q.done ? `data-claim="${i}"` : 'disabled'}>${q.done ? `Claim ${q.gems} ${ico('gem')}` : `${q.gems} ${ico('gem')}`}</button>
+                    <button type="button" class="btn small ${q.done ? 'gold' : ''}" ${q.done ? `data-claim="${i}"` : 'disabled'}>${q.done ? `Claim ${q.gems} ${ico('gem')}` : `Reward ${q.gems} ${ico('gem')}`}</button>
                 </div>`;
             }).join('');
             const ql = $('questList'); if (setHtml(ql, qs)) fixBars(ql);
@@ -603,7 +603,7 @@
             }).join('');
             const asc = `<div class="crown-row">${ico('crown', 'big')}<div><b>${this.crowns}</b> crown${this.crowns === 1 ? '' : 's'}<small>${this.ascensions} ascension${this.ascensions === 1 ? '' : 's'} · reign ${this.ascensions + 1}</small></div></div>
                 <p class="hint">Ascending starts a new reign: your buildings, level, wave and resources reset. Crowns, perks, gems, achievements and statistics stay. ${can ? `Right now it would earn <b>${gain} crown${gain === 1 ? '' : 's'}</b>.` : `Survive ${CFG.ascendMinWave} waves to unlock it (${this.wavesSurvived()} so far).`}</p>
-                <button type="button" class="btn ascend" data-ascend="1" ${can ? '' : 'disabled'}>${ico('crown')}Ascend for ${can ? gain : '?'} crown${gain === 1 ? '' : 's'}</button>
+                <button type="button" class="btn ascend" data-ascend="1" ${can ? '' : 'disabled'}>${ico('crown')}${can ? `Ascend for ${gain} crown${gain === 1 ? '' : 's'}` : `Ascend (needs ${CFG.ascendMinWave} waves)`}</button>
                 <div class="perks">${perks}</div>`;
             setHtml($('ascendBox'), asc);
 
@@ -700,7 +700,7 @@
             const p = this.el.pause;
             p.classList.toggle('on', this.paused); p.setAttribute('aria-pressed', String(this.paused));
             p.setAttribute('aria-label', this.paused ? 'Resume' : 'Pause');
-            this.el.veil.hidden = !(this.paused && !this.gameOverShown && !document.hidden && !this.welcomeOpen && !this.boonOpen);
+            this.el.veil.hidden = !(this.paused && !this.gameOverShown && !document.hidden && !this.welcomeOpen && !this.boonOpen && !$('modal').classList.contains('open'));
             setText(this.el.speedTag, 'x' + this.speed);
             $('btnSpeed').classList.toggle('on', this.speed > 1);
             document.querySelectorAll('#notationSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.notation === K.data.state.notation)));
@@ -740,6 +740,7 @@
             if (!modal.classList.contains('open')) return;
             modal.classList.remove('open');
             this.modalBuilding = null;
+            if (this._modalPaused) { this._modalPaused = false; this.paused = false; this.lastTime = performance.now(); this.syncToggles(); }
             if (this._modalReturnFocus && document.contains(this._modalReturnFocus)) this._modalReturnFocus.focus();
             this._modalReturnFocus = null;
         }
@@ -774,16 +775,17 @@
 
         // ---------- how to play ----------
         showHelp() {
+            this.pauseForModal();
             const row = (icon, title, body) => `<div class="help-row">${ico(icon)}<div><b>${title}</b><span>${body}</span></div></div>`;
             this.openPlainModal(`<h2 id="modalTitle">How to play</h2>
                 <div class="subtitle">Your kingdom earns on its own. You make it stronger and keep raiders out.</div>
                 <div class="help-list">
-                    ${row('sack', 'Collect', 'Mines and wells fill a coin bubble every few seconds. Tap it for a bonus. Tap several quickly for a combo. <b>Space</b> collects every ready bubble.')}
+                    ${row('sack', 'Collect', 'Mines and wells fill a coin bubble every few seconds. Tap it for a bonus. Tap several quickly for a combo. The <b>Collect</b> button (or Space) grabs every ready bubble.')}
                     ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
                     ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Walls and decorations can be painted by dragging.')}
-                    ${row('sword', 'Defend', 'Raiders arrive when the timer on the left runs out. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
+                    ${row('sword', 'Defend', 'Raiders arrive when the raid timer (top left) runs out. Red arrows show which side they come from. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
                     ${row('star', 'Boons', 'After every raid you pick one of three rewards. They stack and last until you ascend.')}
-                    ${row('gem', 'Gems', 'Spend them on <b>Boost</b> (double income, ${CFG.boostCost} gems), <b>Lightning</b> (1) and <b>Freeze</b> (${CFG.freezeCost}). Earn them from waves, quests and goblins.')}
+                    ${row('gem', 'Gems', `Spend them on <b>Boost</b> (double income, ${CFG.boostCost} gems), <b>Lightning</b> (1) and <b>Freeze</b> (${CFG.freezeCost}). Earn them from waves, quests and goblins.`)}
                     ${row('crown', 'Ascend', `From wave ${CFG.ascendMinWave}, Ascend in the Kingdom tab: the kingdom restarts and you keep crowns that buy permanent perks.`)}
                 </div>
                 <div class="modal-actions"><button class="btn small" id="helpKeys" type="button">Keyboard shortcuts</button></div>`);
@@ -822,7 +824,10 @@
             const first = this.el.modalBody.querySelector('[data-boon]'); if (first) first.focus({ preventScroll: true });
         }
 
+        // reading help should not cost you a raid
+        pauseForModal() { if (!this.paused && !this.boonOpen) { this.paused = true; this._modalPaused = true; this.syncToggles(); } }
         showShortcuts() {
+            this.pauseForModal();
             const rows = [
                 [['Space'], 'Collect every ready coin bubble'], [['F'], 'Freeze all raiders'], [['U'], 'Upgrade the selected building (or the cheapest one)'],
                 [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
