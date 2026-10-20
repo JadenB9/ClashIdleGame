@@ -41,7 +41,7 @@
                 coopStatus: $('coopStatus'), themeBtn: $('btnTheme'),
                 sel: $('selCard'), drawer: $('drawer'), app: $('app'),
                 dotUp: $('dotUpgrade'), dotKing: $('dotKingdom'),
-                alert: $('alertPanel'), pause: $('actPause'), veil: $('pauseVeil'), speedTag: $('speedTag'),
+                alert: $('alertPanel'), veil: $('pauseVeil'), speedTag: $('speedTag'),
                 goal: $('goalCard'), hint: $('modeHint'), collect: $('actCollect'), collectDot: $('collectDot'), freeze: $('actFreeze'),
             };
             this.panel = null;
@@ -96,13 +96,13 @@
             click('actBoost', () => this.activateBoost());
             click('actSpell', () => this.beginSpell());
             click('actFreeze', () => this.castFreeze());
-            click('btnHelp', () => this.showHelp());
-            click('btnHowTo', () => this.showHelp());
+            click('btnMenu', () => { this.audio.click(); this.openPanel('menu', true); });
+            this.buildMenuHelp();
+            const home = $('homeLink'); if (home && /(^|\.)j4den\.com$/.test(location.hostname)) home.hidden = false;
             document.querySelectorAll('#diffSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.settings.difficulty = b.dataset.diff; this.reignCrowns = Math.min(this.reignCrowns, DIFFICULTY[b.dataset.diff].crowns); this.syncSettingsUI(); this.save(); this.toast(`Difficulty: ${DIFFICULTY[b.dataset.diff].label}. ${DIFFICULTY[b.dataset.diff].desc}`, 'success'); }));
             this.el.goal.addEventListener('click', (e) => { const a = e.target.closest('[data-goal]'); if (!a) return; this.audio.click(); if (a.dataset.goal === 'skip') this.tutSkip(); else this.tutAdvance(); });
             click('actWarCry', () => this.activateWarCry());
             click('actCancel', () => this.cancelModes());
-            click('actPause', () => this.togglePause());
             click('btnSpeed', () => this.cycleSpeed());
             click('zoomIn', () => this.zoomBy(1.2, this.vw / 2, this.vh / 2));
             click('zoomOut', () => this.zoomBy(1 / 1.2, this.vw / 2, this.vh / 2));
@@ -191,12 +191,15 @@
         openPanel(name, toggle = false) {
             if (!PANEL_TITLES[name]) return;
             if (toggle && this.panel === name) { this.closePanel(); return; }
+            if (this.panel === 'menu' && name !== 'menu') this.resumeFromMenu();
             this.panel = name;
             this.opened[name] = true;
             $('drawerTitle').textContent = PANEL_TITLES[name];
             document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.dataset.tab === name));
             document.querySelectorAll('.dock-btn').forEach(b => { const on = b.dataset.tab === name; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
             this.el.app.classList.add('drawer-open');
+            if (name === 'menu') { this.pauseForMenu(); const mh = $('panel-menu'); if (mh) mh.scrollTop = 0; }
+            this.syncToggles();
             this.forceRefresh = true;
             if (name === 'build') { const cs = this.tutCurrent(); if (cs && cs.id === 'build') this.buildCat = 'defense'; this.buildMenu(true); }
             this.updateUI();
@@ -204,11 +207,20 @@
         }
         closePanel() {
             if (!this.panel) return;
+            if (this.panel === 'menu') this.resumeFromMenu();
             this.panel = null;
             this.el.app.classList.remove('drawer-open');
             document.querySelectorAll('.dock-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
         }
         showTab(n) { this.openPanel(n); }
+        // the menu freezes the game while it is open; only resume what the menu itself paused
+        pauseForMenu() { if (!this.paused && !this.boonOpen && !this.gameOverShown) { this.paused = true; this._menuPaused = true; } }
+        resumeFromMenu() {
+            if (!this._menuPaused) return;
+            this._menuPaused = false;
+            if (!this.gameOverShown && !this.boonOpen) { this.paused = false; this.lastTime = performance.now(); }
+            this.syncToggles();
+        }
         isNarrow() { return window.matchMedia && window.matchMedia('(max-width: 880px)').matches; }
 
         focusBuilding(b) {
@@ -697,9 +709,8 @@
             if (auto) { setText($('autoLabel'), this.autoCollect ? 'on' : 'off'); auto.classList.toggle('on', this.autoCollect); auto.setAttribute('aria-pressed', String(this.autoCollect)); }
             const snd = $('btnSound');
             if (snd) { snd.textContent = this.audio.muted ? 'Off' : 'On'; snd.setAttribute('aria-pressed', String(!this.audio.muted)); }
-            const p = this.el.pause;
-            p.classList.toggle('on', this.paused); p.setAttribute('aria-pressed', String(this.paused));
-            p.setAttribute('aria-label', this.paused ? 'Resume' : 'Pause');
+            const mb = $('btnMenu');
+            if (mb) { const open = this.panel === 'menu'; mb.classList.toggle('on', open || this.paused); mb.setAttribute('aria-pressed', String(open)); setText($('menuTag'), this.paused ? 'paused' : 'menu'); }
             this.el.veil.hidden = !(this.paused && !this.gameOverShown && !document.hidden && !this.welcomeOpen && !this.boonOpen && !$('modal').classList.contains('open'));
             setText(this.el.speedTag, 'x' + this.speed);
             $('btnSpeed').classList.toggle('on', this.speed > 1);
@@ -774,22 +785,18 @@
         }
 
         // ---------- how to play ----------
-        showHelp() {
-            this.pauseForModal();
+        showHelp() { this.openPanel('menu'); }
+        buildMenuHelp() {
+            const host = $('menuHelp'); if (!host) return;
             const row = (icon, title, body) => `<div class="help-row">${ico(icon)}<div><b>${title}</b><span>${body}</span></div></div>`;
-            this.openPlainModal(`<h2 id="modalTitle">How to play</h2>
-                <div class="subtitle">Your kingdom earns on its own. You make it stronger and keep raiders out.</div>
-                <div class="help-list">
-                    ${row('sack', 'Collect', 'Mines and wells fill a coin bubble every few seconds. Tap it for a bonus. Tap several quickly for a combo. The <b>Collect</b> button (or Space) grabs every ready bubble.')}
-                    ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
-                    ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Walls and decorations can be painted by dragging.')}
-                    ${row('sword', 'Defend', 'Raiders arrive when the raid timer (top left) runs out. Red arrows show which side they come from. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
-                    ${row('star', 'Boons', 'After every raid you pick one of three rewards. They stack and last until you ascend.')}
-                    ${row('gem', 'Gems', `Spend them on <b>Boost</b> (double income, ${CFG.boostCost} gems), <b>Lightning</b> (1) and <b>Freeze</b> (${CFG.freezeCost}). Earn them from waves, quests and goblins.`)}
-                    ${row('crown', 'Ascend', `From wave ${CFG.ascendMinWave}, Ascend in the Kingdom tab: the kingdom restarts and you keep crowns that buy permanent perks.`)}
-                </div>
-                <div class="modal-actions"><button class="btn small" id="helpKeys" type="button">Keyboard shortcuts</button></div>`);
-            $('helpKeys').addEventListener('click', () => this.showShortcuts());
+            setHtml(host, `
+                ${row('sack', 'Collect', 'Mines and wells fill a coin bubble every few seconds. Tap it for a bonus. Tap several quickly for a combo. The <b>Collect</b> button (or Space) grabs every ready bubble.')}
+                ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
+                ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Walls and decorations can be painted by dragging.')}
+                ${row('sword', 'Defend', 'Raiders arrive when the raid timer (top left) runs out. Red arrows show which side they come from. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
+                ${row('star', 'Boons', 'After every raid you pick one of three rewards. They stack and last until you ascend.')}
+                ${row('gem', 'Gems', `Spend them on <b>Boost</b> (double income, ${CFG.boostCost} gems), <b>Lightning</b> (1) and <b>Freeze</b> (${CFG.freezeCost}). Earn them from waves, quests and goblins.`)}
+                ${row('crown', 'Ascend', `From wave ${CFG.ascendMinWave}, Ascend in the Kingdom tab: the kingdom restarts and you keep crowns that buy permanent perks.`)}`);
         }
 
         // ---------- wave boons ----------

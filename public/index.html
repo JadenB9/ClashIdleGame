@@ -30,7 +30,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261021b">
+    <link rel="stylesheet" href="css/style.css?v=20261021c">
 </head>
 <body>
     <!-- Icon sprite. Colour icons carry their own fills; the rest use currentColor. -->
@@ -135,9 +135,8 @@
 
                 <div class="top-actions">
                     <button class="round-btn" id="btnSpeed" type="button" aria-label="Game speed" title="Game speed (X)"><svg aria-hidden="true"><use href="#i-fast"/></svg><span class="rb-tag" id="speedTag">x1</span></button>
-                    <button class="round-btn" id="actPause" type="button" aria-label="Pause" aria-pressed="false" title="Pause (P)"><svg class="ico-pause" aria-hidden="true"><use href="#i-pause"/></svg><svg class="ico-play" aria-hidden="true"><use href="#i-play"/></svg></button>
                     <button class="round-btn" id="actAutoCollect" type="button" aria-label="Auto-collect" aria-pressed="false" title="Auto-collect: taps ready bubbles for you at a lower rate (A)"><svg aria-hidden="true"><use href="#i-auto"/></svg><span class="rb-tag" id="autoLabel">off</span></button>
-                    <button class="round-btn" id="btnHelp" type="button" aria-label="How to play" title="How to play (?)"><svg aria-hidden="true"><use href="#i-help"/></svg></button>
+                    <button class="round-btn big" id="btnMenu" type="button" aria-label="Menu" aria-pressed="false" title="Menu: pauses the game and shows how to play (Esc)"><svg aria-hidden="true"><use href="#i-cog"/></svg><span class="rb-tag" id="menuTag">menu</span></button>
                 </div>
             </header>
 
@@ -184,10 +183,9 @@
                 <button class="dock-btn" data-tab="upgrade" type="button"><svg aria-hidden="true"><use href="#i-up"/></svg><span>Upgrade</span><b class="dot" id="dotUpgrade" hidden>0</b></button>
                 <button class="dock-btn" data-tab="kingdom" type="button"><svg aria-hidden="true"><use href="#i-crown"/></svg><span>Kingdom</span><b class="dot" id="dotKingdom" hidden>0</b></button>
                 <button class="dock-btn" data-tab="coop" type="button"><svg aria-hidden="true"><use href="#i-people"/></svg><span>Co-op</span></button>
-                <button class="dock-btn" data-tab="menu" type="button"><svg aria-hidden="true"><use href="#i-cog"/></svg><span>Menu</span></button>
             </nav>
 
-            <div id="pauseVeil" class="pause-veil" hidden><div>PAUSED<small>Press P or the pause button to resume</small></div></div>
+            <div id="pauseVeil" class="pause-veil" hidden><div>PAUSED<small>Press P or close the menu to resume</small></div></div>
         </div>
 
         <!-- Side panel -->
@@ -275,6 +273,11 @@
 
                 <!-- Menu -->
                 <section class="tab-content" data-tab="menu" id="panel-menu" role="region" aria-label="Menu">
+                    <div class="paused-note"><svg aria-hidden="true"><use href="#i-pause"/></svg><span>Game paused while this menu is open.</span></div>
+                    <div class="section-title">How to play</div>
+                    <div class="help-list" id="menuHelp"></div>
+                    <a class="btn small home-link" id="homeLink" href="/" hidden>Back to j4den.com</a>
+
                     <div class="section-title">Save</div>
                     <div class="save-row">
                         <button class="btn small" id="btnSave" type="button">Save now</button>
@@ -285,7 +288,6 @@
                     <p class="hint">Saves to this browser every 15 seconds and when you leave, with a backup of the save before it. While you are away the kingdom earns at half rate for up to 4 hours.</p>
 
                     <div class="section-title">Play</div>
-                    <div class="setting-row"><span class="setting-label">How to play</span><button class="btn small" id="btnHowTo" type="button">Open</button></div>
                     <div class="setting-row stacked"><span class="setting-label" id="lblDiff">Difficulty</span>
                         <div class="seg" role="group" aria-labelledby="lblDiff" id="diffSeg">
                             <button class="seg-btn" type="button" data-diff="easy" aria-pressed="false" title="Weaker raiders">Relaxed</button>
@@ -376,16 +378,16 @@
     </div>
 
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
-    <script src="js/data.js?v=20261021b"></script>
-    <script src="js/art-core.js?v=20261021b"></script>
-    <script src="js/art-buildings-a.js?v=20261021b"></script>
-    <script src="js/art-buildings-b.js?v=20261021b"></script>
-    <script src="js/art-world.js?v=20261021b"></script>
-    <script src="js/art-units.js?v=20261021b"></script>
-    <script src="js/game.js?v=20261021b"></script>
-    <script src="js/ui.js?v=20261021b"></script>
-    <script src="js/features.js?v=20261021b"></script>
-    <script src="js/net.js?v=20261021b"></script>
-    <script src="js/boot.js?v=20261021b"></script>
+    <script src="js/data.js?v=20261021c"></script>
+    <script src="js/art-core.js?v=20261021c"></script>
+    <script src="js/art-buildings-a.js?v=20261021c"></script>
+    <script src="js/art-buildings-b.js?v=20261021c"></script>
+    <script src="js/art-world.js?v=20261021c"></script>
+    <script src="js/art-units.js?v=20261021c"></script>
+    <script src="js/game.js?v=20261021c"></script>
+    <script src="js/ui.js?v=20261021c"></script>
+    <script src="js/features.js?v=20261021c"></script>
+    <script src="js/net.js?v=20261021c"></script>
+    <script src="js/boot.js?v=20261021c"></script>
 </body>
 </html>

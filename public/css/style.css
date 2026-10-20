@@ -705,3 +705,15 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
     .wave-timer { font-size: 20px; }
 }
 #waveInfo { min-width: 0; }
+
+/* the one menu button: bigger than the rest, and it pauses the game */
+.round-btn.big { width: 62px; height: 62px; }
+.round-btn.big svg { width: 30px; height: 30px; }
+.round-btn.big .rb-tag { bottom: -7px; }
+.paused-note { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 4px; border-radius: 12px; background: var(--panel-2); border: 2px solid var(--gold-edge); font: 14px var(--font-display); }
+.paused-note svg { width: 18px; height: 18px; flex: none; color: var(--gold); }
+.home-link { display: inline-flex; margin-top: 10px; text-decoration: none; }
+@media (max-width: 560px) {
+    .round-btn.big { width: 48px; height: 48px; }
+    .round-btn.big svg { width: 24px; height: 24px; }
+}
