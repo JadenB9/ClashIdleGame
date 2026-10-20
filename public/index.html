@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <!-- Scripts: this file's own game.js, PeerJS from unpkg (SRI below), Cloudflare's analytics beacon,
+    <!-- Scripts: the game's own files, PeerJS from unpkg (SRI below), Cloudflare's analytics beacon,
          and the one inline theme script by hash (recompute the sha256 if that script changes).
          Styles are external only; everything the JS toggles goes through classes or the CSSOM. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://static.cloudflareinsights.com 'sha256-BCKkW2ZyLWRPps2oQLHtHWzG0qJ73cYKXYsw/CTK4nA='; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com https://static.cloudflareinsights.com https://cloudflareinsights.com; base-uri 'self'; form-action 'none'; object-src 'none'">
     <meta name="color-scheme" content="light dark">
     <meta name="theme-color" content="#ece2cc" media="(prefers-color-scheme: light)">
-    <meta name="theme-color" content="#0b0f1a" media="(prefers-color-scheme: dark)">
-    <meta name="description" content="Kingdom of Ember — an idle tower-defense game. Build a village, collect resources and hold off raids. Saves in your browser.">
-    <title>Clash Idle — Kingdom of Ember</title>
+    <meta name="theme-color" content="#141b2e" media="(prefers-color-scheme: dark)">
+    <meta name="description" content="Kingdom of Ember — an idle tower-defense game. Build a village, collect resources, hold off raids and ascend. Saves in your browser.">
+    <title>Kingdom of Ember — Clash Idle</title>
     <script>
 // Site theme contract: light mode is data-theme="light" on <html>, dark is the default.
 // Runs before paint so a saved light choice never flashes dark first. Same lines as
@@ -28,290 +28,345 @@
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261015a">
+    <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css?v=20261020a">
 </head>
 <body>
+    <!-- Icon sprite. Colour icons carry their own fills; the rest use currentColor. -->
+    <svg class="svg-sprite" width="0" height="0" aria-hidden="true" focusable="false">
+        <defs>
+            <linearGradient id="gCoin" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe98a"/><stop offset="1" stop-color="#f0a21a"/></linearGradient>
+            <linearGradient id="gElx" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6a8ff"/><stop offset="1" stop-color="#a02ad8"/></linearGradient>
+            <linearGradient id="gDark" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9a6aff"/><stop offset="1" stop-color="#3a1478"/></linearGradient>
+            <linearGradient id="gGem" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b8f4ff"/><stop offset="1" stop-color="#28a8e0"/></linearGradient>
+            <linearGradient id="gCrown" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe98a"/><stop offset="1" stop-color="#e8a010"/></linearGradient>
+        </defs>
+        <symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="url(#gCoin)" stroke="#6a3c00" stroke-width="1.7"/><circle cx="12" cy="12" r="6.6" fill="none" stroke="#b87810" stroke-width="1.3"/><path d="M12 7.4v9.2M14.4 9.6c-.4-1-1.3-1.5-2.4-1.5-1.3 0-2.3.7-2.3 1.7 0 2.3 4.8 1.1 4.8 3.5 0 1-1.1 1.8-2.5 1.8-1.2 0-2.1-.5-2.5-1.5" fill="none" stroke="#9a5c00" stroke-width="1.3" stroke-linecap="round"/><path d="M5.6 8.6A7.4 7.4 0 0 1 10 4.6" stroke="#fffbe0" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/></symbol>
+        <symbol id="i-elixir" viewBox="0 0 24 24"><path d="M12 2c3.8 4.7 7 8.3 7 12.2a7 7 0 0 1-14 0C5 10.3 8.2 6.7 12 2z" fill="url(#gElx)" stroke="#4a0a70" stroke-width="1.7" stroke-linejoin="round"/><path d="M8.2 14.6a3.9 3.9 0 0 0 3 3.5" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".8"/><circle cx="14.6" cy="10.6" r="1.1" fill="#fff" opacity=".7"/></symbol>
+        <symbol id="i-dark" viewBox="0 0 24 24"><path d="M12 2c3.8 4.7 7 8.3 7 12.2a7 7 0 0 1-14 0C5 10.3 8.2 6.7 12 2z" fill="url(#gDark)" stroke="#12042a" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 8.4l1.5 3.6 3.5.4-2.7 2.3.9 3.5-3.2-2-3.2 2 .9-3.5L7 12.4l3.5-.4z" fill="#d8b8ff" opacity=".85"/></symbol>
+        <symbol id="i-gem" viewBox="0 0 24 24"><path d="M12 21.5 2.6 9.2 6.2 3.5h11.6l3.6 5.7z" fill="url(#gGem)" stroke="#0a4a78" stroke-width="1.7" stroke-linejoin="round"/><path d="M2.8 9.2h18.4M8.6 3.6 7 9.2l5 12M15.4 3.6 17 9.2l-5 12" fill="none" stroke="#0a4a78" stroke-width="1" opacity=".55"/><path d="M7.6 5.2h3" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".9"/></symbol>
+        <symbol id="i-crown" viewBox="0 0 24 24"><path d="M3 18.5 2.2 7.6l5.1 4.3L12 4.5l4.7 7.4 5.1-4.3L21 18.5z" fill="url(#gCrown)" stroke="#6a3c00" stroke-width="1.7" stroke-linejoin="round"/><path d="M3.4 21h17.2" stroke="#6a3c00" stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="13.6" r="1.7" fill="#e8403a" stroke="#6a1010" stroke-width=".9"/><circle cx="7.4" cy="14.6" r="1.1" fill="#4ab0f0"/><circle cx="16.6" cy="14.6" r="1.1" fill="#4ab0f0"/></symbol>
+        <symbol id="i-hammer" viewBox="0 0 24 24"><path d="m13.6 9.2 8.2 8.2a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-8.2-8.2" fill="#b07a44" stroke="#3a2008" stroke-width="1.6" stroke-linejoin="round"/><path d="M3 9.8 8.6 4.2a3 3 0 0 1 4.2 0l1.4 1.4-3.2 3.2 2 2-1.4 1.4-1.2-1.2-1.5 1.5L5 9.7z" fill="#c8ccd8" stroke="#2a2e3a" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+        <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 2.6 21 12.4h-5.4V21H8.4v-8.6H3z" fill="#7ee26a" stroke="#14501a" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.2 11.4 12 6.8" stroke="#eaffd8" stroke-width="1.6" stroke-linecap="round" opacity=".9" fill="none"/></symbol>
+        <symbol id="i-people" viewBox="0 0 24 24"><circle cx="8.4" cy="8" r="3.4" fill="currentColor"/><path d="M1.8 20c0-3.8 2.9-6.2 6.6-6.2s6.6 2.4 6.6 6.2z" fill="currentColor"/><circle cx="16.8" cy="9" r="2.8" fill="currentColor" opacity=".75"/><path d="M16.4 14.2c3.2.1 5.8 2.1 5.8 5.8h-5.4c0-2-.5-3.9-.4-5.8z" fill="currentColor" opacity=".75"/></symbol>
+        <symbol id="i-cog" viewBox="0 0 24 24"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61zM12 15.6A3.6 3.6 0 1 1 15.6 12 3.6 3.6 0 0 1 12 15.6z"/></symbol>
+        <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.4" fill="#ffd54a" stroke="#7a4a00" stroke-width="1.6"/><path d="M12 2.4v2.8M12 18.8v2.8M2.4 12h2.8M18.8 12h2.8M5.2 5.2l2 2M16.8 16.8l2 2M5.2 18.8l2-2M16.8 7.2l2-2" stroke="#ffb020" stroke-width="2" stroke-linecap="round"/></symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.4 14.8A8.6 8.6 0 0 1 9.2 3.6a8.6 8.6 0 1 0 11.2 11.2z" fill="#dfe6ff" stroke="#3a4678" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24"><rect x="5.5" y="4" width="4.4" height="16" rx="1.2" fill="currentColor"/><rect x="14.1" y="4" width="4.4" height="16" rx="1.2" fill="currentColor"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.2v15.6a1 1 0 0 0 1.5.9l12-7.8a1 1 0 0 0 0-1.8l-12-7.8A1 1 0 0 0 7 4.2z" fill="currentColor"/></symbol>
+        <symbol id="i-fast" viewBox="0 0 24 24"><path d="M3 5.2v13.6a.9.9 0 0 0 1.4.8l8-6.8a.9.9 0 0 0 0-1.6l-8-6.8A.9.9 0 0 0 3 5.2zM12 5.2v13.6a.9.9 0 0 0 1.4.8l8-6.8a.9.9 0 0 0 0-1.6l-8-6.8a.9.9 0 0 0-1.4.8z" fill="currentColor"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></symbol>
+        <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></symbol>
+        <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.4 12 3.6l9 7.8M5.6 10v10h4.6v-5.8h3.6V20h4.6V10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+        <symbol id="i-sword" viewBox="0 0 24 24"><path d="M14.5 3.5 21 3l-.5 6.5L9.6 20.4 3.6 14.4z" fill="#d8dce8" stroke="#2a2e3a" stroke-width="1.6" stroke-linejoin="round"/><path d="m5.6 12.6 5.8 5.8M3.2 20.8l3.4-3.4" stroke="#6a4424" stroke-width="2.2" stroke-linecap="round"/></symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.6 20 5.6v6.2c0 4.6-3.2 8.2-8 9.8-4.8-1.6-8-5.2-8-9.8V5.6z" fill="#5a86d8" stroke="#142a5a" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 2.6v19" stroke="#142a5a" stroke-width="1.2" opacity=".5"/><path d="M12 2.6 20 5.6v6.2" fill="none" stroke="#bcd4ff" stroke-width="1.4" opacity=".6"/></symbol>
+        <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.6 1.8 4.2 13.6h6.4L9.4 22.2l10.4-12.4h-6.8z" fill="#ffe66a" stroke="#6a4a00" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+        <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V3" stroke="#6a4424" stroke-width="2.4" stroke-linecap="round"/><path d="M5.6 4.2c4-2 6.8 2.2 12 0v9c-5.2 2.2-8-2-12 0z" fill="#e8403a" stroke="#5a0e0a" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+        <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 21.2S3 15.4 3 9.4A5 5 0 0 1 12 6.6a5 5 0 0 1 9 2.8c0 6-9 11.8-9 11.8z" fill="#ff6a7a" stroke="#6a1020" stroke-width="1.8" stroke-linejoin="round"/><path d="M6.4 8.4a2.4 2.4 0 0 1 2.4-1.8" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".7" fill="none"/></symbol>
+        <symbol id="i-sack" viewBox="0 0 24 24"><path d="M9 3.2h6l-1.6 3a7.4 7.4 0 0 1 4.6 6.8c0 4.8-2.6 8-6 8s-6-3.2-6-8a7.4 7.4 0 0 1 4.6-6.8z" fill="#c8a050" stroke="#4a2c06" stroke-width="1.7" stroke-linejoin="round"/><path d="M8.6 6.2h6.8" stroke="#4a2c06" stroke-width="1.8" stroke-linecap="round"/><path d="M12 10.4v6.6M13.8 11.8c-.3-.7-1-1-1.8-1-.9 0-1.7.5-1.7 1.2 0 1.6 3.6.8 3.6 2.6 0 .8-.8 1.4-1.9 1.4-.9 0-1.6-.4-1.9-1.1" fill="none" stroke="#fff3c0" stroke-width="1.2" stroke-linecap="round"/></symbol>
+        <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2.8 2.8 5.8 6.3.9-4.6 4.4 1.1 6.3L12 17.2l-5.6 3 1.1-6.3L2.9 9.5l6.3-.9z" fill="#ffd34a" stroke="#7a4a00" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+        <symbol id="i-skull" viewBox="0 0 24 24"><path d="M12 2.6c-4.6 0-8 3.2-8 7.6 0 2.6 1.2 4.4 3 5.6v3.2h10v-3.2c1.8-1.2 3-3 3-5.6 0-4.4-3.4-7.6-8-7.6z" fill="#efe8d4" stroke="#2a2418" stroke-width="1.7" stroke-linejoin="round"/><circle cx="8.8" cy="10.6" r="2" fill="#2a2418"/><circle cx="15.2" cy="10.6" r="2" fill="#2a2418"/><path d="M12 13.4v2.2M9.6 18.4v2.4M12 18.4v2.4M14.4 18.4v2.4" stroke="#2a2418" stroke-width="1.5" stroke-linecap="round"/></symbol>
+        <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v11m0 0-4-4m4 4 4-4M4 15v4.4a1.6 1.6 0 0 0 1.6 1.6h12.8a1.6 1.6 0 0 0 1.6-1.6V15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+        <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3 22 20.4H2z" fill="#ffc83a" stroke="#6a3c00" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9.4v5M12 17.2v.2" stroke="#3a2000" stroke-width="2.2" stroke-linecap="round"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.6 4.4 4.4L19 7.4" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+        <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.4" width="14" height="10.6" rx="2.4" fill="#8a93a8" stroke="#2a3040" stroke-width="1.7"/><path d="M8 10.4V7.8a4 4 0 0 1 8 0v2.6" fill="none" stroke="#2a3040" stroke-width="2.2" stroke-linecap="round"/></symbol>
+        <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.4" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 11v5.6M12 7.4v.2" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
+        <symbol id="i-move" viewBox="0 0 24 24"><path d="M12 2.6v18.8M2.6 12h18.8M12 2.6 9 5.6M12 2.6l3 3M12 21.4l-3-3M12 21.4l3-3M2.6 12l3-3M2.6 12l3 3M21.4 12l-3-3M21.4 12l-3 3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6.6h16M9.4 6.6V4h5.2v2.6M6.2 6.6l.9 13.4h9.8l.9-13.4M10 10.4v6.2M14 10.4v6.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+        <symbol id="i-scroll" viewBox="0 0 24 24"><path d="M6 3.4h12a2 2 0 0 1 2 2V17a3.6 3.6 0 0 1-3.6 3.6H5.6A2.6 2.6 0 0 1 3 18v-1.6h4V5.4A2 2 0 0 0 6 3.4z" fill="#f0e2b6" stroke="#5a3d1c" stroke-width="1.7" stroke-linejoin="round"/><path d="M10 8h7M10 11.4h7M10 14.8h4.4" stroke="#8a6a3c" stroke-width="1.6" stroke-linecap="round"/></symbol>
+        <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M7 3.4h10v5.4a5 5 0 0 1-10 0zM7 5H3.6v1.4a4 4 0 0 0 3.6 4M17 5h3.4v1.4a4 4 0 0 1-3.6 4" fill="#ffd34a" stroke="#6a3c00" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 13.8v3.4M8 20.6h8l-.8-3.4H8.8z" fill="#e8a010" stroke="#6a3c00" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+        <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.8-6.6 10-6.6S22 12 22 12s-3.8 6.6-10 6.6S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/></symbol>
+    </svg>
+
     <div id="app">
-        <!-- Top Resource Bar -->
-        <header id="topBar">
-            <div class="brand">
-                <span class="brand-mark" aria-hidden="true">⚔</span>
-                <div class="brand-text">
-                    <div class="brand-title">Kingdom of Ember</div>
-                    <div class="brand-sub">Clash Idle</div>
+        <!-- Everything the map shows lives in the stage; the side panel docks beside it -->
+        <div id="stage">
+            <main id="gameArea">
+                <canvas id="gameCanvas" aria-label="Kingdom map. Tap a building to select it, drag to pan, pinch or scroll to zoom."></canvas>
+            </main>
+
+            <header id="topBar">
+                <button class="player" id="playerBadge" type="button" aria-label="Open kingdom panel">
+                    <span class="level-ring">
+                        <svg viewBox="0 0 44 44" aria-hidden="true"><circle class="ring-bg" cx="22" cy="22" r="18"/><circle class="ring-fg" id="xpRing" cx="22" cy="22" r="18"/></svg>
+                        <span class="level-num" id="playerLevel">1</span>
+                    </span>
+                    <span class="player-meta">
+                        <span class="player-name">Chief Jaden</span>
+                        <span class="xp-bar"><span class="xp-fill" id="xpFill"></span></span>
+                        <span class="player-xp" id="playerXp">0 / 100 XP</span>
+                    </span>
+                </button>
+
+                <div class="resources" id="resources" role="group" aria-label="Resources">
+                    <div class="res" data-res="gold" title="Gold: buildings and upgrades">
+                        <span class="res-fill" id="fill-gold"></span>
+                        <svg class="res-ico" aria-hidden="true"><use href="#i-coin"/></svg>
+                        <span class="sr-only">Gold</span>
+                        <span class="res-val" id="val-gold">0</span>
+                        <span class="res-rate" id="rate-gold">+0/s</span>
+                    </div>
+                    <div class="res" data-res="elixir" title="Elixir: advanced buildings">
+                        <span class="res-fill" id="fill-elixir"></span>
+                        <svg class="res-ico" aria-hidden="true"><use href="#i-elixir"/></svg>
+                        <span class="sr-only">Elixir</span>
+                        <span class="res-val" id="val-elixir">0</span>
+                        <span class="res-rate" id="rate-elixir">+0/s</span>
+                    </div>
+                    <div class="res" data-res="dark" title="Dark elixir: the strongest towers">
+                        <span class="res-fill" id="fill-dark"></span>
+                        <svg class="res-ico" aria-hidden="true"><use href="#i-dark"/></svg>
+                        <span class="sr-only">Dark elixir</span>
+                        <span class="res-val" id="val-dark">0</span>
+                        <span class="res-rate" id="rate-dark">+0/s</span>
+                    </div>
+                    <div class="res" data-res="gems" title="Gems: boosts and lightning">
+                        <svg class="res-ico" aria-hidden="true"><use href="#i-gem"/></svg>
+                        <span class="sr-only">Gems</span>
+                        <span class="res-val" id="val-gems">0</span>
+                    </div>
                 </div>
+
+                <div class="top-actions">
+                    <button class="round-btn" id="btnSpeed" type="button" aria-label="Game speed" title="Game speed (X)"><svg aria-hidden="true"><use href="#i-fast"/></svg><span class="rb-tag" id="speedTag">x1</span></button>
+                    <button class="round-btn" id="actPause" type="button" aria-label="Pause" aria-pressed="false" title="Pause (P)"><svg class="ico-pause" aria-hidden="true"><use href="#i-pause"/></svg><svg class="ico-play" aria-hidden="true"><use href="#i-play"/></svg></button>
+                    <button class="round-btn" id="btnTheme" type="button" aria-label="Switch to light mode" title="Theme (T)"><svg class="ico-sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="ico-moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+                </div>
+            </header>
+
+            <div class="hud-left">
+                <div class="wave-card" id="wavePanel">
+                    <div class="wave-head"><svg class="hud-ico" aria-hidden="true"><use href="#i-sword"/></svg><span id="waveInfo">Wave 1</span></div>
+                    <div class="wave-timer" id="waveTimer">–</div>
+                    <div class="wave-preview" id="wavePreview" aria-label="Next raid"></div>
+                </div>
+                <div class="clock-chip" id="dayPanel"><svg class="hud-ico ico-day" aria-hidden="true"><use href="#i-sun"/></svg><svg class="hud-ico ico-night" aria-hidden="true"><use href="#i-moon"/></svg><span id="dayTime">12:00</span><span class="clock-sub" id="dayCount">Day 1</span></div>
             </div>
 
-            <div class="resources" id="resources" role="group" aria-label="Resources">
-                <div class="res" data-res="gold" title="Gold — spent on buildings & upgrades">
-                    <span class="res-ico" aria-hidden="true">◈</span>
-                    <span class="sr-only">Gold</span>
-                    <span class="res-val" id="val-gold">0</span>
-                    <span class="res-rate" id="rate-gold">+0/s</span>
-                </div>
-                <div class="res" data-res="elixir" title="Elixir — unlocks advanced structures">
-                    <span class="res-ico" aria-hidden="true">❂</span>
-                    <span class="sr-only">Elixir</span>
-                    <span class="res-val" id="val-elixir">0</span>
-                    <span class="res-rate" id="rate-elixir">+0/s</span>
-                </div>
-                <div class="res" data-res="dark" title="Dark Elixir — prestige tier resource">
-                    <span class="res-ico" aria-hidden="true">✦</span>
-                    <span class="sr-only">Dark Elixir</span>
-                    <span class="res-val" id="val-dark">0</span>
-                    <span class="res-rate" id="rate-dark">+0/s</span>
-                </div>
-                <div class="res" data-res="gems" title="Gems — premium. Earned from wave rewards">
-                    <span class="res-ico" aria-hidden="true">♦</span>
-                    <span class="sr-only">Gems</span>
-                    <span class="res-val" id="val-gems">0</span>
-                </div>
-            </div>
-
-            <div class="player">
-                <div class="level-ring">
-                    <svg viewBox="0 0 40 40">
-                        <circle class="ring-bg" cx="20" cy="20" r="16"/>
-                        <circle class="ring-fg" id="xpRing" cx="20" cy="20" r="16"/>
-                    </svg>
-                    <span id="playerLevel">1</span>
-                </div>
-                <div class="player-meta">
-                    <div class="player-name">Chief Jaden</div>
-                    <div class="player-xp" id="playerXp">0 / 100 XP</div>
-                </div>
-            </div>
-
-            <button class="icon-btn" id="btnTheme" type="button" aria-label="Switch to light mode" title="Theme (T)">
-                <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="4.2"/>
-                    <path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>
-                </svg>
-                <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M20.5 14.6A8.5 8.5 0 0 1 9.4 3.5a8.5 8.5 0 1 0 11.1 11.1z"/>
-                </svg>
-            </button>
-        </header>
-
-        <!-- Main Game Area -->
-        <main id="gameArea">
-            <canvas id="gameCanvas" aria-label="Kingdom map. Tap a building to collect, long-press or right-click it for its menu, drag to pan."></canvas>
-
-            <!-- HUD overlay on canvas -->
-            <div class="hud">
-                <div class="hud-panel left" id="wavePanel">
-                    <div class="hud-label">Next Raid</div>
-                    <div class="hud-value" id="waveTimer">–</div>
-                    <div class="hud-sub" id="waveInfo">Wave 1 · Goblins</div>
-                </div>
-                <div class="hud-panel center" id="alertPanel"></div>
-                <div class="hud-panel right" id="dayPanel">
-                    <div class="hud-label" id="dayLabel">Day</div>
-                    <div class="hud-value" id="dayTime">12:00</div>
-                    <div class="hud-sub" id="dayCount">Day 1</div>
-                </div>
-            </div>
-
-            <!-- Zoom controls -->
             <div class="zoom-controls">
-                <button class="zoom-btn" id="zoomIn" title="Zoom in (+)" aria-label="Zoom in">+</button>
-                <div class="zoom-val" id="zoomVal" aria-hidden="true">100%</div>
-                <button class="zoom-btn" id="zoomOut" title="Zoom out (-)" aria-label="Zoom out">−</button>
-                <button class="zoom-btn reset" id="zoomReset" title="Reset view (0)" aria-label="Reset view">⟲</button>
+                <button class="round-btn small" id="zoomIn" type="button" title="Zoom in (+)" aria-label="Zoom in"><svg aria-hidden="true"><use href="#i-plus"/></svg></button>
+                <button class="round-btn small" id="zoomOut" type="button" title="Zoom out (-)" aria-label="Zoom out"><svg aria-hidden="true"><use href="#i-minus"/></svg></button>
+                <button class="round-btn small" id="zoomReset" type="button" title="Back to the Town Hall (0)" aria-label="Reset view"><svg aria-hidden="true"><use href="#i-home"/></svg></button>
+                <span class="zoom-val" id="zoomVal" aria-hidden="true">100%</span>
             </div>
 
-            <!-- Combo indicator -->
             <div class="combo-label" id="comboLabel" aria-hidden="true">COMBO</div>
-
-            <!-- Tooltips for buildings -->
+            <div id="alertPanel" class="alert-banner" role="status"></div>
+            <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
             <div id="hoverTip" class="hover-tip" aria-hidden="true"></div>
 
-            <!-- Toast notifications -->
-            <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
-        </main>
+            <!-- Selected building -->
+            <section id="selCard" class="sel-card" hidden aria-label="Selected building"></section>
 
-        <!-- Sidebar -->
-        <aside id="sidebar">
-            <div class="tabs" role="tablist" aria-label="Panels">
-                <button class="tab active" data-tab="build" role="tab" aria-selected="true" aria-controls="panel-build">Build</button>
-                <button class="tab" data-tab="army" role="tab" aria-selected="false" aria-controls="panel-army">Army</button>
-                <button class="tab" data-tab="coop" role="tab" aria-selected="false" aria-controls="panel-coop">Co-op</button>
-                <button class="tab" data-tab="stats" role="tab" aria-selected="false" aria-controls="panel-stats">Stats</button>
+            <!-- Abilities -->
+            <div class="abilities" id="abilities">
+                <button class="ability" id="actCollect" type="button" aria-label="Collect all" title="Collect from every mine and well (Space)"><svg aria-hidden="true"><use href="#i-sack"/></svg><span class="ab-name">Collect</span></button>
+                <button class="ability" id="actAutoCollect" type="button" aria-label="Auto-collect" aria-pressed="false" title="Auto-collect every 5 seconds (A)"><svg aria-hidden="true"><use href="#i-coin"/></svg><span class="ab-name" id="autoLabel">Auto: Off</span></button>
+                <button class="ability" id="actRally" type="button" aria-label="Rally defenses" title="Repair everything and reset tower cooldowns (R)"><svg aria-hidden="true"><use href="#i-heart"/></svg><span class="ab-name">Rally</span></button>
+                <button class="ability" id="actBoost" type="button" aria-label="Boost production for 1 gem" title="1 gem: double production for 60s"><svg aria-hidden="true"><use href="#i-gem"/></svg><span class="ab-name" id="boostLabel">Boost</span></button>
+                <button class="ability" id="actSpell" type="button" aria-label="Lightning, 1 gem" title="1 gem: lightning strike (L)"><svg aria-hidden="true"><use href="#i-bolt"/></svg><span class="ab-name">Lightning</span></button>
+                <button class="ability" id="actWarCry" type="button" aria-label="War Cry" title="+50% tower damage for 15s, 90s cooldown (W)"><svg aria-hidden="true"><use href="#i-flag"/></svg><span class="ab-name" id="warCryLabel">War Cry</span><span class="cd" id="warCryCd"></span></button>
+                <button class="ability cancel" id="actCancel" type="button" hidden aria-label="Cancel" title="Cancel (Esc)"><svg aria-hidden="true"><use href="#i-close"/></svg><span class="ab-name">Cancel</span></button>
             </div>
 
-            <!-- Build Tab -->
-            <section class="tab-content active" data-tab="build" id="panel-build" role="tabpanel" aria-label="Build">
-                <div class="section-title">Structures</div>
-                <div id="buildMenu" class="build-grid"></div>
-                <div class="hint">Tap a card, then tap an empty tile to place. Long-press or right-click a building to upgrade, move or sell it.</div>
-            </section>
+            <!-- Main navigation -->
+            <nav id="dock" class="dock" aria-label="Panels">
+                <button class="dock-btn" data-tab="build" type="button"><svg aria-hidden="true"><use href="#i-hammer"/></svg><span>Build</span></button>
+                <button class="dock-btn" data-tab="upgrade" type="button"><svg aria-hidden="true"><use href="#i-up"/></svg><span>Upgrade</span><b class="dot" id="dotUpgrade" hidden>0</b></button>
+                <button class="dock-btn" data-tab="kingdom" type="button"><svg aria-hidden="true"><use href="#i-crown"/></svg><span>Kingdom</span><b class="dot" id="dotKingdom" hidden>0</b></button>
+                <button class="dock-btn" data-tab="coop" type="button"><svg aria-hidden="true"><use href="#i-people"/></svg><span>Co-op</span></button>
+                <button class="dock-btn" data-tab="menu" type="button"><svg aria-hidden="true"><use href="#i-cog"/></svg><span>Menu</span></button>
+            </nav>
 
-            <!-- Army Tab -->
-            <section class="tab-content" data-tab="army" id="panel-army" role="tabpanel" aria-label="Army">
-                <div class="section-title">Defenses</div>
-                <div id="armyList" class="army-list"></div>
-                <div class="section-title">Achievements</div>
-                <div id="achievementList" class="achievement-list"></div>
-            </section>
+            <div id="pauseVeil" class="pause-veil" hidden><div>PAUSED<small>Press P or the pause button to resume</small></div></div>
+        </div>
 
-            <!-- Co-op Tab -->
-            <section class="tab-content" data-tab="coop" id="panel-coop" role="tabpanel" aria-label="Co-op">
-                <div class="section-title">Multiplayer Co-op</div>
-                <div id="coopDisconnected" class="coop-section">
-                    <div class="coop-code-block">
-                        <div class="coop-label">Your Game Code</div>
-                        <div class="coop-code" id="gameCode">------</div>
-                        <button class="btn small" id="btnCopyCode">Copy Code</button>
-                    </div>
-                    <div class="coop-connect-block">
-                        <div class="coop-label">Enter Partner's Code</div>
-                        <input type="text" id="partnerCodeInput" class="coop-input" maxlength="6" placeholder="XXXXXX" autocomplete="off" spellcheck="false" autocapitalize="characters" aria-label="Partner's game code">
-                        <button class="btn primary small" id="btnConnect">Connect</button>
-                    </div>
-                    <div class="coop-status pending" id="coopStatus" role="status">Connecting to relay…</div>
-                    <div class="coop-hint">Share your code with a friend. Both players must be online.</div>
-                </div>
-                <div id="coopConnected" class="coop-section" hidden>
-                    <div class="partner-header">
-                        <div class="partner-name" id="partnerName">Partner</div>
-                        <div class="coop-status online" id="coopStatusOn">Connected</div>
-                    </div>
-                    <div class="partner-resources" id="partnerRes"></div>
-                    <div class="partner-wave" id="partnerWave"></div>
-                    <canvas id="partnerMap" class="partner-map" width="280" height="280" aria-label="Partner's village map"></canvas>
-                    <div class="section-title spaced">Send Resources</div>
-                    <div class="gift-row">
-                        <button class="btn small gift-btn" data-gift="gold">◈ Send 10% Gold</button>
-                        <button class="btn small gift-btn" data-gift="elixir">❂ Send 10% Elixir</button>
-                    </div>
-                    <div class="gift-row">
-                        <button class="btn small gift-btn" data-gift="dark">✦ Send 10% Dark</button>
-                        <button class="btn small gift-btn" data-gift="gems">♦ Send 1 Gem</button>
-                    </div>
-                    <button class="btn small danger coop-disconnect" id="btnDisconnect">Disconnect</button>
-                </div>
-            </section>
+        <!-- Side panel -->
+        <aside id="drawer" class="drawer" aria-label="Panel">
+            <div class="drawer-head">
+                <h2 id="drawerTitle">Build</h2>
+                <button class="icon-btn" id="drawerClose" type="button" aria-label="Close panel"><svg aria-hidden="true"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="drawer-body">
+                <!-- Build -->
+                <section class="tab-content" data-tab="build" id="panel-build" role="region" aria-label="Build">
+                    <div class="seg cat-seg" id="catSeg" role="group" aria-label="Category"></div>
+                    <div id="buildMenu" class="build-grid"></div>
+                    <p class="hint">Tap a card, then tap the grass. Walls and decorations can be painted by dragging.</p>
+                </section>
 
-            <!-- Stats Tab -->
-            <section class="tab-content" data-tab="stats" id="panel-stats" role="tabpanel" aria-label="Stats">
-                <div class="section-title">Kingdom Statistics</div>
-                <div id="statList" class="stat-list"></div>
-                <div class="section-title">Save</div>
-                <div class="save-row">
-                    <button class="btn small" id="btnSave">Save</button>
-                    <button class="btn small" id="btnExport" title="Download your save as a file">Export</button>
-                    <button class="btn small" id="btnImport" title="Load a save file">Import</button>
-                    <button class="btn small danger" id="btnReset">Reset</button>
-                </div>
-                <input type="file" id="importFile" accept=".json,application/json" hidden>
-                <div class="hint">Saves to this browser every 15s and when you leave, with a backup copy of the save before it. While you're away your kingdom earns at half rate, for up to 4 hours.</div>
-                <div class="section-title">Settings</div>
-                <div class="setting-row">
-                    <span class="setting-label" id="lblSound">Sound</span>
-                    <button class="btn small" id="btnSound" aria-pressed="true" aria-labelledby="lblSound btnSound">On</button>
-                </div>
-                <div class="setting-row">
-                    <span class="setting-label" id="lblTheme">Theme</span>
-                    <div class="seg" role="group" aria-labelledby="lblTheme" id="themeSeg">
-                        <button class="seg-btn" type="button" data-theme-opt="system" aria-pressed="false">System</button>
-                        <button class="seg-btn" type="button" data-theme-opt="light" aria-pressed="false">Light</button>
-                        <button class="seg-btn" type="button" data-theme-opt="dark" aria-pressed="false">Dark</button>
+                <!-- Upgrade -->
+                <section class="tab-content" data-tab="upgrade" id="panel-upgrade" role="region" aria-label="Upgrades">
+                    <div class="up-actions">
+                        <button class="btn good" id="btnUpCheap" type="button"><svg aria-hidden="true"><use href="#i-up"/></svg>Upgrade cheapest</button>
+                        <button class="btn good" id="btnUpAll" type="button"><svg aria-hidden="true"><use href="#i-up"/></svg>Upgrade all you can</button>
                     </div>
-                </div>
-                <div class="setting-row">
-                    <span class="setting-label" id="lblNotation">Numbers</span>
-                    <div class="seg" role="group" aria-labelledby="lblNotation" id="notationSeg">
-                        <button class="seg-btn" type="button" data-notation="short" aria-pressed="true" title="Short: 12.5K">12.5K</button>
-                        <button class="seg-btn" type="button" data-notation="full" aria-pressed="false" title="Full: 12,500">12,500</button>
-                        <button class="seg-btn" type="button" data-notation="sci" aria-pressed="false" title="Scientific: 1.25e4">1.25e4</button>
+                    <div class="setting-row stacked">
+                        <span class="setting-label" id="lblAutoUp">Auto-upgrade</span>
+                        <div class="seg" role="group" aria-labelledby="lblAutoUp" id="autoUpSeg">
+                            <button class="seg-btn" type="button" data-autoup="off" aria-pressed="true">Off</button>
+                            <button class="seg-btn" type="button" data-autoup="economy" aria-pressed="false">Economy</button>
+                            <button class="seg-btn" type="button" data-autoup="defense" aria-pressed="false">Defense</button>
+                            <button class="seg-btn" type="button" data-autoup="all" aria-pressed="false">All</button>
+                        </div>
                     </div>
-                </div>
-                <div class="setting-row">
-                    <span class="setting-label">Keyboard</span>
-                    <button class="btn small" id="btnShortcuts" title="Keyboard shortcuts (?)">Shortcuts</button>
-                </div>
-            </section>
+                    <div id="upgradeList" class="up-list"></div>
+                </section>
+
+                <!-- Kingdom -->
+                <section class="tab-content" data-tab="kingdom" id="panel-kingdom" role="region" aria-label="Kingdom">
+                    <div class="section-title">Quests</div>
+                    <div id="questList" class="quest-list"></div>
+                    <div class="section-title">Ascension</div>
+                    <div id="ascendBox" class="ascend-box"></div>
+                    <div class="section-title">Defenses</div>
+                    <div id="armyList" class="stat-list"></div>
+                    <div class="section-title">Achievements</div>
+                    <div id="achievementList" class="achievement-list"></div>
+                    <div class="section-title">Statistics</div>
+                    <div id="statList" class="stat-list"></div>
+                </section>
+
+                <!-- Co-op -->
+                <section class="tab-content" data-tab="coop" id="panel-coop" role="region" aria-label="Co-op">
+                    <div id="coopDisconnected" class="coop-section">
+                        <div class="coop-code-block">
+                            <div class="coop-label">Your game code</div>
+                            <div class="coop-code" id="gameCode">------</div>
+                            <button class="btn small" id="btnCopyCode" type="button">Copy code</button>
+                        </div>
+                        <div class="coop-connect-block">
+                            <div class="coop-label">Enter a friend's code</div>
+                            <input type="text" id="partnerCodeInput" class="coop-input" maxlength="6" placeholder="XXXXXX" autocomplete="off" spellcheck="false" autocapitalize="characters" aria-label="Partner's game code">
+                            <button class="btn good small" id="btnConnect" type="button">Connect</button>
+                        </div>
+                        <div class="coop-status pending" id="coopStatus" role="status">Connecting to relay…</div>
+                        <p class="hint">Share your code with a friend. Both of you need to be online. You can swap resources and watch each other's kingdoms.</p>
+                    </div>
+                    <div id="coopConnected" class="coop-section" hidden>
+                        <div class="partner-header">
+                            <div class="partner-name" id="partnerName">Partner</div>
+                            <div class="coop-status online" id="coopStatusOn">Connected</div>
+                        </div>
+                        <div class="partner-resources" id="partnerRes"></div>
+                        <div class="partner-wave" id="partnerWave"></div>
+                        <canvas id="partnerMap" class="partner-map" width="280" height="280" aria-label="Partner's village map"></canvas>
+                        <div class="section-title">Send resources</div>
+                        <div class="gift-row">
+                            <button class="btn small gift-btn" data-gift="gold" type="button"><svg aria-hidden="true"><use href="#i-coin"/></svg>10% gold</button>
+                            <button class="btn small gift-btn" data-gift="elixir" type="button"><svg aria-hidden="true"><use href="#i-elixir"/></svg>10% elixir</button>
+                            <button class="btn small gift-btn" data-gift="dark" type="button"><svg aria-hidden="true"><use href="#i-dark"/></svg>10% dark</button>
+                            <button class="btn small gift-btn" data-gift="gems" type="button"><svg aria-hidden="true"><use href="#i-gem"/></svg>1 gem</button>
+                        </div>
+                        <button class="btn small danger coop-disconnect" id="btnDisconnect" type="button">Disconnect</button>
+                    </div>
+                </section>
+
+                <!-- Menu -->
+                <section class="tab-content" data-tab="menu" id="panel-menu" role="region" aria-label="Menu">
+                    <div class="section-title">Save</div>
+                    <div class="save-row">
+                        <button class="btn small" id="btnSave" type="button">Save now</button>
+                        <button class="btn small" id="btnExport" type="button" title="Download your save as a file">Export</button>
+                        <button class="btn small" id="btnImport" type="button" title="Load a save file">Import</button>
+                    </div>
+                    <input type="file" id="importFile" accept=".json,application/json" hidden>
+                    <p class="hint">Saves to this browser every 15 seconds and when you leave, with a backup of the save before it. While you are away the kingdom earns at half rate for up to 4 hours.</p>
+
+                    <div class="section-title">Settings</div>
+                    <div class="setting-row"><span class="setting-label" id="lblSound">Sound</span><button class="btn small" id="btnSound" type="button" aria-pressed="true" aria-labelledby="lblSound btnSound">On</button></div>
+                    <div class="setting-row stacked"><span class="setting-label" id="lblTheme">Theme</span>
+                        <div class="seg" role="group" aria-labelledby="lblTheme" id="themeSeg">
+                            <button class="seg-btn" type="button" data-theme-opt="system" aria-pressed="false">System</button>
+                            <button class="seg-btn" type="button" data-theme-opt="light" aria-pressed="false">Light</button>
+                            <button class="seg-btn" type="button" data-theme-opt="dark" aria-pressed="false">Dark</button>
+                        </div>
+                    </div>
+                    <div class="setting-row stacked"><span class="setting-label" id="lblView">Camera angle</span>
+                        <div class="seg" role="group" aria-labelledby="lblView" id="viewSeg">
+                            <button class="seg-btn" type="button" data-view="classic" aria-pressed="false" title="Low and dramatic">Classic</button>
+                            <button class="seg-btn" type="button" data-view="balanced" aria-pressed="true" title="A good all-rounder">Balanced</button>
+                            <button class="seg-btn" type="button" data-view="overhead" aria-pressed="false" title="Look down on everything">Overhead</button>
+                        </div>
+                    </div>
+                    <div class="setting-row"><span class="setting-label" id="lblXray">See-through front buildings</span><button class="btn small" id="btnXray" type="button" aria-pressed="true" aria-labelledby="lblXray btnXray">On</button></div>
+                    <div class="setting-row"><span class="setting-label" id="lblHints">Upgrade arrows</span><button class="btn small" id="btnHints" type="button" aria-pressed="true" aria-labelledby="lblHints btnHints">On</button></div>
+                    <div class="setting-row stacked"><span class="setting-label" id="lblTags">Level tags</span>
+                        <div class="seg" role="group" aria-labelledby="lblTags" id="tagsSeg">
+                            <button class="seg-btn" type="button" data-tags="always" aria-pressed="true">Always</button>
+                            <button class="seg-btn" type="button" data-tags="hover" aria-pressed="false">On select</button>
+                        </div>
+                    </div>
+                    <div class="setting-row stacked"><span class="setting-label" id="lblNotation">Numbers</span>
+                        <div class="seg" role="group" aria-labelledby="lblNotation" id="notationSeg">
+                            <button class="seg-btn" type="button" data-notation="short" aria-pressed="true" title="Short: 12.5K">12.5K</button>
+                            <button class="seg-btn" type="button" data-notation="full" aria-pressed="false" title="Full: 12,500">12,500</button>
+                            <button class="seg-btn" type="button" data-notation="sci" aria-pressed="false" title="Scientific: 1.25e4">1.25e4</button>
+                        </div>
+                    </div>
+                    <div class="setting-row"><span class="setting-label">Keyboard</span><button class="btn small" id="btnShortcuts" type="button" title="Keyboard shortcuts (?)">Shortcuts</button></div>
+
+                    <div class="section-title danger-title">Start over</div>
+                    <div class="danger-zone">
+                        <p>Erase this kingdom and begin again from nothing. Crowns, perks and achievements are erased too. If you only want a fresh start with permanent bonuses, <b>Ascend</b> from the Kingdom tab instead.</p>
+                        <button class="btn danger" id="btnReset" type="button"><svg aria-hidden="true"><use href="#i-trash"/></svg>Reset everything</button>
+                    </div>
+                </section>
+            </div>
         </aside>
 
-        <!-- Bottom Action Bar -->
-        <footer id="bottomBar">
-            <button class="action" id="actCollect" aria-label="Collect all" title="Collect all (Space)">
-                <span class="action-ico" aria-hidden="true">◉</span>
-                <span class="action-label">Collect All</span>
-            </button>
-            <button class="action" id="actAutoCollect" title="Toggle auto-collect" aria-label="Auto-collect" aria-pressed="false">
-                <span class="action-ico" aria-hidden="true">↻</span>
-                <span class="action-label">Auto: Off</span>
-            </button>
-            <button class="action" id="actPause" title="Pause (P)" aria-label="Pause" aria-pressed="false">
-                <span class="action-ico" aria-hidden="true">⏸</span>
-                <span class="action-label">Pause</span>
-            </button>
-            <button class="action" id="actRally" aria-label="Rally defenses" title="Rally defenses: heal towers and reset their cooldowns">
-                <span class="action-ico" aria-hidden="true">⚑</span>
-                <span class="action-label">Rally Defenses</span>
-            </button>
-            <button class="action" id="actBoost" aria-label="Spend a gem for double production for 60 seconds" title="Spend 1 gem: x2 production for 60s">
-                <span class="action-ico" aria-hidden="true">✦</span>
-                <span class="action-label">Spend Gem (x2 · 60s)</span>
-            </button>
-            <button class="action spell" id="actSpell" aria-label="Lightning spell, costs 1 gem" title="Lightning spell — 1 gem (L)">
-                <span class="action-ico" aria-hidden="true">⚡</span>
-                <span class="action-label">Lightning (1 ♦)</span>
-            </button>
-            <button class="action warcry" id="actWarCry" title="War Cry — +50% tower damage for 15s, 90s cooldown (W)" aria-label="War Cry">
-                <span class="action-ico" aria-hidden="true">🔥</span>
-                <span class="action-label">War Cry</span>
-            </button>
-            <button class="action" id="actCancel" hidden aria-label="Cancel" title="Cancel (Esc)">
-                <span class="action-ico" aria-hidden="true">✕</span>
-                <span class="action-label">Cancel Build</span>
-            </button>
-        </footer>
-
-        <!-- Modal -->
+        <!-- Detail dialog -->
         <div id="modal" class="modal">
             <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-                <button class="modal-close" id="modalClose" aria-label="Close">✕</button>
+                <button class="icon-btn modal-close" id="modalClose" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button>
                 <div id="modalBody"></div>
             </div>
         </div>
 
-        <!-- Co-op Invite Notification -->
+        <!-- Co-op invite -->
         <div id="inviteNotify" class="invite-notify" role="alert">
             <div class="invite-content">
-                <div class="invite-icon">⚔</div>
+                <svg class="invite-icon" aria-hidden="true"><use href="#i-people"/></svg>
                 <div class="invite-text">
-                    <div class="invite-title">Co-op Invite</div>
+                    <div class="invite-title">Co-op invite</div>
                     <div class="invite-name" id="inviteName">Player</div>
                 </div>
                 <div class="invite-actions">
-                    <button class="btn primary small" id="btnAcceptInvite">Accept</button>
-                    <button class="btn small" id="btnDeclineInvite">Decline</button>
+                    <button class="btn good small" id="btnAcceptInvite" type="button">Accept</button>
+                    <button class="btn small" id="btnDeclineInvite" type="button">Decline</button>
                 </div>
             </div>
         </div>
 
-        <!-- Welcome screen -->
+        <!-- Welcome -->
         <div id="welcome" class="welcome">
             <div class="welcome-panel" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
-                <div class="welcome-crest" aria-hidden="true">⚔</div>
+                <canvas id="welcomeArt" class="welcome-art" width="360" height="230" aria-hidden="true"></canvas>
                 <h1 id="welcomeTitle">Kingdom of Ember</h1>
-                <p class="tagline">Build. Defend. Conquer. Idle-style.</p>
+                <p class="tagline">Build it. Defend it. Let it run.</p>
                 <ul class="welcome-tips">
-                    <li>◈ Buildings generate resources over time</li>
-                    <li>◎ Tap any building to collect a click bonus</li>
-                    <li>⚒ Long-press or right-click a building to upgrade it</li>
-                    <li>⚔ Raiders attack every minute — build defenses</li>
-                    <li>★ Level up to unlock new structures</li>
+                    <li><svg aria-hidden="true"><use href="#i-coin"/></svg><span>Mines and wells earn on their own. Tap them for a bonus.</span></li>
+                    <li><svg aria-hidden="true"><use href="#i-up"/></svg><span>Tap any building to select it, then upgrade in one tap. Green arrows show what you can afford.</span></li>
+                    <li><svg aria-hidden="true"><use href="#i-sword"/></svg><span>Raiders arrive in waves. Towers fire on their own. Walls slow them down.</span></li>
+                    <li><svg aria-hidden="true"><use href="#i-crown"/></svg><span>Reach wave 10, then Ascend for crowns and permanent bonuses.</span></li>
                 </ul>
-                <button class="btn primary" id="welcomeStart">Enter the Kingdom</button>
+                <button class="btn good big" id="welcomeStart" type="button">Enter the kingdom</button>
             </div>
         </div>
     </div>
 
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
-    <script src="js/game.js?v=20261015a"></script>
+    <script src="js/data.js?v=20261020a"></script>
+    <script src="js/art-core.js?v=20261020a"></script>
+    <script src="js/art-buildings-a.js?v=20261020a"></script>
+    <script src="js/art-buildings-b.js?v=20261020a"></script>
+    <script src="js/art-world.js?v=20261020a"></script>
+    <script src="js/art-units.js?v=20261020a"></script>
+    <script src="js/game.js?v=20261020a"></script>
+    <script src="js/ui.js?v=20261020a"></script>
+    <script src="js/net.js?v=20261020a"></script>
+    <script src="js/boot.js?v=20261020a"></script>
 </body>
 </html>

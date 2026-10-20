@@ -1,585 +1,183 @@
 /* ============================================================
    Kingdom of Ember — Clash Idle
-   Single-file isometric tower-defense idle game
+   Game core: state, economy, combat, camera, input and rendering.
+   DOM panels live in ui.js, co-op and saving in net.js, all the
+   art in art-*.js and the numbers in data.js.
    ============================================================ */
-
-(() => {
+(function (K) {
     'use strict';
-
-    // ---------- CONFIG ----------
-    const CFG = {
-        gridW: 24,
-        gridH: 24,
-        tileW: 72,
-        tileH: 36,
-        zoomMin: 0.65,
-        zoomMax: 2.4,
-        saveKey: 'kingdomOfEmber.v3',   // key stays put so old saves still load; the format version lives in the data
-        saveVersion: 5,
-        autoSaveMs: 15000,
-        offlineMaxSec: 4 * 60 * 60,      // offline earnings cap out after 4 hours away
-        offlineRate: 0.5,                // and pay half the live rate
-        offlineSummarySec: 120,          // away longer than this gets a summary dialog instead of a toast
-        catchUpMaxSec: 3,                // a frame gap up to this long is simulated step by step; beyond it counts as time away
-        darkCapFrac: 0.3,                // dark elixir storage is 30% of the normal cap
-        dayLengthSec: 180,        // 3 minutes real-time = 1 in-game day
-        waveBaseSec: 75,
-        waveMinSec: 35,
-        xpToLevel: (lv) => Math.floor(100 * Math.pow(1.4, lv - 1)),
-        comboWindow: 1.3,
-        spellCost: { gold: 0, gems: 1 },
-        spellRadius: 3.2,
-        spellBaseDmg: 260,
-    };
-
-    // ---------- BUILDING TYPES ----------
-    const BLD = {
-        townhall: {
-            name: 'Town Hall',
-            icon: '♔',
-            size: 2,
-            maxLevel: 20,
-            unlockLevel: 1,
-            baseCost: { gold: 0 },
-            baseHP: 2500,
-            color1: '#8b4b1c',
-            color2: '#e29451',
-            roof: '#c73535',
-            desc: 'The heart of your kingdom. Upgrading unlocks new buildings and raises storage caps.',
-            upgradeCost: (lv) => ({ gold: 1500 * Math.pow(2, lv - 1), elixir: 400 * Math.pow(1.8, lv - 1) }),
-            provides: (lv) => ({ cap: 3000 + lv * 2500 }),
-        },
-        goldmine: {
-            name: 'Gold Mine',
-            icon: '◈',
-            size: 1,
-            maxLevel: 25,
-            unlockLevel: 1,
-            baseCost: { gold: 300 },
-            baseHP: 500,
-            color1: '#6a5227',
-            color2: '#d9b34e',
-            roof: '#a97a24',
-            desc: 'Produces Gold passively. Tap to mine a burst bonus.',
-            upgradeCost: (lv) => ({ gold: 400 * Math.pow(1.55, lv - 1) }),
-            production: (lv) => ({ gold: 2 + lv * 1.8 }),
-            clickBonus: (lv) => ({ gold: 15 + lv * 12 }),
-        },
-        elixirwell: {
-            name: 'Elixir Well',
-            icon: '❂',
-            size: 1,
-            maxLevel: 25,
-            unlockLevel: 2,
-            baseCost: { gold: 650 },
-            baseHP: 500,
-            color1: '#4a2464',
-            color2: '#c471ed',
-            roof: '#7e2fb0',
-            desc: 'Magical Elixir wells up from the deep. Tap for a burst.',
-            upgradeCost: (lv) => ({ gold: 600 * Math.pow(1.55, lv - 1), elixir: 80 * Math.pow(1.5, lv - 1) }),
-            production: (lv) => ({ elixir: 1 + lv * 1.2 }),
-            clickBonus: (lv) => ({ elixir: 10 + lv * 8 }),
-        },
-        darkdrill: {
-            name: 'Dark Drill',
-            icon: '✦',
-            size: 1,
-            maxLevel: 20,
-            unlockLevel: 6,
-            baseCost: { gold: 4500, elixir: 1200 },
-            baseHP: 700,
-            color1: '#1a0a2e',
-            color2: '#6b2cc9',
-            roof: '#3e1d66',
-            desc: 'Extracts rare Dark Elixir — gateway to prestige progression.',
-            upgradeCost: (lv) => ({ gold: 5000 * Math.pow(1.7, lv - 1), elixir: 1500 * Math.pow(1.6, lv - 1) }),
-            production: (lv) => ({ dark: 0.2 + lv * 0.15 }),
-            clickBonus: (lv) => ({ dark: 2 + lv * 1.5 }),
-        },
-        wall: {
-            name: 'Wall',
-            icon: '▭',
-            size: 1,
-            maxLevel: 20,
-            unlockLevel: 2,
-            baseCost: { gold: 180 },
-            baseHP: 1800,
-            color1: '#3c3c42',
-            color2: '#7d7d88',
-            roof: '#5a5a62',
-            desc: 'Thick stone rampart. Absorbs damage to protect your core buildings.',
-            upgradeCost: (lv) => ({ gold: 220 * Math.pow(1.55, lv - 1) }),
-        },
-        cannon: {
-            name: 'Cannon',
-            icon: '◉',
-            size: 1,
-            maxLevel: 22,
-            unlockLevel: 1,
-            baseCost: { gold: 450 },
-            baseHP: 450,
-            color1: '#2a2a2a',
-            color2: '#666',
-            roof: '#444',
-            desc: 'Long-range single-target cannon. Core defensive tower.',
-            upgradeCost: (lv) => ({ gold: 550 * Math.pow(1.5, lv - 1) }),
-            defense: (lv) => ({ range: 5, dmg: 25 + lv * 14, cd: 1.2, splash: 0 }),
-        },
-        archer: {
-            name: 'Archer Tower',
-            icon: '➳',
-            size: 1,
-            maxLevel: 22,
-            unlockLevel: 3,
-            baseCost: { gold: 1200 },
-            baseHP: 380,
-            color1: '#3d2817',
-            color2: '#8b6b3d',
-            roof: '#5a3c1f',
-            desc: 'Fast-firing tower with long range and sustained damage.',
-            upgradeCost: (lv) => ({ gold: 1400 * Math.pow(1.5, lv - 1), elixir: 200 * Math.pow(1.4, lv - 1) }),
-            defense: (lv) => ({ range: 6, dmg: 12 + lv * 7, cd: 0.45, splash: 0 }),
-        },
-        mortar: {
-            name: 'Mortar',
-            icon: '◎',
-            size: 1,
-            maxLevel: 20,
-            unlockLevel: 4,
-            baseCost: { gold: 2200, elixir: 400 },
-            baseHP: 420,
-            color1: '#1f2030',
-            color2: '#585b74',
-            roof: '#313347',
-            desc: 'Lobs massive splash shells. Devastates enemy clusters.',
-            upgradeCost: (lv) => ({ gold: 2500 * Math.pow(1.55, lv - 1), elixir: 500 * Math.pow(1.5, lv - 1) }),
-            defense: (lv) => ({ range: 7, dmg: 60 + lv * 25, cd: 3.2, splash: 1.8 }),
-        },
-        airdef: {
-            name: 'Air Defense',
-            icon: '⇧',
-            size: 1,
-            maxLevel: 20,
-            unlockLevel: 5,
-            baseCost: { gold: 2800, elixir: 600 },
-            baseHP: 500,
-            color1: '#2a3d1c',
-            color2: '#6ea04a',
-            roof: '#3e5a24',
-            desc: 'High-damage missile tower. Slow fire, enormous burst.',
-            upgradeCost: (lv) => ({ gold: 3000 * Math.pow(1.55, lv - 1), elixir: 650 * Math.pow(1.5, lv - 1) }),
-            defense: (lv) => ({ range: 5.5, dmg: 95 + lv * 40, cd: 2.4, splash: 0 }),
-        },
-        wizard: {
-            name: 'Wizard Tower',
-            icon: '✺',
-            size: 1,
-            maxLevel: 20,
-            unlockLevel: 6,
-            baseCost: { gold: 3200, elixir: 900 },
-            baseHP: 420,
-            color1: '#1a3a5c',
-            color2: '#5cd8ff',
-            roof: '#2f7ec2',
-            desc: 'Arcane splash damage tower. Beautiful and deadly.',
-            upgradeCost: (lv) => ({ gold: 3500 * Math.pow(1.6, lv - 1), elixir: 1100 * Math.pow(1.55, lv - 1) }),
-            defense: (lv) => ({ range: 4.5, dmg: 40 + lv * 20, cd: 1.8, splash: 1.2 }),
-        },
-        tesla: {
-            name: 'Hidden Tesla',
-            icon: '⚡',
-            size: 1,
-            maxLevel: 20,
-            unlockLevel: 7,
-            baseCost: { gold: 4200, elixir: 1400 },
-            baseHP: 600,
-            color1: '#20203a',
-            color2: '#7aa6ff',
-            roof: '#4a5a9c',
-            desc: 'Chain-lightning tower. Very fast and strikes through steel.',
-            upgradeCost: (lv) => ({ gold: 4500 * Math.pow(1.6, lv - 1), elixir: 1500 * Math.pow(1.55, lv - 1) }),
-            defense: (lv) => ({ range: 5, dmg: 28 + lv * 16, cd: 0.55, splash: 0 }),
-        },
-        xbow: {
-            name: 'X-Bow',
-            icon: '⤭',
-            size: 1,
-            maxLevel: 18,
-            unlockLevel: 8,
-            baseCost: { gold: 6000, elixir: 2000 },
-            baseHP: 520,
-            color1: '#3a2614',
-            color2: '#a67c4a',
-            roof: '#5a3c1f',
-            desc: 'Enormous crossbow with extreme range. Rains bolts from afar.',
-            upgradeCost: (lv) => ({ gold: 6500 * Math.pow(1.6, lv - 1), elixir: 2200 * Math.pow(1.55, lv - 1) }),
-            defense: (lv) => ({ range: 9, dmg: 22 + lv * 12, cd: 0.35, splash: 0 }),
-        },
-        inferno: {
-            name: 'Inferno Tower',
-            icon: '✶',
-            size: 1,
-            maxLevel: 18,
-            unlockLevel: 9,
-            baseCost: { gold: 8500, elixir: 3000, dark: 50 },
-            baseHP: 680,
-            color1: '#3a0c0c',
-            color2: '#ff6b35',
-            roof: '#8a1a10',
-            desc: 'Shoots a beam of hellfire. Incinerates single targets with unrivaled DPS.',
-            upgradeCost: (lv) => ({ gold: 9000 * Math.pow(1.65, lv - 1), elixir: 3300 * Math.pow(1.6, lv - 1), dark: 60 * Math.pow(1.5, lv - 1) }),
-            defense: (lv) => ({ range: 4.5, dmg: 55 + lv * 30, cd: 0.22, splash: 0 }),
-        },
-        storage: {
-            name: 'Vault',
-            icon: '▦',
-            size: 1,
-            maxLevel: 20,
-            unlockLevel: 2,
-            baseCost: { gold: 800 },
-            baseHP: 900,
-            color1: '#4a3520',
-            color2: '#b08040',
-            roof: '#705828',
-            desc: 'Increases storage capacity for all resources.',
-            upgradeCost: (lv) => ({ gold: 900 * Math.pow(1.6, lv - 1) }),
-            provides: (lv) => ({ cap: 1500 * lv + 1500 }),
-        },
-        builderhut: {
-            name: 'Builder Hut',
-            icon: '⚒',
-            size: 1,
-            maxLevel: 15,
-            unlockLevel: 2,
-            baseCost: { gold: 1500 },
-            baseHP: 400,
-            color1: '#3c2616',
-            color2: '#a0703c',
-            roof: '#5a3c1f',
-            desc: 'Each hut boosts all Gold Mine production by +10% per level.',
-            upgradeCost: (lv) => ({ gold: 1800 * Math.pow(1.5, lv - 1) }),
-            provides: (lv) => ({ goldMult: 0.1 * lv }),
-        },
-        lab: {
-            name: 'Laboratory',
-            icon: '⚗',
-            size: 1,
-            maxLevel: 18,
-            unlockLevel: 4,
-            baseCost: { gold: 2500, elixir: 500 },
-            baseHP: 480,
-            color1: '#1c3a2e',
-            color2: '#4bb08e',
-            roof: '#285c48',
-            desc: 'Research XP gain is boosted per level (+15% per level).',
-            upgradeCost: (lv) => ({ gold: 3000 * Math.pow(1.55, lv - 1), elixir: 600 * Math.pow(1.5, lv - 1) }),
-            provides: (lv) => ({ xpMult: 0.15 * lv }),
-        },
-        clancastle: {
-            name: 'Clan Castle',
-            icon: '♖',
-            size: 2,
-            maxLevel: 18,
-            unlockLevel: 5,
-            baseCost: { gold: 5500, elixir: 1200 },
-            baseHP: 1600,
-            color1: '#4a4a5a',
-            color2: '#b0b0c0',
-            roof: '#2a3a5a',
-            desc: 'Fortress that passively grants gems from completed waves (+1 gem/wave per level).',
-            upgradeCost: (lv) => ({ gold: 6500 * Math.pow(1.6, lv - 1), elixir: 1500 * Math.pow(1.55, lv - 1) }),
-            provides: (lv) => ({ waveGems: lv }),
-            defense: (lv) => ({ range: 4, dmg: 30 + lv * 15, cd: 1.5, splash: 0.8 }),
-        },
-        armycamp: {
-            name: 'Army Camp',
-            icon: '⛺',
-            size: 1,
-            maxLevel: 15,
-            unlockLevel: 3,
-            baseCost: { gold: 1800, elixir: 300 },
-            baseHP: 420,
-            color1: '#3a2a18',
-            color2: '#a58048',
-            roof: '#62421c',
-            desc: 'Houses troops. Rally Defenses heals 10% more per army camp level.',
-            upgradeCost: (lv) => ({ gold: 2000 * Math.pow(1.5, lv - 1), elixir: 400 * Math.pow(1.45, lv - 1) }),
-            provides: (lv) => ({ rallyMult: 0.1 * lv }),
-        },
-    };
-
-    // ---------- ACHIEVEMENTS ----------
-    const ACHS = [
-        { id: 'first_build',  name: 'Groundbreaking',    desc: 'Place your first building',     icon: '⚒', check: (g) => g.stats.built >= 1 },
-        { id: 'ten_builds',   name: 'Master Architect',  desc: 'Build 10 structures',           icon: '🏛', check: (g) => g.stats.built >= 10 },
-        { id: 'twenty_builds',name: 'Urban Planner',     desc: 'Build 20 structures',           icon: '🏰', check: (g) => g.stats.built >= 20 },
-        { id: 'first_kill',   name: 'First Blood',       desc: 'Defeat your first raider',      icon: '⚔', check: (g) => g.stats.kills >= 1 },
-        { id: 'slayer',       name: 'Goblin Slayer',     desc: 'Defeat 50 raiders',             icon: '💀', check: (g) => g.stats.kills >= 50 },
-        { id: 'warlord',      name: 'Warlord',           desc: 'Defeat 200 raiders',            icon: '☠', check: (g) => g.stats.kills >= 200 },
-        { id: 'wave_5',       name: 'Wave Rider',        desc: 'Survive wave 5',                icon: '🌊', check: (g) => g.wave.number > 5 },
-        { id: 'wave_10',      name: 'Unbreakable',       desc: 'Survive wave 10',               icon: '🛡', check: (g) => g.wave.number > 10 },
-        { id: 'wave_20',      name: 'Iron Bastion',      desc: 'Survive wave 20',               icon: '🏛', check: (g) => g.wave.number > 20 },
-        { id: 'level_5',      name: 'Rising Chief',      desc: 'Reach level 5',                 icon: '★', check: (g) => g.player.level >= 5 },
-        { id: 'level_10',     name: 'Veteran Lord',      desc: 'Reach level 10',                icon: '✦', check: (g) => g.player.level >= 10 },
-        { id: 'gold_rich',    name: 'Gilded',            desc: 'Amass 100,000 gold',            icon: '◈', check: (g) => g.res.gold >= 100000 },
-        { id: 'darkelixir',   name: 'Touched by Shadow', desc: 'Collect your first Dark Elixir',icon: '✦', check: (g) => g.res.dark >= 1 },
-        { id: 'combo_10',     name: 'Click Frenzy',      desc: 'Reach a 10x click combo',       icon: '✱', check: (g) => g.stats.maxCombo >= 10 },
-        { id: 'spellcaster',  name: 'Lightning Mage',    desc: 'Cast your first spell',         icon: '⚡', check: (g) => g.stats.spells >= 1 },
-    ];
-
-    // ---------- WINDOW LAYOUTS (hoisted: reused every frame for every building) ----------
-    const WINDOW_SPEC = {
-        townhall:  [{ face: 'R', u: 0.28, v: 0.45, s: 1.6 }, { face: 'L', u: 0.28, v: 0.45, s: 1.6 }, { face: 'R', u: 0.55, v: 0.45, s: 1.3 }, { face: 'L', u: 0.55, v: 0.45, s: 1.3 }],
-        archer:    [{ face: 'R', u: 0.35, v: 0.6,  s: 1.1 }, { face: 'L', u: 0.35, v: 0.6, s: 1.1 }],
-        wizard:    [{ face: 'R', u: 0.3,  v: 0.55, s: 1.1 }, { face: 'L', u: 0.3,  v: 0.55, s: 1.1 }],
-        storage:   [{ face: 'R', u: 0.4,  v: 0.5,  s: 1.2 }],
-        lab:       [{ face: 'R', u: 0.35, v: 0.5,  s: 1.2 }],
-        builderhut:[{ face: 'R', u: 0.4,  v: 0.5,  s: 1.1 }],
-        clancastle:[{ face: 'R', u: 0.3,  v: 0.6,  s: 1.4 }, { face: 'L', u: 0.3, v: 0.6, s: 1.4 }, { face: 'R', u: 0.6, v: 0.6, s: 1.2 }, { face: 'L', u: 0.6, v: 0.6, s: 1.2 }],
-        goldmine:  [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-        elixirwell:[{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
-        darkdrill: [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-        tesla:     [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-        inferno:   [{ face: 'R', u: 0.5,  v: 0.55, s: 1.0 }],
-        armycamp:  [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-        xbow:      [{ face: 'R', u: 0.5,  v: 0.6,  s: 0.9 }],
-        airdef:    [{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
-        mortar:    [{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
-        cannon:    [{ face: 'R', u: 0.5,  v: 0.55, s: 0.9 }],
-    };
-
-    // ---------- UTILITIES ----------
-    const rand = (a, b) => a + Math.random() * (b - a);
-    const randi = (a, b) => Math.floor(rand(a, b));
-    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    const SUFFIXES = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi'];
-    const NOTATIONS = ['short', 'full', 'sci'];
-    // Number format from Settings: 12.5K (default), 12,500 or 1.25e4. Saved with the game.
-    let notation = 'short';
-    const fmt = (n) => {
-        if (!Number.isFinite(n)) return '0';
-        if (n < 0) return '-' + fmt(-n);
-        if (n < 1000) return Math.floor(n).toString();
-        if (notation === 'full') return Math.floor(n).toLocaleString('en-US');
-        if (notation === 'sci') return n.toExponential(2).replace('e+', 'e');
-        let tier = Math.min(Math.floor(Math.log10(n) / 3), SUFFIXES.length - 1);
-        let v = n / Math.pow(1000, tier);
-        // 999.95K would round up to "1000.0K" — bump it to the next tier instead
-        if (v >= 999.95 && tier < SUFFIXES.length - 1) { tier++; v /= 1000; }
-        return v.toFixed(v < 10 ? 2 : 1) + SUFFIXES[tier];
-    };
-    // These lists refresh at 10Hz; only touch the DOM when the markup actually changed
-    const setHtml = (el, html) => { if (el._html !== html) { el._html = html; el.innerHTML = html; } };
-    // Per-second rates: keep one decimal for small numbers so +0.4/s isn't shown as +0
-    const fmtRate = (n, digits = 1) => (n < 1000 ? n.toFixed(digits) : fmt(n));
-    // A number from outside (save file, co-op peer) or a fallback if it isn't one
-    const safeNum = (v, fallback, lo = 0, hi = Infinity) => (Number.isFinite(v) ? clamp(v, lo, hi) : fallback);
-    // Strings and whole numbers from a co-op peer: bounded, never used as-is
-    const cleanStr = (v, max, fallback = '') => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : fallback);
-    const cleanInt = (v, fallback, lo, hi) => Math.floor(safeNum(Number(v), fallback, lo, hi));
-    // Drop finished entries in place; the old `arr = arr.filter(...)` made a new array every frame
-    const compact = (arr, keep) => {
-        let w = 0;
-        for (let i = 0; i < arr.length; i++) if (keep(arr[i])) arr[w++] = arr[i];
-        arr.length = w;
-        return arr;
-    };
-    const alive = (p) => p.life > 0;
-    // textContent writes are not free even when nothing changed; skip the no-ops
-    const setText = (el, s) => { if (el && el._t !== s) { el._t = s; el.textContent = s; } };
-    const fmtDuration = (sec) => {
-        const m = Math.round(sec / 60);
-        if (m < 1) return `${Math.round(sec)}s`;
-        if (m < 60) return `${m}m`;
-        return `${Math.floor(m / 60)}h ${m % 60}m`;
-    };
-    const fmtTime = (sec) => {
-        sec = Math.max(0, Math.ceil(sec));
-        const m = Math.floor(sec / 60);
-        const s = sec % 60;
-        return m + ':' + s.toString().padStart(2, '0');
-    };
-    const mixColor = (c1, c2, t) => {
-        const p = (c) => [parseInt(c.slice(1,3),16), parseInt(c.slice(3,5),16), parseInt(c.slice(5,7),16)];
-        const [r1,g1,b1] = p(c1), [r2,g2,b2] = p(c2);
-        const h = (v) => Math.round(v).toString(16).padStart(2,'0');
-        return '#' + h(r1+(r2-r1)*t) + h(g1+(g2-g1)*t) + h(b1+(b2-b1)*t);
-    };
-    // Standard ray-cast point-in-polygon. poly is [[x,y], ...] in any order.
-    const pointInPolygon = (px, py, poly) => {
-        let inside = false;
-        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-            const xi = poly[i][0], yi = poly[i][1];
-            const xj = poly[j][0], yj = poly[j][1];
-            const intersect = ((yi > py) !== (yj > py)) &&
-                (px < (xj - xi) * (py - yi) / (yj - yi + 1e-9) + xi);
-            if (intersect) inside = !inside;
-        }
-        return inside;
-    };
+    const { CFG, VIEWS, BLD, ENEMY, waveTable, PERKS, QUEST_KINDS, ACHS } = K.data;
+    const U = K.util;
+    const { rand, randi, clamp, fmt, safeNum, compact, alive, tierOf, resColor } = U;
+    const A = K.art;
+    const TAU = Math.PI * 2;
 
     // ---------- AUDIO (procedural WebAudio) ----------
-    class Audio {
-        constructor() {
-            this.ctx = null;
-            this.enabled = true;   // false if WebAudio isn't available
-            this.muted = false;    // player's sound setting
-            this.gain = null;
-        }
+    class Sound {
+        constructor() { this.ctx = null; this.enabled = true; this.muted = false; this.gain = null; this._last = {}; }
         ensure() {
             if (!this.enabled) return;
-            if (this.ctx) {
-                // Browsers start the context suspended until a user gesture
-                if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
-                return;
-            }
+            if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {}); return; }
             try {
                 const Ctor = window.AudioContext || window['webkitAudioContext'];
                 this.ctx = new Ctor();
                 this.gain = this.ctx.createGain();
-                this.gain.gain.value = 0.18;
+                this.gain.gain.value = 0.16;
                 this.gain.connect(this.ctx.destination);
+                const len = this.ctx.sampleRate * 0.5;
+                this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+                const d = this.noiseBuf.getChannelData(0);
+                for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
             } catch (e) { this.enabled = false; }
         }
-        beep(freq, dur = 0.1, type = 'sine', vol = 1) {
+        // don't let a dozen towers firing at once turn into a wall of noise
+        gate(name, ms) {
+            const now = performance.now();
+            if (now - (this._last[name] || 0) < ms) return false;
+            this._last[name] = now;
+            return true;
+        }
+        beep(freq, dur = 0.1, type = 'sine', vol = 1, slide = 0) {
             if (!this.enabled || this.muted) return;
             this.ensure();
             if (!this.ctx) return;
-            const o = this.ctx.createOscillator();
-            const g = this.ctx.createGain();
-            o.type = type;
-            o.frequency.value = freq;
-            g.gain.value = vol;
-            g.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + dur);
+            const t = this.ctx.currentTime;
+            const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+            o.type = type; o.frequency.setValueAtTime(freq, t);
+            if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq * slide), t + dur);
+            g.gain.setValueAtTime(vol, t);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
             o.connect(g); g.connect(this.gain);
-            o.start();
-            o.stop(this.ctx.currentTime + dur);
+            o.start(t); o.stop(t + dur);
         }
-        click()  { this.beep(740, 0.07, 'square', 0.3); }
-        coin()   { this.beep(880, 0.06, 'triangle', 0.4); setTimeout(() => this.beep(1320, 0.08, 'triangle', 0.3), 35); }
-        build()  { this.beep(220, 0.12, 'sawtooth', 0.5); setTimeout(() => this.beep(440, 0.15, 'triangle', 0.4), 120); }
-        upgrade(){ this.beep(523, 0.1, 'triangle', 0.5); setTimeout(() => this.beep(659, 0.1, 'triangle', 0.5), 90); setTimeout(() => this.beep(784, 0.18, 'triangle', 0.5), 180); }
-        shoot()  { this.beep(180, 0.05, 'square', 0.2); }
-        hit()    { this.beep(120, 0.08, 'sawtooth', 0.3); }
-        die()    { this.beep(90, 0.2, 'sawtooth', 0.4); }
-        wave()   { this.beep(260, 0.3, 'sawtooth', 0.6); setTimeout(() => this.beep(200, 0.3, 'sawtooth', 0.5), 180); }
-        levelup(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => this.beep(f, 0.14, 'triangle', 0.55), i * 90)); }
-        spell()  { [220, 440, 880].forEach((f, i) => setTimeout(() => this.beep(f, 0.12, 'square', 0.5), i * 40)); }
-        combo()  { this.beep(1200, 0.05, 'triangle', 0.35); }
-        error()  { this.beep(180, 0.12, 'square', 0.3); }
+        noise(dur = 0.2, vol = 0.5, freq = 800, q = 0.7) {
+            if (!this.enabled || this.muted) return;
+            this.ensure();
+            if (!this.ctx || !this.noiseBuf) return;
+            const t = this.ctx.currentTime;
+            const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf;
+            const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = freq; f.Q.value = q;
+            const g = this.ctx.createGain();
+            g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+            s.connect(f); f.connect(g); g.connect(this.gain);
+            s.start(t); s.stop(t + dur);
+        }
+        click()  { this.beep(660, 0.05, 'triangle', 0.35, 1.3); }
+        coin()   { if (!this.gate('coin', 60)) return; this.beep(988, 0.07, 'triangle', 0.4); setTimeout(() => this.beep(1319, 0.1, 'triangle', 0.3), 45); }
+        build()  { this.noise(0.12, 0.5, 500); this.beep(196, 0.16, 'sawtooth', 0.3, 1.5); setTimeout(() => this.beep(392, 0.18, 'triangle', 0.35), 110); }
+        upgrade(){ [523, 659, 784].forEach((f, i) => setTimeout(() => this.beep(f, 0.12, 'triangle', 0.45), i * 80)); }
+        shoot()  { if (this.gate('shoot', 70)) this.beep(240, 0.06, 'square', 0.14, 0.5); }
+        bow()    { if (this.gate('bow', 90)) { this.beep(900, 0.05, 'triangle', 0.12, 0.6); } }
+        boom()   { if (this.gate('boom', 90)) { this.noise(0.35, 0.7, 380, 1); this.beep(90, 0.3, 'sine', 0.5, 0.4); } }
+        zap()    { if (this.gate('zap', 60)) { this.beep(1400, 0.07, 'sawtooth', 0.14, 0.4); } }
+        hit()    { if (this.gate('hit', 50)) this.noise(0.07, 0.3, 900); }
+        die()    { if (this.gate('die', 60)) this.beep(140, 0.18, 'square', 0.22, 0.4); }
+        wave()   { this.beep(196, 0.5, 'sawtooth', 0.45, 0.8); setTimeout(() => this.beep(147, 0.6, 'sawtooth', 0.4, 0.8), 260); }
+        levelup(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => this.beep(f, 0.16, 'triangle', 0.5), i * 90)); }
+        spell()  { this.noise(0.5, 0.8, 2500); [220, 440, 880].forEach((f, i) => setTimeout(() => this.beep(f, 0.14, 'square', 0.4), i * 40)); }
+        combo()  { if (this.gate('combo', 80)) this.beep(1200, 0.05, 'triangle', 0.3); }
+        error()  { this.beep(160, 0.14, 'square', 0.3, 0.7); }
     }
+
+    // ---------- tiny binary heap for the flow fields ----------
+    class Heap {
+        constructor() { this.k = []; this.v = []; }
+        get size() { return this.k.length; }
+        push(key, val) {
+            const k = this.k, v = this.v;
+            let i = k.length; k.push(key); v.push(val);
+            while (i > 0) {
+                const p = (i - 1) >> 1;
+                if (k[p] <= k[i]) break;
+                [k[p], k[i]] = [k[i], k[p]]; [v[p], v[i]] = [v[i], v[p]]; i = p;
+            }
+        }
+        pop() {
+            const k = this.k, v = this.v;
+            const rk = k[0], rv = v[0];
+            const lk = k.pop(), lv = v.pop();
+            if (k.length) {
+                k[0] = lk; v[0] = lv;
+                let i = 0;
+                for (;;) {
+                    const l = i * 2 + 1, r = l + 1;
+                    let m = i;
+                    if (l < k.length && k[l] < k[m]) m = l;
+                    if (r < k.length && k[r] < k[m]) m = r;
+                    if (m === i) break;
+                    [k[m], k[i]] = [k[i], k[m]]; [v[m], v[i]] = [v[i], v[m]]; i = m;
+                }
+            }
+            return { key: rk, val: rv };
+        }
+    }
+
+    const GROUND_ONLY = new Set(['cannon', 'mortar']);
+    const AIR_ONLY = new Set(['airdef']);
+    const MARGIN = 5;                       // free tiles around the grid that raiders may walk on
+    const easeOutBack = (t) => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 
     // ---------- MAIN GAME ----------
     class Game {
         constructor() {
             this.canvas = document.getElementById('gameCanvas');
             this.ctx = this.canvas.getContext('2d', { alpha: false });
-            this.audio = new Audio();
-            // Cap DPR at 1.5 — retina-quality but half the pixel work of 2x. Big perf win.
-            this.dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-            // Static ground layer cached on an offscreen canvas (invalidated on zoom / resize)
-            this.groundCache = null;
-            this.groundCacheZoom = 0;
-            this.groundCacheW = 0;
-            this.groundCacheH = 0;
-            // Time accumulator (passed to draw loops for consistent animation)
+            this.audio = new Sound();
+            this.dpr = Math.min(window.devicePixelRatio || 1, 2);
             this.tnow = 0;
 
-            // World state
             this.res = { gold: 500, elixir: 150, dark: 0, gems: 5 };
-            this.rates = { gold: 0, elixir: 0, dark: 0 };
-            this.capBonus = 0;
-            this.goldMult = 1;
-            this.xpMult = 1;
-            this.rallyHeal = 0.2;
-            this.waveGems = 1;
+            this.gemAcc = 0;
+            this.rates = { gold: 0, elixir: 0, dark: 0, gems: 0 };
+            this.capBonus = 0; this.goldMult = 1; this.xpMult = 1; this.rallyHeal = 0.2; this.waveGems = 1; this.prosperity = 0;
             this.player = { level: 1, xp: 0, name: 'Chief' };
             this.buildings = [];
-            this.projectiles = [];
             this.enemies = [];
+            this.projectiles = [];
+            this.beams = [];
             this.particles = [];
             this.popups = [];
-            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0 };
+            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0, goblins: 0, bosses: 0 };
             this.achievements = {};
-            this.dayTime = 0.25;
-            this.dayCount = 1;
+            this.dayTime = 0.25; this.dayCount = 1;
+            this.wave = { number: 0, timer: 90, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
 
-            // Wave system
-            this.wave = { number: 0, timer: 90, spawnLeft: 0, spawnCd: 0, active: false, enemiesToSpawn: 0 };
+            // ascension and quests
+            this.crowns = 0; this.crownsEver = 0; this.ascensions = 0;
+            this.perks = {}; for (const k in PERKS) this.perks[k] = 0;
+            this.quests = [];
 
-            // Camera with zoom
+            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true };
+            this.speed = 1;
+
             this.cam = { x: 0, y: 0, zoom: 1 };
-            this.input = {
-                x: 0, y: 0,
-                down: false, drag: false,
-                downX: 0, downY: 0, lastX: 0, lastY: 0,
-                downBuilding: null,  // building under press (if any) — suppresses pan
-                downTime: 0,
-                shift: false, right: false,
-                // double-click state
-                lastClickTime: 0, lastClickTx: -99, lastClickTy: -99,
-            };
-            this.hoverTile = null;
-            this.hoverBuilding = null;
-
-            // Modes
-            this.buildMode = null;    // building type string or null
-            this.moveMode = null;     // building being moved or null (also set during drag-to-move)
-            this.spellMode = false;   // lightning targeting?
-            this.selectedBuilding = null;  // last left-clicked non-collector (highlight target)
-            this.selectHighlight = 0; // 0-1 decay used for the selection ring pulse
-            this.paused = false;      // global freeze (manual pause, tab hidden, or game over)
-            this.autoCollect = false; // auto-collect toggle — periodically taps all collectors
-            this._autoCollectAcc = 0;
-
-            // Boost
+            this.input = { x: 0, y: 0, down: false, drag: false, downX: 0, downY: 0, lastX: 0, lastY: 0, downTarget: null, touch: false, paint: false, lastPaint: null, lastTapT: 0, lastTapB: null };
+            this.hoverTile = null; this.hoverBuilding = null;
+            this.selected = null;
+            this.buildMode = null; this.moveMode = null; this.spellMode = false;
+            this.paused = false; this.autoCollect = false; this._autoCollectAcc = 0; this._autoUpAcc = 0;
             this.boost = { mult: 1, timeLeft: 0 };
-
-            // Combo
             this.combo = { count: 0, time: 0, mult: 1 };
-
-            // Flash effect (screen flash for spells)
-            this.flash = 0;
-
-            // War Cry (free cooldown ability)
             this.warCry = { active: false, timeLeft: 0, cooldown: 0 };
+            this.flash = 0; this.shake = 0;
+            this.goblin = null; this.goblinTimer = rand(70, 110);
 
-            // Co-op multiplayer
+            this.occ = new Array(CFG.gridW * CFG.gridH).fill(null);
+            this.occDirty = true; this.gridVer = 0; this._flow = new Map();
+            this._draws = []; this._scn = []; this._order = [];
+            this._lightQ = [];
+
             this.coop = {
-                peer: null,
-                conn: null,
-                code: '',
-                partnerCode: '',
-                connected: false,
-                partnerState: null,
-                syncInterval: null,
-                pendingInvite: null,
-                relay: 'connecting',    // signalling server: connecting | ready | lost | error | offline
-                relayText: '',
-                reconnectTimer: null,
-                reconnectTries: 0,
-                lastStateAt: 0,
+                peer: null, conn: null, code: '', partnerCode: '', connected: false, partnerState: null, syncInterval: null,
+                pendingInvite: null, relay: 'connecting', relayText: '', reconnectTimer: null, reconnectTries: 0, lastStateAt: 0,
             };
-
-            this.lastTime = 0;
-            this.alertTimer = 0;
-            // Reused every frame by render(): no per-frame array for the depth sort
-            this._draws = [];
-
-            try {
-                this.socket = (typeof io !== 'undefined') ? io() : null;
-            } catch (e) { this.socket = null; }
+            this.lastTime = 0; this.alertTimer = 0;
         }
 
         init() {
-            // Emergency escape hatch: ?reset=1 in the URL wipes the save before
-            // we even try to load it. Use this when the game is in a broken
-            // state you can't click out of.
             try {
                 if (window.location.search.indexOf('reset=1') >= 0) {
-                    localStorage.removeItem(CFG.saveKey);
-                    // Strip the query string so reloads don't keep wiping
+                    for (const k of ['', '.bak', '.corrupt']) localStorage.removeItem(CFG.saveKey + k);
                     window.history.replaceState({}, '', window.location.pathname);
                 }
             } catch (e) { /* ignore */ }
@@ -589,970 +187,578 @@
             window.addEventListener('resize', () => this.resize());
             this.bindInput();
             this.loadSave();
+            A.setView(this.settings.view);
+            this.ensureWorld();
+            this.fillQuests();
             this.buildMenu();
             this.bindUI();
             this.initTheme();
+            if (!this.hadSave) this.cam.zoom = CFG.homeZoom;
             this.centerCamera();
+            this.wave.next = this.buildQueue(this.wave.number + 1);
 
             this.lastTime = performance.now();
             requestAnimationFrame((t) => this.loop(t));
-
             setInterval(() => this.save(), CFG.autoSaveMs);
-            // Also save when the page goes away so closing the tab doesn't lose
-            // up to 15 seconds of progress (and offline time is measured from here)
             window.addEventListener('pagehide', () => {
                 this.save();
-                // Tell the partner we left instead of letting their link time out
                 if (this.coop.connected) this.disconnectCoop();
             });
             this.initCoop();
 
             const welcome = document.getElementById('welcome');
-            document.getElementById('welcomeStart').addEventListener('click', () => {
-                welcome.classList.add('hidden');
-                this.audio.ensure();
-                this.audio.click();
-            });
-            if (this.hadSave) welcome.classList.add('hidden');
-            else document.getElementById('welcomeStart').focus();
+            const start = document.getElementById('welcomeStart');
+            start.addEventListener('click', () => { welcome.classList.add('hidden'); this.audio.ensure(); this.audio.click(); });
+            if (this.hadSave) welcome.classList.add('hidden'); else start.focus();
+            this.updateUI();
+            this.refreshSelection();
         }
 
-        // ---------- Canvas sizing ----------
+        // ---------- view / canvas ----------
         resize() {
             const r = this.canvas.parentElement.getBoundingClientRect();
             this.canvas.width = Math.floor(r.width * this.dpr);
             this.canvas.height = Math.floor(r.height * this.dpr);
             this.canvas.style.width = r.width + 'px';
             this.canvas.style.height = r.height + 'px';
-            this.vw = r.width;
-            this.vh = r.height;
-            // Invalidate gradients + ground cache that depend on viewport size
-            this._skyCache = null;
-            this.groundCache = null;
-            this.cacheMinX = undefined;
-            this.clampCamera();
+            this.vw = r.width; this.vh = r.height;
+            // until the player moves the map themselves, keep the village centred as the window settles
+            if (!this._camMoved && this.bounds) this.centerCamera(); else this.clampCamera();
         }
 
-        // The HUD refreshes ten times a second; look its elements up once
-        cacheEls() {
-            const $ = (id) => document.getElementById(id);
-            this.el = {
-                gold: $('val-gold'), elixir: $('val-elixir'), dark: $('val-dark'), gems: $('val-gems'),
-                rateGold: $('rate-gold'), rateElixir: $('rate-elixir'), rateDark: $('rate-dark'),
-                level: $('playerLevel'), xp: $('playerXp'), ring: $('xpRing'),
-                waveTimer: $('waveTimer'), waveInfo: $('waveInfo'),
-                dayTime: $('dayTime'), dayCount: $('dayCount'), dayLabel: $('dayLabel'),
-                zoom: $('zoomVal'), combo: $('comboLabel'),
-                warCry: $('actWarCry'), cancel: $('actCancel'),
-                modal: $('modal'), modalBody: $('modalBody'),
-                coopStatus: $('coopStatus'), themeBtn: $('btnTheme'),
-            };
-            this.el.warCryLabel = this.el.warCry ? this.el.warCry.querySelector('.action-label') : null;
-        }
-
-        // ---------- Theme ----------
-        // Shared with the rest of j4den.com: localStorage.theme is "light" or
-        // "dark", and nothing saved means follow the device. The inline script
-        // in <head> already set the attribute before paint; this keeps the
-        // toggle, the settings picker and the browser chrome color in step.
-        initTheme() {
-            const btn = this.el.themeBtn;
-            if (btn) btn.addEventListener('click', () => {
-                this.audio.click();
-                this.setTheme(this.isLight() ? 'dark' : 'light');
-            });
-            document.querySelectorAll('#themeSeg .seg-btn').forEach(b => {
-                b.addEventListener('click', () => { this.audio.click(); this.setTheme(b.dataset.themeOpt); });
-            });
-            // The device flipped between light and dark, or another j4den.com tab changed the setting
-            const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
-            if (mq && mq.addEventListener) mq.addEventListener('change', () => { if (!this.savedTheme()) this.applyTheme(); });
-            window.addEventListener('storage', (e) => { if (e.key === 'theme') this.applyTheme(); });
-            this.applyTheme();
-        }
-
-        savedTheme() {
-            try {
-                const t = localStorage.getItem('theme');
-                return (t === 'light' || t === 'dark') ? t : null;
-            } catch (e) { return null; }
-        }
-
-        isLight() {
-            return document.documentElement.getAttribute('data-theme') === 'light';
-        }
-
-        // mode: 'light', 'dark' or 'system' (forget the choice, follow the device)
-        setTheme(mode) {
-            const explicit = (mode === 'light' || mode === 'dark') ? mode : null;
-            try {
-                if (explicit) localStorage.setItem('theme', explicit);
-                else localStorage.removeItem('theme');
-            } catch (e) { /* private window: the choice still holds for this page */ }
-            this._themeOverride = explicit;
-            this.applyTheme();
-        }
-
-        applyTheme() {
-            const saved = this.savedTheme() || this._themeOverride || null;
-            const light = saved === 'light' || (!saved && window.matchMedia
-                && window.matchMedia('(prefers-color-scheme: light)').matches);
-            const root = document.documentElement;
-            if (light) root.setAttribute('data-theme', 'light');
-            else root.removeAttribute('data-theme');
-            const btn = this.el.themeBtn;
-            if (btn) {
-                btn.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
-                btn.title = (light ? 'Dark mode' : 'Light mode') + ' (T)';
+        ensureWorld() {
+            if (A.worldDirty || !A.world.ready) {
+                A.world.build();
+                const N = A.iso(0, 0), E = A.iso(CFG.gridW, 0), S = A.iso(CFG.gridW, CFG.gridH), W = A.iso(0, CFG.gridH);
+                this.bounds = { minX: W.x - 460, maxX: E.x + 460, minY: N.y - 380, maxY: S.y + 380 };
             }
-            // Browser chrome follows the page's theme, not just the device's
-            document.querySelectorAll('meta[name="theme-color"]').forEach(m => { m.content = light ? '#ece2cc' : '#0b0f1a'; });
-            const pick = saved || 'system';
-            document.querySelectorAll('#themeSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeOpt === pick)));
-            // The partner minimap is painted with the chrome colors
-            if (this.coop.partnerState) this.renderPartnerMinimap(this.coop.partnerState);
+        }
+
+        changeView(name) {
+            if (!VIEWS[name] || name === this.settings.view) return;
+            // keep whatever tile is in the middle of the screen in the middle
+            const c = this.screenToTile(this.vw / 2, this.vh / 2);
+            this.settings.view = name;
+            A.setView(name);
+            for (const b of this.buildings) b._sp = null;
+            this.ensureWorld();
+            const w = this.worldIso(c.tfx, c.tfy);
+            this.cam.x = this.vw / 2 - w.x * this.cam.zoom;
+            this.cam.y = this.vh / 2 - w.y * this.cam.zoom;
+            this.clampCamera();
+            this.save();
+            this.syncSettingsUI();
         }
 
         centerCamera() {
-            // Place camera so the middle of the grid sits at the visible center
-            const midWorld = this.worldIso(CFG.gridW / 2, CFG.gridH / 2);
-            this.cam.x = this.vw / 2 - midWorld.x * this.cam.zoom;
-            this.cam.y = this.vh / 2 - midWorld.y * this.cam.zoom - 60;
+            const mid = this.worldIso(CFG.gridW / 2, CFG.gridH / 2);
+            this.cam.x = this.vw / 2 - mid.x * this.cam.zoom;
+            this.cam.y = this.vh / 2 - mid.y * this.cam.zoom - 20;
             this.clampCamera();
         }
 
-        // ---------- Input ----------
+        clampCamera() {
+            if (!this.bounds) return;
+            const z = this.cam.zoom, b = this.bounds;
+            const minX = this.vw - b.maxX * z, maxX = -b.minX * z;
+            const minY = this.vh - b.maxY * z, maxY = -b.minY * z;
+            this.cam.x = minX <= maxX ? clamp(this.cam.x, minX, maxX) : (minX + maxX) / 2;
+            this.cam.y = minY <= maxY ? clamp(this.cam.y, minY, maxY) : (minY + maxY) / 2;
+        }
+
+        zoomBy(factor, ax, ay) {
+            this._camMoved = true;
+            const nz = clamp(this.cam.zoom * factor, CFG.zoomMin, CFG.zoomMax);
+            const wx = (ax - this.cam.x) / this.cam.zoom, wy = (ay - this.cam.y) / this.cam.zoom;
+            this.cam.zoom = nz;
+            this.cam.x = ax - wx * nz; this.cam.y = ay - wy * nz;
+            this.clampCamera();
+        }
+
+        worldIso(tx, ty) { return { x: (tx - ty) * CFG.tileW / 2, y: (tx + ty) * CFG.tileH / 2 }; }
+        screenToWorld(sx, sy) { return { x: (sx - this.cam.x) / this.cam.zoom, y: (sy - this.cam.y) / this.cam.zoom }; }
+        screenToTile(sx, sy) {
+            const w = this.screenToWorld(sx, sy);
+            const tx = w.x / CFG.tileW + w.y / CFG.tileH, ty = -w.x / CFG.tileW + w.y / CFG.tileH;
+            return { tx: Math.floor(tx), ty: Math.floor(ty), tfx: tx, tfy: ty };
+        }
+        // centre of a building's footprint on the ground, in world units
+        centerOf(b) { const s = BLD[b.type].size; return this.worldIso(b.tx + s / 2, b.ty + s / 2); }
+
+        // ---------- grid ----------
+        rebuildOcc() {
+            if (!this.occDirty) return;
+            this.occDirty = false;
+            this.occ.fill(null);
+            for (const b of this.buildings) {
+                const s = BLD[b.type].size;
+                for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
+                    const x = b.tx + dx, y = b.ty + dy;
+                    if (x >= 0 && y >= 0 && x < CFG.gridW && y < CFG.gridH) this.occ[y * CFG.gridW + x] = b;
+                }
+            }
+            // walls connect to wall neighbours
+            for (const b of this.buildings) {
+                if (b.type !== 'wall') continue;
+                const w = (x, y) => { const o = this.cell(x, y); return o && o.type === 'wall' ? 1 : 0; };
+                b.wmask = w(b.tx + 1, b.ty) | (w(b.tx, b.ty + 1) << 1) | (w(b.tx - 1, b.ty) << 2) | (w(b.tx, b.ty - 1) << 3);
+            }
+            this.gridVer++;
+            this._flow.clear();
+        }
+        cell(x, y) { return (x >= 0 && y >= 0 && x < CFG.gridW && y < CFG.gridH) ? this.occ[y * CFG.gridW + x] : null; }
+        touchGrid() { this.occDirty = true; this.rebuildOcc(); }
+        buildingAt(tx, ty) { if (this.occDirty) this.rebuildOcc(); return this.cell(tx, ty); }
+        canPlace(type, tx, ty, ignore = null) {
+            const size = BLD[type].size;
+            if (this.occDirty) this.rebuildOcc();
+            for (let dy = 0; dy < size; dy++) for (let dx = 0; dx < size; dx++) {
+                const x = tx + dx, y = ty + dy;
+                if (x < 0 || y < 0 || x >= CFG.gridW || y >= CFG.gridH) return false;
+                const o = this.cell(x, y);
+                if (o && o !== ignore) return false;
+            }
+            return true;
+        }
+        countOf(type) { let n = 0; for (const b of this.buildings) if (b.type === type) n++; return n; }
+        decorCount() { let n = 0; for (const b of this.buildings) if (BLD[b.type].decor) n++; return n; }
+        maxedOut(type) { const m = BLD[type].maxCount; return !!m && this.countOf(type) >= m; }
+
+        // ---------- hit testing ----------
+        spriteOf(b) {
+            const tier = tierOf(b.type, b.level);
+            const variant = b.type === 'wall' ? (b.wmask || 0) : 0;
+            const key = A.spriteVersion + '|' + tier + '|' + variant;
+            if (!b._sp || b._spKey !== key) { b._sp = A.getSprite(b.type, tier, variant); b._spKey = key; }
+            return b._sp;
+        }
+        buildingsFrontToBack() {
+            const list = this.buildings.slice();
+            list.sort((a, b) => (b.tx + b.ty + BLD[b.type].size) - (a.tx + a.ty + BLD[a.type].size));
+            return list;
+        }
+        // Which building is under this screen point? The art you can see wins, front-most first;
+        // a generous halo catches thin parts, and the footprint always counts.
+        buildingAtScreen(sx, sy) {
+            const w = this.screenToWorld(sx, sy);
+            const padPx = this.input.touch ? 12 : 4;
+            const pad = padPx / this.cam.zoom;
+            const list = this.buildingsFrontToBack();
+            for (const pass of [0, 1]) {
+                for (const b of list) {
+                    const sp = this.spriteOf(b);
+                    A.maskOf(sp);
+                    const c = this.centerOf(b);
+                    const dx = w.x - c.x, dy = w.y - c.y;
+                    const bb = sp.bbox, pp = pass ? pad * 2.5 + 4 : pad;
+                    if (dx < bb.x0 - pp || dx > bb.x1 + pp || dy < bb.y0 - pp || dy > bb.y1 + pp) continue;
+                    if (A.hitSprite(sp, dx, dy, pass ? pp : Math.min(pp, 3))) return b;
+                }
+                if (pass === 0) {
+                    const t = this.screenToTile(sx, sy);
+                    const o = this.buildingAt(t.tx, t.ty);
+                    if (o) return o;
+                }
+            }
+            return null;
+        }
+        // The little green upgrade arrow floating above a building
+        arrowRect(b) {
+            const sp = this.spriteOf(b); A.maskOf(sp);
+            const c = this.centerOf(b);
+            return { x: c.x, y: c.y + sp.bbox.y0 - 12, r: 9 };
+        }
+        arrowAtScreen(sx, sy) {
+            if (!this.settings.hints) return null;
+            const w = this.screenToWorld(sx, sy);
+            for (const b of this.buildings) {
+                if (!this.upgradeReady(b)) continue;
+                const r = this.arrowRect(b);
+                const pad = (this.input.touch ? 8 : 3) / this.cam.zoom;
+                if (Math.hypot(w.x - r.x, w.y - r.y) <= r.r + pad) return b;
+            }
+            return null;
+        }
+        upgradeReady(b) {
+            const def = BLD[b.type];
+            return b.level < def.maxLevel && !!def.upgradeCost && this.canAfford(def.upgradeCost(b.level));
+        }
+
+        // ---------- input ----------
         bindInput() {
             const c = this.canvas;
-            const DRAG_THRESH = 7;       // pixels from downX/downY before a press becomes a drag
-            const LONG_PRESS_MS = 500;   // hold this long on a building to open its menu
-
+            const DRAG = 7;
             const getPos = (e) => {
                 const r = c.getBoundingClientRect();
-                const x = (e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0) - r.left;
-                const y = (e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0) - r.top;
-                return { x, y };
+                const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
+                return { x: (e.clientX ?? (t && t.clientX) ?? 0) - r.left, y: (e.clientY ?? (t && t.clientY) ?? 0) - r.top };
+            };
+            const goblinAt = (x, y) => {
+                if (!this.goblin) return false;
+                const w = this.screenToWorld(x, y), g = this.goblin;
+                return Math.hypot(w.x - g.x, w.y - (g.y - 14)) <= (this.input.touch ? 34 : 24);
+            };
+            const paintAt = (x, y) => {
+                const t = this.screenToTile(x, y);
+                const L = this.input.lastPaint;
+                if (L && L.tx === t.tx && L.ty === t.ty) return;
+                this.input.lastPaint = { tx: t.tx, ty: t.ty };
+                if (this.buildMode && this.canPlace(this.buildMode, t.tx, t.ty)) this.placeBuilding(this.buildMode, t.tx, t.ty, true);
             };
 
-            const onDown = (e) => {
-                // We only respond to the primary (left) mouse button for down-tracking.
-                // Right-click is handled by the contextmenu listener below.
-                if (e.button !== undefined && e.button !== 0) {
-                    return;
-                }
+            const onDown = (e, touch) => {
+                if (e.button !== undefined && e.button !== 0) return;
                 const p = getPos(e);
-                this.input.down = true;
-                this.input.drag = false;
-                this.input.dragMove = false;    // dragging-to-move a building?
-                this.input.downX = p.x;
-                this.input.downY = p.y;
-                this.input.lastX = p.x;
-                this.input.lastY = p.y;
-                this.input.x = p.x;
-                this.input.y = p.y;
-                this.input.downTime = performance.now();
-                this.input.shift = !!(e.shiftKey);
-                this.input.right = false;
-                // Identify what's under the press using visual hit detection so
-                // clicking anywhere on a tall building (not just its base tile) counts.
-                this.input.downBuilding = this.buildingAtScreen(p.x, p.y);
+                const I = this.input;
+                I.touch = !!touch;
+                I.down = true; I.drag = false; I.dragMove = false; I.paint = false; I.lastPaint = null;
+                I.downX = I.lastX = I.x = p.x; I.downY = I.lastY = I.y = p.y;
+                I.shift = !!e.shiftKey;
                 this.audio.ensure();
-                // Long-press a building opens its menu. Touch screens have no
-                // right-click, so without this there was no way to upgrade,
-                // move or sell on a phone.
-                clearTimeout(this._pressTimer);
-                if (this.input.downBuilding) {
-                    const pressed = this.input.downBuilding;
-                    this._pressTimer = setTimeout(() => {
-                        if (!this.input.down || this.input.drag || this.input.downBuilding !== pressed) return;
-                        if (this.buildMode || this.spellMode || this.moveMode) return;
-                        if (!this.buildings.includes(pressed)) return;
-                        this.input.down = false; // swallow the release so it doesn't also collect
-                        this.openBuildingModal(pressed);
-                    }, LONG_PRESS_MS);
-                }
+                I.downTarget = null;
+                if (this.buildMode && BLD[this.buildMode].drag) { I.paint = true; this.updateHover(); paintAt(p.x, p.y); return; }
+                if (this.buildMode || this.spellMode || this.moveMode) return;
+                if (goblinAt(p.x, p.y)) { I.downTarget = 'goblin'; return; }
+                const ab = this.arrowAtScreen(p.x, p.y);
+                if (ab) { I.downTarget = 'arrow'; I.downBuilding = ab; return; }
+                I.downBuilding = this.buildingAtScreen(p.x, p.y);
+                I.downTarget = I.downBuilding ? 'building' : null;
             };
-
             const onMove = (e) => {
                 const p = getPos(e);
-                this.input.x = p.x;
-                this.input.y = p.y;
-                if (this.input.down) {
-                    const totalDx = p.x - this.input.downX;
-                    const totalDy = p.y - this.input.downY;
-                    const dist = Math.hypot(totalDx, totalDy);
-
-                    // Once the mouse has traveled past the threshold, commit to a drag.
-                    // Two kinds of drag:
-                    //   1. dragMove: press started on a building → drag-to-move that building
-                    //   2. pan: press started on grass → pan the camera
-                    if (!this.input.drag && dist > DRAG_THRESH) {
-                        this.input.drag = true;
-                        clearTimeout(this._pressTimer);
-                        if (this.input.downBuilding
-                                && !this.buildMode
-                                && !this.spellMode
-                                && !this.moveMode) {
-                            this.input.dragMove = true;
-                            // Enter live move mode; ghost + range preview render while dragging
-                            this.moveMode = this.input.downBuilding;
-                            this.updateCanvasCursor();
+                const I = this.input;
+                I.x = p.x; I.y = p.y;
+                if (I.down) {
+                    const dist = Math.hypot(p.x - I.downX, p.y - I.downY);
+                    if (I.paint) { this.updateHover(); paintAt(p.x, p.y); return; }
+                    if (!I.drag && dist > DRAG) {
+                        I.drag = true;
+                        // Dragging the building you already selected picks it up; anything else pans
+                        if (I.downTarget === 'building' && I.downBuilding === this.selected && !this.buildMode && !this.spellMode && !this.moveMode && BLD[this.selected.type].cat !== 'core') {
+                            I.dragMove = true; this.moveMode = this.selected; this.updateCanvasCursor();
                         }
                     }
-                    if (this.input.drag && !this.input.dragMove) {
-                        // Pan the world
-                        this.cam.x += p.x - this.input.lastX;
-                        this.cam.y += p.y - this.input.lastY;
-                        this.clampCamera();
+                    if (I.drag && !I.dragMove) {
+                        this.cam.x += p.x - I.lastX; this.cam.y += p.y - I.lastY; this._camMoved = true; this.clampCamera();
                     }
-                    this.input.lastX = p.x;
-                    this.input.lastY = p.y;
+                    I.lastX = p.x; I.lastY = p.y;
                 }
                 this.updateHover();
             };
-
             const onUp = () => {
-                clearTimeout(this._pressTimer);
-                if (this.input.down) {
-                    if (this.input.dragMove) {
-                        // Drag-to-move release: try to place at the hovered tile
-                        this.commitDragMove();
-                    } else if (!this.input.drag) {
-                        // Pure left-click (no drag) → collect / select / place etc.
-                        this.handleTap(this.input.x, this.input.y, this.input.shift, /*right*/ false);
-                    }
+                const I = this.input;
+                if (I.down) {
+                    if (I.paint) { /* tiles were placed as the finger moved */ }
+                    else if (I.dragMove) this.commitMove();
+                    else if (!I.drag) this.handleTap(I.x, I.y, I.shift);
                 }
-                this.input.down = false;
-                this.input.drag = false;
-                this.input.dragMove = false;
-                this.input.downBuilding = null;
+                I.down = false; I.drag = false; I.dragMove = false; I.paint = false; I.downBuilding = null; I.downTarget = null;
             };
 
-            c.addEventListener('mousedown', onDown);
-            // Listen on canvas for hover work (saves events when mouse is over side/top bars),
-            // but also listen on window so we can keep tracking a drag once it has started.
+            c.addEventListener('mousedown', (e) => onDown(e, false));
             c.addEventListener('mousemove', onMove);
-            window.addEventListener('mousemove', (e) => {
-                // Only forward while actively dragging (otherwise canvas handler covers it)
-                if (this.input.down && this.input.drag) onMove(e);
-            });
+            window.addEventListener('mousemove', (e) => { if (this.input.down && this.input.drag) onMove(e); });
             window.addEventListener('mouseup', onUp);
-            c.addEventListener('mouseleave', () => {
-                // Clear hover state when the mouse leaves the canvas so the tip hides
-                this.hoverTile = null;
-                this.hoverBuilding = null;
-                this.rebuildHoverTip();
-            });
-            // Two-finger pinch zooms around the midpoint. While pinching, the
-            // single-finger press is cancelled so lifting a finger doesn't tap.
-            let pinchDist = 0;
-            const touchInfo = (e) => {
-                const r = c.getBoundingClientRect();
-                const [a, b] = e.touches;
-                return {
-                    dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
-                    x: (a.clientX + b.clientX) / 2 - r.left,
-                    y: (a.clientY + b.clientY) / 2 - r.top,
-                };
+            c.addEventListener('mouseleave', () => { this.hoverTile = null; this.hoverBuilding = null; this.rebuildHoverTip(); });
+
+            let pinch = 0;
+            const tinfo = (e) => {
+                const r = c.getBoundingClientRect(), [a, b] = e.touches;
+                return { dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), x: (a.clientX + b.clientX) / 2 - r.left, y: (a.clientY + b.clientY) / 2 - r.top };
             };
             c.addEventListener('touchstart', (e) => {
                 e.preventDefault();
                 if (e.touches.length === 2) {
-                    clearTimeout(this._pressTimer);
-                    // If the first finger had already started dragging a building, put it back
                     if (this.input.dragMove) { this.moveMode = null; this.updateCanvasCursor(); }
-                    this.input.down = false;
-                    this.input.drag = false;
-                    this.input.dragMove = false;
-                    pinchDist = touchInfo(e).dist;
-                    return;
+                    this.input.down = this.input.drag = this.input.dragMove = this.input.paint = false;
+                    pinch = tinfo(e).dist; return;
                 }
-                if (e.touches.length === 1) onDown(e);
+                if (e.touches.length === 1) onDown(e, true);
             }, { passive: false });
             c.addEventListener('touchmove', (e) => {
                 e.preventDefault();
-                if (e.touches.length === 2 && pinchDist > 0) {
-                    const t = touchInfo(e);
-                    this.zoomBy(t.dist / pinchDist, t.x, t.y);
-                    pinchDist = t.dist;
-                    return;
-                }
+                if (e.touches.length === 2 && pinch > 0) { const t = tinfo(e); this.zoomBy(t.dist / pinch, t.x, t.y); pinch = t.dist; return; }
                 onMove(e);
             }, { passive: false });
-            c.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                if (e.touches.length < 2) pinchDist = 0;
-                onUp();
-            }, { passive: false });
-            c.addEventListener('touchcancel', () => { pinchDist = 0; this.input.down = false; onUp(); });
+            c.addEventListener('touchend', (e) => { e.preventDefault(); if (e.touches.length < 2) pinch = 0; onUp(); }, { passive: false });
+            c.addEventListener('touchcancel', () => { pinch = 0; this.input.down = false; onUp(); });
 
-            // Right click: exit build/move/spell mode if active, otherwise open modal
             c.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                if (this.buildMode || this.moveMode || this.spellMode) {
-                    this.setBuildMode(null);
-                    this.moveMode = null;
-                    this.spellMode = false;
-                    this.updateCanvasCursor();
-                    return;
-                }
-                const rect = c.getBoundingClientRect();
-                const sx = e.clientX - rect.left;
-                const sy = e.clientY - rect.top;
-                const b = this.buildingAtScreen(sx, sy);
-                if (b) this.openBuildingModal(b);
+                if (this.buildMode || this.moveMode || this.spellMode) { this.cancelModes(); return; }
+                const r = c.getBoundingClientRect();
+                const b = this.buildingAtScreen(e.clientX - r.left, e.clientY - r.top);
+                if (b) this.selectBuilding(b);
             });
-
-            // Wheel zoom (trackpad + mouse)
             c.addEventListener('wheel', (e) => {
                 e.preventDefault();
-                const rect = c.getBoundingClientRect();
-                const ax = e.clientX - rect.left;
-                const ay = e.clientY - rect.top;
-                // Trackpad pinch shows as wheel with ctrlKey=true; mouse wheel also works
-                const factor = Math.exp(-e.deltaY * 0.0015);
-                this.zoomBy(factor, ax, ay);
+                const r = c.getBoundingClientRect();
+                this.zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
             }, { passive: false });
 
-            window.addEventListener('keydown', (e) => {
-                // Leave typing (co-op code box) and browser shortcuts like Cmd+W / Ctrl+0 alone
-                const tag = e.target && e.target.tagName;
-                if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
-                if (e.ctrlKey || e.metaKey || e.altKey) return;
-                // While a dialog is up its own buttons own the keyboard
-                const dialogOpen = document.getElementById('modal').classList.contains('open')
-                    || document.querySelector('.confirm-dialog.open');
-                if (dialogOpen && e.key !== 'Escape') return;
-                if (e.key === 'Escape') {
-                    this.setBuildMode(null);
-                    this.moveMode = null;
-                    this.spellMode = false;
-                    this.updateCanvasCursor();
-                    this.closeModal();
-                }
-                // Space on a focused button should press that button, not collect
-                if (e.key === ' ' && tag !== 'BUTTON') { e.preventDefault(); this.collectAll(); }
-                if (e.key === '+' || e.key === '=') this.zoomBy(1.15, this.vw/2, this.vh/2);
-                if (e.key === '-' || e.key === '_') this.zoomBy(1/1.15, this.vw/2, this.vh/2);
-                if (e.key === '0') { this.cam.zoom = 1; this.centerCamera(); }
-                if (e.key === 'w' || e.key === 'W') this.activateWarCry();
-                if (e.key === 'l' || e.key === 'L') {
-                    if (this.res.gems >= CFG.spellCost.gems) {
-                        this.spellMode = true;
-                        this.setBuildMode(null);
-                        this.moveMode = null;
-                        this.updateCanvasCursor();
-                        this.toast('⚡ Click a tile to strike', 'warn');
-                    }
-                }
-                if (e.key === 'p' || e.key === 'P') {
-                    this.togglePause();
-                }
-                if (e.key === 'a' || e.key === 'A') this.toggleAutoCollect();
-                if (e.key === 'r' || e.key === 'R') this.rally();
-                if (e.key === 'm' || e.key === 'M') this.toggleSound();
-                if (e.key === 't' || e.key === 'T') this.setTheme(this.isLight() ? 'dark' : 'light');
-                if (e.key === '?') this.showShortcuts();
-                if (e.key >= '1' && e.key <= '4') this.showTab(['build', 'army', 'coop', 'stats'][e.key - 1]);
-            });
+            window.addEventListener('keydown', (e) => this.onKey(e));
         }
 
-        zoomBy(factor, ax, ay) {
-            const newZoom = clamp(this.cam.zoom * factor, CFG.zoomMin, CFG.zoomMax);
-            // Keep the world point under (ax, ay) fixed
-            const wx = (ax - this.cam.x) / this.cam.zoom;
-            const wy = (ay - this.cam.y) / this.cam.zoom;
-            this.cam.zoom = newZoom;
-            this.cam.x = ax - wx * newZoom;
-            this.cam.y = ay - wy * newZoom;
-            this.clampCamera();
-        }
-
-        /**
-         * Clamp the camera so the ground cache always fully covers the viewport.
-         * This is what keeps the player from panning far enough that the dark
-         * sky peeks in on the sides or top. Called after every pan / zoom /
-         * resize. No-op before the cache has been built (init phase).
-         */
-        clampCamera() {
-            if (this.cacheMinX === undefined) return;
-            const z = this.cam.zoom;
-            // The viewport in world space goes from
-            //   (-cam.x/z, -cam.y/z)  to  ((vw-cam.x)/z, (vh-cam.y)/z)
-            // We need this rectangle to sit inside the cache rectangle
-            //   [cacheMinX, cacheMaxX] × [cacheMinY, cacheMaxY]
-            // Solving for cam.x:
-            //   -cam.x/z       >= cacheMinX  → cam.x <= -cacheMinX * z
-            //   (vw-cam.x)/z  <= cacheMaxX  → cam.x >= vw - cacheMaxX * z
-            const minCamX = this.vw - this.cacheMaxX * z;
-            const maxCamX = -this.cacheMinX * z;
-            const minCamY = this.vh - this.cacheMaxY * z;
-            const maxCamY = -this.cacheMinY * z;
-            // If the cache is wider/taller than the viewport, clamp normally;
-            // otherwise just center (shouldn't happen with our pad logic, but
-            // be safe).
-            if (minCamX <= maxCamX) {
-                this.cam.x = clamp(this.cam.x, minCamX, maxCamX);
-            } else {
-                this.cam.x = (minCamX + maxCamX) / 2;
-            }
-            if (minCamY <= maxCamY) {
-                this.cam.y = clamp(this.cam.y, minCamY, maxCamY);
-            } else {
-                this.cam.y = (minCamY + maxCamY) / 2;
-            }
-        }
-
-        // ---------- Iso helpers (world space) ----------
-        // iso(tx, ty): returns WORLD coordinates (no camera). Top vertex of tile diamond.
-        worldIso(tx, ty) {
-            return {
-                x: (tx - ty) * CFG.tileW / 2,
-                y: (tx + ty) * CFG.tileH / 2,
-            };
-        }
-        // screen (sx,sy) -> continuous (tx,ty) in tile-space (top vertex = 0,0)
-        screenToTile(sx, sy) {
-            const wx = (sx - this.cam.x) / this.cam.zoom;
-            const wy = (sy - this.cam.y) / this.cam.zoom;
-            const tx = wx / CFG.tileW + wy / CFG.tileH;
-            const ty = -wx / CFG.tileW + wy / CFG.tileH;
-            return { tx: Math.floor(tx), ty: Math.floor(ty), tfx: tx, tfy: ty };
-        }
-
-        updateHover() {
-            const t = this.screenToTile(this.input.x, this.input.y);
-            if (t.tx >= 0 && t.tx < CFG.gridW && t.ty >= 0 && t.ty < CFG.gridH) {
-                this.hoverTile = { tx: t.tx, ty: t.ty };
-            } else {
-                this.hoverTile = null;
-            }
-            const prev = this.hoverBuilding;
-            // Use visual hit detection so hovering any part of a tall building
-            // shows its tooltip, not just when over the base tile.
-            this.hoverBuilding = this.buildingAtScreen(this.input.x, this.input.y);
-
-            // Only regenerate the hover-tip HTML when the hovered building IDENTITY
-            // or LEVEL changes. Position is updated cheaply below.
-            const changed = prev !== this.hoverBuilding
-                || (this.hoverBuilding && this._hoverLevel !== this.hoverBuilding.level);
-            if (changed) this.rebuildHoverTip();
-            this.positionHoverTip();
-        }
-
-        rebuildHoverTip() {
-            const tip = this._hoverTipEl || (this._hoverTipEl = document.getElementById('hoverTip'));
-            if (!tip) return;
-            if (this.hoverBuilding && !this.buildMode && !this.spellMode && !this.moveMode) {
-                const b = this.hoverBuilding;
-                const def = BLD[b.type];
-                const parts = [`<strong>${def.name}</strong> <span class="tip-dim">Lv ${b.level}</span>`];
-                parts.push(`HP ${Math.ceil(b.hp)}/${b.maxHp}`);
-                if (def.production) {
-                    const p = def.production(b.level);
-                    Object.entries(p).forEach(([k,v]) => parts.push(`+${v.toFixed(1)} ${k}/s`));
-                }
-                if (def.defense) {
-                    const d = def.defense(b.level);
-                    parts.push(`DMG ${d.dmg} · CD ${d.cd}s · Range ${d.range}`);
-                }
-                if (def.provides) {
-                    const p = def.provides(b.level);
-                    if (p.cap) parts.push(`+${p.cap} storage`);
-                    if (p.goldMult) parts.push(`+${(p.goldMult*100).toFixed(0)}% gold`);
-                    if (p.xpMult) parts.push(`+${(p.xpMult*100).toFixed(0)}% XP`);
-                    if (p.rallyMult) parts.push(`+${(p.rallyMult*100).toFixed(0)}% rally heal`);
-                    if (p.waveGems) parts.push(`+${p.waveGems} gem/wave`);
-                }
-                parts.push(`<span class="tip-help">Shift+click = upgrade · Right-click = menu · Drag = move</span>`);
-                tip.innerHTML = parts.join('<br>');
-                tip.classList.add('visible');
-                this._hoverLevel = b.level;
-            } else {
-                tip.classList.remove('visible');
-                this._hoverLevel = -1;
-            }
-        }
-
-        positionHoverTip() {
-            const tip = this._hoverTipEl;
-            if (!tip || !tip.classList.contains('visible')) return;
-            tip.style.left = (this.input.x + 18) + 'px';
-            tip.style.top = (this.input.y + 18) + 'px';
-        }
-
-        handleTap(sx, sy, shift = false, right = false) {
-            this.audio.ensure();
-            const t = this.screenToTile(sx, sy);
-            const tx = t.tx;
-            const ty = t.ty;
-
-            // Spell targeting
-            if (this.spellMode) {
-                if (this.res.gems < CFG.spellCost.gems) {
-                    this.toast('Not enough gems', 'warn');
-                    this.spellMode = false;
-                    this.updateCanvasCursor();
-                    return;
-                }
-                this.res.gems -= CFG.spellCost.gems;
-                this.castLightning(tx + 0.5, ty + 0.5);
-                this.spellMode = false;
-                this.updateCanvasCursor();
-                this.updateUI();
-                return;
-            }
-
-            // Build mode placement (first left-click places the queued building)
-            if (this.buildMode) {
-                if (this.canPlace(this.buildMode, tx, ty)) {
-                    this.placeBuilding(this.buildMode, tx, ty);
-                } else {
-                    this.audio.error();
-                    this.toast('Cannot build here', 'warn');
-                }
-                return;
-            }
-
-            // "Move" from the building menu: the next tap picks the destination
-            if (this.moveMode) {
-                this.commitDragMove({ tx, ty });
-                return;
-            }
-
-            // Click a building — use visual hit detection so clicks anywhere on
-            // the drawn shape register, not just the base tile footprint.
-            const b = this.buildingAtScreen(sx, sy);
-            if (b) {
-                // Shift-click → instant upgrade (power-user shortcut). Falls back to
-                // the modal if already max level so the player still gets feedback.
-                if (shift) {
-                    const def = BLD[b.type];
-                    if (b.level >= def.maxLevel) {
-                        this.openBuildingModal(b);
-                        return;
-                    }
-                    this.upgradeBuilding(b);
-                    return;
-                }
-                // Right-click: open the full stats/upgrade modal
-                if (right) {
-                    this.openBuildingModal(b);
-                    return;
-                }
-                // Left-click: collect (for resource buildings) or select (for others)
-                const def = BLD[b.type];
-                if (def.clickBonus) {
-                    // Collect — feeds combo
-                    this.collectFrom(b);
-                } else {
-                    // Non-collector: mark as selected and flash a ring
-                    this.selectBuilding(b);
-                }
-                return;
-            }
-            // Clicked empty terrain — clear selection
-            this.selectedBuilding = null;
-        }
-
-        /** Apply a short highlight to a building so the player sees their click registered. */
-        selectBuilding(b) {
-            this.selectedBuilding = b;
-            this.selectHighlight = 1.0;
-            this.audio.click();
-            // Float the name once so they see what they clicked
-            const p = this.worldIso(b.tx + 0.5, b.ty + 0.5);
-            const def = BLD[b.type];
-            this.floatText(def.name, p.x, p.y - 40, '#ffe3a1');
-        }
-
-        /**
-         * Drop the building being moved. Called on mouse-up after a drag-to-move,
-         * and on a tap after picking "Move" in the building menu (with that tile).
-         */
-        commitDragMove(t = this.hoverTile) {
-            const mb = this.moveMode;
-            if (!mb) { this.moveMode = null; this.updateCanvasCursor(); return; }
-            if (!t || t.tx < 0 || t.ty < 0 || t.tx >= CFG.gridW || t.ty >= CFG.gridH) {
-                this.toast('Drop on a valid tile', 'warn');
-                this.moveMode = null;
-                this.updateCanvasCursor();
-                return;
-            }
-            const originalTx = mb.tx, originalTy = mb.ty;
-            mb.tx = -999; mb.ty = -999;
-            const ok = this.canPlace(mb.type, t.tx, t.ty);
-            mb.tx = originalTx; mb.ty = originalTy;
-            if (ok) {
-                mb.tx = t.tx;
-                mb.ty = t.ty;
-                this.audio.build();
-                // Tiny dust puff on arrival
-                const p = this.worldIso(mb.tx + 0.5, mb.ty + 0.5);
-                for (let i = 0; i < 8; i++) {
-                    this.particles.push({
-                        x: p.x + rand(-10, 10), y: p.y + rand(-6, 4),
-                        vx: rand(-30, 30), vy: rand(-50, -15),
-                        life: 0.5, max: 0.5,
-                        color: '#d4c0a0', size: rand(2, 4),
-                    });
-                }
-            } else {
-                this.audio.error();
-                this.toast('Cannot place there', 'warn');
-            }
-            this.moveMode = null;
+        cancelModes() {
+            this.setBuildMode(null); this.moveMode = null; this.spellMode = false;
             this.updateCanvasCursor();
         }
 
-        /** Apply a click-bonus collection burst to a building (from the modal's Collect button). */
-        collectFrom(b) {
-            const def = BLD[b.type];
-            if (!def.clickBonus) return;
-            // Combo
-            if (this.combo.time > 0) this.combo.count++;
-            else this.combo.count = 1;
-            this.combo.time = CFG.comboWindow;
-            this.combo.mult = this.combo.count >= 10 ? 3 : this.combo.count >= 6 ? 2 : this.combo.count >= 3 ? 1.5 : 1;
-            if (this.combo.count > this.stats.maxCombo) this.stats.maxCombo = this.combo.count;
-
-            const bonus = def.clickBonus(b.level);
-            Object.entries(bonus).forEach(([k, v]) => {
-                const mul = this.boost.mult * this.combo.mult * (k === 'gold' ? this.goldMult : 1);
-                const amt = Math.floor(v * mul);
-                const got = this.addRes(k, amt);
-                if (k === 'gold') this.stats.goldEarned += got;
-                const p = this.worldIso(b.tx + 0.5, b.ty + 0.5);
-                this.floatText(`+${amt}`, p.x, p.y - 40, this.resColor(k));
-            });
-            if (this.combo.count >= 3) {
-                const p = this.worldIso(b.tx + 0.5, b.ty + 0.5);
-                this.floatText(`COMBO x${this.combo.mult}`, p.x, p.y - 62, '#ffc857');
-                this.audio.combo();
+        onKey(e) {
+            const tag = e.target && e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            const dialogOpen = document.getElementById('modal').classList.contains('open') || document.querySelector('.confirm-dialog.open');
+            if (dialogOpen && e.key !== 'Escape') return;
+            const k = e.key;
+            if (k === 'Escape') {
+                if (this.buildMode || this.moveMode || this.spellMode) this.cancelModes();
+                else if (document.getElementById('modal').classList.contains('open')) this.closeModal();
+                else if (this.selected) this.deselect();
+                else this.closePanel();
+                return;
             }
-            this.stats.clicks++;
-            this.audio.coin();
-            this.pulseRes(Object.keys(bonus)[0]);
-            this.updateUI();
-            this.checkAchievements();
+            if (k === ' ' && tag !== 'BUTTON') { e.preventDefault(); this.collectAll(); }
+            else if (k === '+' || k === '=') this.zoomBy(1.15, this.vw / 2, this.vh / 2);
+            else if (k === '-' || k === '_') this.zoomBy(1 / 1.15, this.vw / 2, this.vh / 2);
+            else if (k === '0') { this.cam.zoom = CFG.homeZoom; this.centerCamera(); }
+            else if (k === 'w' || k === 'W') this.activateWarCry();
+            else if (k === 'l' || k === 'L') this.beginSpell();
+            else if (k === 'p' || k === 'P') this.togglePause();
+            else if (k === 'a' || k === 'A') this.toggleAutoCollect();
+            else if (k === 'r' || k === 'R') this.rally();
+            else if (k === 'm' || k === 'M') this.toggleSound();
+            else if (k === 't' || k === 'T') this.setTheme(this.isLight() ? 'dark' : 'light');
+            else if (k === 'u' || k === 'U') { if (this.selected) this.upgradeBuilding(this.selected); else this.upgradeCheapest(); }
+            else if (k === 'x' || k === 'X') this.cycleSpeed();
+            else if (k === 'v' || k === 'V') { const n = Object.keys(VIEWS); this.changeView(n[(n.indexOf(this.settings.view) + 1) % n.length]); }
+            else if (k === '?') this.showShortcuts();
+            else if (k >= '1' && k <= '5') this.openPanel(['build', 'upgrade', 'kingdom', 'coop', 'menu'][k - 1]);
         }
 
-        castLightning(tx, ty) {
-            this.stats.spells++;
-            this.flash = 0.55;
-            this.audio.spell();
-            const dmg = CFG.spellBaseDmg + this.player.level * 80;
-            // Big burst of particles
-            const center = this.worldIso(tx, ty);
-            for (let i = 0; i < 60; i++) {
-                const ang = Math.random() * Math.PI * 2;
-                const sp = rand(80, 420);
-                this.particles.push({
-                    x: center.x, y: center.y,
-                    vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 80,
-                    life: rand(0.4, 1.1), max: 1.1,
-                    color: i % 2 ? '#a6ecff' : '#ffffff', size: rand(2, 5),
-                });
-            }
-            // Lightning bolt jagged line from sky
-            for (let j = 0; j < 6; j++) {
-                this.particles.push({
-                    x: center.x + rand(-25, 25), y: center.y - 340,
-                    vx: rand(-10, 10), vy: 1400,
-                    life: 0.12, max: 0.12,
-                    color: '#ffffff', size: 5,
-                });
-            }
-            // Damage enemies in radius. Use both tile-space and screen-space
-            // distance checks — tile coords for logic, screen coords as a
-            // fallback so fast-moving enemies near the strike still get hit.
-            let hits = 0;
-            for (const e of this.enemies) {
-                if (e.hp <= 0) continue;
-                const d = Math.hypot(e.tx - tx, e.ty - ty);
-                if (d <= CFG.spellRadius) {
-                    this.hitEnemy(e, dmg);
-                    hits++;
-                    // Per-hit spark burst so the player sees the damage land
-                    for (let k = 0; k < 6; k++) {
-                        this.particles.push({
-                            x: e.x, y: e.y,
-                            vx: rand(-120, 120), vy: rand(-140, -40),
-                            life: rand(0.3, 0.6), max: 0.6,
-                            color: '#ffe3a1', size: rand(2, 4),
-                        });
-                    }
-                }
-            }
-            if (hits > 0) {
-                this.toast(`⚡ Lightning struck ${hits} raider${hits > 1 ? 's' : ''}!`, 'success');
-            } else {
-                this.toast('⚡ Lightning strike — no targets in range', 'warn');
-            }
-            this.checkAchievements();
+        updateHover() {
+            const I = this.input;
+            const t = this.screenToTile(I.x, I.y);
+            this.hoverTile = (t.tx >= 0 && t.tx < CFG.gridW && t.ty >= 0 && t.ty < CFG.gridH) ? { tx: t.tx, ty: t.ty } : null;
+            const prev = this.hoverBuilding;
+            // while carrying something, hovering buildings only gets in the way
+            this.hoverBuilding = (this.buildMode || this.spellMode || I.touch && !I.down) ? null : (this.moveMode && I.dragMove ? null : this.buildingAtScreen(I.x, I.y));
+            if (prev !== this.hoverBuilding || (this.hoverBuilding && this._hoverLevel !== this.hoverBuilding.level)) this.rebuildHoverTip();
+            this.positionHoverTip();
+            this.updateCanvasCursor();
         }
 
-        // ---------- Building ops ----------
-        canPlace(type, tx, ty) {
+        handleTap(sx, sy, shift = false) {
+            this.audio.ensure();
+            const I = this.input;
+            const t = this.screenToTile(sx, sy);
+
+            if (this.spellMode) {
+                if (this.res.gems < CFG.spellCost.gems) { this.toast('Not enough gems', 'warn'); this.spellMode = false; this.updateCanvasCursor(); return; }
+                this.res.gems -= CFG.spellCost.gems;
+                this.castLightning(t.tfx, t.tfy);
+                this.spellMode = false; this.updateCanvasCursor(); this.updateUI();
+                return;
+            }
+            if (this.buildMode) {
+                if (this.canPlace(this.buildMode, t.tx, t.ty)) this.placeBuilding(this.buildMode, t.tx, t.ty);
+                else { this.audio.error(); this.toast('Something is in the way', 'warn'); }
+                return;
+            }
+            if (this.moveMode) { this.commitMove({ tx: t.tx, ty: t.ty }); return; }
+
+            if (I.downTarget === 'goblin') { this.catchGoblin(); return; }
+            if (I.downTarget === 'arrow' && I.downBuilding) { this.upgradeBuilding(I.downBuilding); return; }
+
+            const b = I.downBuilding || this.buildingAtScreen(sx, sy);
+            if (b) {
+                const now = performance.now();
+                const dbl = I.lastTapB === b && now - I.lastTapT < 340;
+                I.lastTapB = b; I.lastTapT = now;
+                if (shift || dbl) { this.selectBuilding(b, true); this.upgradeBuilding(b); return; }
+                this.selectBuilding(b);
+                if (BLD[b.type].clickBonus) this.collectFrom(b);
+                return;
+            }
+            this.deselect();
+        }
+
+        selectBuilding(b, quiet = false) {
+            this.selected = b;
+            this.selPulse = 1;
+            if (!quiet) this.audio.click();
+            this.refreshSelection();
+        }
+        deselect() {
+            if (!this.selected) return;
+            this.selected = null;
+            this.refreshSelection();
+        }
+
+        // ---------- building ops ----------
+        placeBuilding(type, tx, ty, quiet = false) {
             const def = BLD[type];
-            const size = def.size;
-            for (let dy = 0; dy < size; dy++) {
-                for (let dx = 0; dx < size; dx++) {
-                    const cx = tx + dx, cy = ty + dy;
-                    if (cx < 0 || cy < 0 || cx >= CFG.gridW || cy >= CFG.gridH) return false;
-                    if (this.buildingAt(cx, cy)) return false;
-                }
+            if (this.maxedOut(type)) {
+                this.audio.error(); this.toast(`You can only have ${def.maxCount} ${def.name}${def.maxCount > 1 ? 's' : ''}`, 'warn');
+                this.setBuildMode(null); return false;
             }
+            if (!this.canAfford(def.baseCost)) { this.audio.error(); this.toast('Not enough resources', 'warn'); return false; }
+            this.spend(def.baseCost);
+            const b = { id: Math.random().toString(36).slice(2, 9), type, tx, ty, level: 1, hp: def.baseHP, maxHp: def.baseHP, lastShot: 0, build: 0 };
+            this.buildings.push(b);
+            this.touchGrid();
+            this.stats.built++;
+            this.gainXp(def.decor ? 5 : 15);
+            if (!quiet) this.audio.build(); else if (this.audio.gate('buildq', 90)) this.audio.build();
+            const p = this.centerOf(b);
+            for (let i = 0; i < 12; i++) this.particles.push({ x: p.x + rand(-18, 18), y: p.y + rand(-4, 8), vx: rand(-30, 30), vy: rand(-45, -12), life: 0.8, max: 0.8, color: '#d8c8a8', size: rand(3, 6), kind: 'dust' });
+            const singleton = !!def.maxCount && this.countOf(type) >= def.maxCount;
+            if (singleton || !this.canAfford(def.baseCost)) {
+                this.setBuildMode(null);
+                if (!singleton) this.toast(`${def.name} built. Not enough for another.`, 'success');
+                else this.toast(`${def.name} built!`, 'success');
+            } else {
+                if (!quiet) this.toast(`${def.name} built!`, 'success');
+                this.buildMenu();
+            }
+            this.recomputeRates(); this.updateUI(); this.checkAchievements();
             return true;
         }
 
-        buildingAt(tx, ty) {
-            for (const b of this.buildings) {
-                const def = BLD[b.type];
-                if (tx >= b.tx && tx < b.tx + def.size && ty >= b.ty && ty < b.ty + def.size) return b;
-            }
-            return null;
-        }
-
-        /**
-         * Hit test: resolve which building the player is clicking on.
-         *
-         * Strategy:
-         *   1. Check the base tile under the cursor — if that tile is inside a
-         *      building's footprint, that building is the winner (it's what's
-         *      visible on the ground plane).
-         *   2. Otherwise check each building's actual iso silhouette (a hexagon
-         *      made from the base diamond + the two side faces + the top
-         *      diamond). This matches the pixels the player actually sees.
-         *   3. Also check the level marker region drawn above each building so
-         *      clicking the floating number acts as clicking the building.
-         *
-         * Uses frontmost-depth ordering so when hexagons overlap, the building
-         * drawn on top wins.
-         */
-        buildingAtScreen(sx, sy) {
-            // Screen → world
-            const wx = (sx - this.cam.x) / this.cam.zoom;
-            const wy = (sy - this.cam.y) / this.cam.zoom;
-
-            // 1) Polygon check FIRST — tests the actual iso silhouette hexagon
-            // of every building. This means hovering or clicking anywhere on a
-            // building's drawn shape (roof, sides, base, badge) hits that
-            // building, even if a different building's base tile is underneath.
-            // The FRONTMOST building by draw-depth wins when shapes overlap,
-            // which matches what the player visually sees.
-            let best = null;
-            let bestDepth = -Infinity;
-            for (const b of this.buildings) {
-                const def = BLD[b.type];
-                const size = def.size;
-                const center = this.worldIso(b.tx + size / 2, b.ty + size / 2);
-                const fw = CFG.tileW * size / 2;
-                const fh = CFG.tileH * size / 2;
-                const h = this.buildHeight(b.type);
-                // Account for per-level height scaling
-                const lvlProgress = Math.min(1, ((b.level || 1) - 1) / Math.max(1, (def.maxLevel || 20) - 1));
-                const hScaled = h * (1 + lvlProgress * 0.28);
-
-                const hex = [
-                    [center.x,           center.y + fh],
-                    [center.x + fw,      center.y],
-                    [center.x + fw,      center.y - hScaled],
-                    [center.x,           center.y - fh - hScaled],
-                    [center.x - fw,      center.y - hScaled],
-                    [center.x - fw,      center.y],
-                ];
-                const inHex = pointInPolygon(wx, wy, hex);
-
-                // Also check the small level badge circle
-                const badgeX = center.x + fw * 0.42;
-                const badgeY = center.y - hScaled - fh * 0.12;
-                const inBadge = Math.hypot(wx - badgeX, wy - badgeY) <= 10;
-
-                if (inHex || inBadge) {
-                    const depth = b.tx + b.ty + size;
-                    if (depth > bestDepth) {
-                        bestDepth = depth;
-                        best = b;
-                    }
-                }
-            }
-            if (best) return best;
-
-            // 2) Tile-based fallback — catches clicks on empty grass between
-            // buildings where no polygon matched but the tile belongs to a
-            // building's footprint.
-            const t = this.screenToTile(sx, sy);
-            return this.buildingAt(t.tx, t.ty);
-        }
-
-        placeBuilding(type, tx, ty) {
-            const def = BLD[type];
-            // Only one Town Hall allowed per kingdom
-            if (type === 'townhall' && this.buildings.some(b => b.type === 'townhall')) {
-                this.audio.error();
-                this.toast('You already have a Town Hall', 'warn');
-                this.setBuildMode(null);
-                return;
-            }
-            if (!this.canAfford(def.baseCost)) {
-                this.audio.error();
-                this.toast('Not enough resources', 'warn');
-                return;
-            }
-            this.spend(def.baseCost);
-            const b = {
-                id: Math.random().toString(36).slice(2, 9),
-                type, tx, ty,
-                level: 1,
-                hp: def.baseHP,
-                maxHp: def.baseHP,
-                lastShot: 0,
-                placedAt: Date.now(),
-                animScale: 0,
-            };
-            this.buildings.push(b);
-            this.stats.built++;
-            this.gainXp(15);
-            this.audio.build();
-            this.toast(`${def.name} built!`, 'success');
-            // Sticky build mode — stay in placement mode after placing one so you
-            // can drop multiple walls/towers in a row. Escape / right-click / Cancel
-            // button all still exit. Automatically exits when the player can no
-            // longer afford another, or (for singletons like townhall) after one.
-            const singleton = (type === 'townhall');
-            const stillAffordable = this.canAfford(def.baseCost);
-            if (singleton || !stillAffordable) {
-                this.setBuildMode(null);
-                if (!stillAffordable && !singleton) {
-                    this.toast('Not enough for another — tap a card to keep building', 'warn');
-                }
-            } else {
-                // Refresh the sidebar so greyed-out cards update, and keep the
-                // same build tool selected for the next placement.
-                this.buildMenu();
-            }
-            this.recomputeRates();
-            this.updateUI();
-            this.checkAchievements();
-
-            const p = this.worldIso(tx + def.size/2, ty + def.size/2);
-            for (let i = 0; i < 14; i++) {
-                this.particles.push({
-                    x: p.x + rand(-20, 20), y: p.y + rand(-10, 5),
-                    vx: rand(-40, 40), vy: rand(-90, -30),
-                    life: 0.8, max: 0.8,
-                    color: '#d4c0a0', size: rand(3, 6),
-                });
-            }
-        }
-
-        upgradeBuilding(b) {
+        upgradeBuilding(b, quiet = false) {
             const def = BLD[b.type];
-            if (b.level >= def.maxLevel) {
-                this.toast('Already max level', 'warn');
-                return;
-            }
+            if (!def.upgradeCost || b.level >= def.maxLevel) { if (!quiet) this.toast('Already max level', 'warn'); return false; }
             const cost = def.upgradeCost(b.level);
-            if (!this.canAfford(cost)) {
-                this.audio.error();
-                this.toast('Not enough resources', 'warn');
-                return;
-            }
+            if (!this.canAfford(cost)) { this.audio.error(); if (!quiet) this.toast('Not enough resources', 'warn'); return false; }
             this.spend(cost);
             b.level++;
             b.maxHp = this.hpFor(b.type, b.level);
             b.hp = b.maxHp;
+            b.upg = 1;
             this.stats.upgrades++;
             this.gainXp(25);
-            this.audio.upgrade();
-            this.toast(`${def.name} → Lv ${b.level}`, 'success');
-            this.recomputeRates();
-            this.updateUI();
-            this.checkAchievements();
-            if (document.getElementById('modal').classList.contains('open')) {
-                this.openBuildingModal(b);
+            if (!quiet) this.audio.upgrade(); else if (this.audio.gate('upq', 120)) this.audio.upgrade();
+            const p = this.centerOf(b);
+            for (let i = 0; i < 18; i++) {
+                const a = i / 18 * TAU;
+                this.particles.push({ x: p.x, y: p.y - 10, vx: Math.cos(a) * 70, vy: Math.sin(a) * 40 - 40, life: 0.8, max: 0.8, color: i % 2 ? '#ffe066' : '#ffffff', size: rand(2, 4), kind: 'spark' });
             }
+            this.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.6, max: 0.6, color: '#ffe066', size: 30, kind: 'ring' });
+            this.floatText(`Level ${b.level}`, p.x, p.y - 56, '#ffe066');
+            if (!quiet) this.toast(`${def.name} is now level ${b.level}`, 'success');
+            // new tiers change the look
+            if (tierOf(b.type, b.level) !== tierOf(b.type, b.level - 1)) {
+                this.floatText('NEW LOOK', p.x, p.y - 74, '#9af0ff');
+            }
+            this.recomputeRates(); this.updateUI(); this.checkAchievements();
+            if (b === this.selected) this.refreshSelection();
+            if (this.modalBuilding === b) this.openBuildingModal(b);
+            return true;
+        }
+        // Keep upgrading one building until it runs out of money or levels
+        upgradeMax(b) {
+            let n = 0;
+            while (n < 60 && this.upgradeBuilding(b, true)) n++;
+            if (n) this.toast(`${BLD[b.type].name} upgraded ${n} level${n > 1 ? 's' : ''}`, 'success');
+            else this.toast('Not enough resources', 'warn');
+        }
+        upgradeCostScore(b) { const c = BLD[b.type].upgradeCost(b.level); return (c.gold || 0) + (c.elixir || 0) * 1.3 + (c.dark || 0) * 60; }
+        upgradeCandidates(cat = 'all') {
+            return this.buildings.filter(b => {
+                const def = BLD[b.type];
+                if (!def.upgradeCost || b.level >= def.maxLevel) return false;
+                if (cat === 'economy') return def.cat === 'economy' || def.cat === 'core';
+                if (cat === 'defense') return def.cat === 'defense';
+                return true;
+            // walls are cheap and numerous: they only get upgraded once nothing else is affordable
+            }).sort((a, b) => (this.upgradeCostScore(a) + (a.type === 'wall' ? 1e12 : 0)) - (this.upgradeCostScore(b) + (b.type === 'wall' ? 1e12 : 0)));
+        }
+        upgradeCheapest(cat = 'all', quiet = false) {
+            for (const b of this.upgradeCandidates(cat)) {
+                if (this.canAfford(BLD[b.type].upgradeCost(b.level))) { return this.upgradeBuilding(b, quiet); }
+            }
+            if (!quiet) this.toast('Nothing affordable to upgrade yet', 'warn');
+            return false;
+        }
+        upgradeAll(cat = 'all') {
+            let n = 0;
+            while (n < 80 && this.upgradeCheapest(cat, true)) n++;
+            if (n) { this.toast(`Upgraded ${n} time${n > 1 ? 's' : ''}`, 'success'); this.audio.upgrade(); }
+            else this.toast('Nothing affordable to upgrade yet', 'warn');
         }
 
-        // Max HP grows 18% per level
-        hpFor(type, level) {
-            return Math.floor(BLD[type].baseHP * Math.pow(1.18, level - 1));
-        }
+        hpFor(type, level) { return Math.floor(BLD[type].baseHP * Math.pow(1.18, level - 1)); }
 
-        destroyBuilding(b) {
+        sellBuilding(b) {
             const def = BLD[b.type];
-            const p = this.worldIso(b.tx + def.size/2, b.ty + def.size/2);
-            for (let i = 0; i < 30; i++) {
-                this.particles.push({
-                    x: p.x, y: p.y,
-                    vx: rand(-150, 150), vy: rand(-200, -40),
-                    life: 1.2, max: 1.2,
-                    color: i % 2 ? '#ff6b35' : '#8a4a1d',
-                    size: rand(3, 7),
-                });
-            }
+            const refund = {};
+            for (const k in def.baseCost) refund[k] = Math.floor(def.baseCost[k] * 0.5);
+            for (const k in refund) this.addRes(k, refund[k]);
             this.removeBuilding(b);
-            this.audio.die();
-            this.toast(`${def.name} destroyed!`, 'error');
-            if (b.type === 'townhall') this.gameOver();
+            this.audio.coin();
+            this.updateUI();
+            return refund;
         }
 
-        // Take a building off the map and drop every reference to it, so raiders
-        // stop hitting an empty tile and an open menu can't upgrade a ghost.
         removeBuilding(b) {
             this.buildings = this.buildings.filter(x => x !== b);
+            this.touchGrid();
             for (const e of this.enemies) if (e.target === b) e.target = null;
             if (this.hoverBuilding === b) { this.hoverBuilding = null; this.rebuildHoverTip(); }
-            if (this.selectedBuilding === b) this.selectedBuilding = null;
+            if (this.selected === b) { this.selected = null; this.refreshSelection(); }
             if (this.moveMode === b) { this.moveMode = null; this.updateCanvasCursor(); }
             if (this.modalBuilding === b) this.closeModal();
             this.recomputeRates();
         }
 
-        canAfford(cost) {
-            for (const k in cost) if ((this.res[k] || 0) < cost[k]) return false;
-            return true;
+        startMove(b) {
+            this.setBuildMode(null);
+            this.moveMode = b; this.spellMode = false;
+            this.updateCanvasCursor();
+            this.toast('Tap an empty tile to move it there', 'warn');
+        }
+        commitMove(t = this.hoverTile) {
+            const mb = this.moveMode;
+            if (!mb) { this.updateCanvasCursor(); return; }
+            this.moveMode = null;
+            if (!t || t.tx < 0 || t.ty < 0 || t.tx >= CFG.gridW || t.ty >= CFG.gridH) { this.toast('Drop it on the grass', 'warn'); this.updateCanvasCursor(); return; }
+            if (this.canPlace(mb.type, t.tx, t.ty, mb)) {
+                mb.tx = t.tx; mb.ty = t.ty;
+                this.touchGrid();
+                this.audio.build();
+                const p = this.centerOf(mb);
+                for (let i = 0; i < 8; i++) this.particles.push({ x: p.x + rand(-10, 10), y: p.y + rand(-4, 6), vx: rand(-30, 30), vy: rand(-50, -15), life: 0.5, max: 0.5, color: '#d8c8a0', size: rand(2, 4), kind: 'dust' });
+                this.refreshSelection();
+            } else { this.audio.error(); this.toast('Cannot place it there', 'warn'); }
+            this.updateCanvasCursor();
         }
 
-        spend(cost) {
-            for (const k in cost) this.res[k] -= cost[k];
-        }
-
+        // ---------- resources ----------
+        canAfford(cost) { for (const k in cost) if ((this.res[k] || 0) < cost[k]) return false; return true; }
+        spend(cost) { for (const k in cost) this.res[k] -= cost[k]; }
         cap() {
             const th = this.buildings.find(b => b.type === 'townhall');
-            const thCap = th ? BLD.townhall.provides(th.level).cap : 3000;
-            return thCap + this.capBonus;
+            return (th ? BLD.townhall.provides(th.level).cap : 3000) + this.capBonus;
         }
-
-        // Storage cap for one resource. Gems are uncapped; dark elixir gets a smaller vault.
-        capFor(k) {
-            if (k === 'gems') return Infinity;
-            return k === 'dark' ? this.cap() * CFG.darkCapFrac : this.cap();
-        }
-
-        // Add to a resource without going past its cap, and return how much
-        // actually went in. Never takes anything away if a sold vault already
-        // left the player over the cap.
+        capFor(k) { return k === 'gems' ? Infinity : (k === 'dark' ? this.cap() * CFG.darkCapFrac : this.cap()); }
         addRes(k, amt) {
             const before = this.res[k] || 0;
             this.res[k] = Math.max(before, Math.min(this.capFor(k), before + amt));
             return this.res[k] - before;
         }
+        resSymbol(k) { return U.resSymbol(k); }
+        resColor(k) { return resColor(k); }
+
+        prodMult() { return (1 + 0.1 * this.perks.treasury) * (1 + this.prosperity); }
+        towerMult() { return (1 + 0.08 * this.perks.steel) * (this.warCry.active ? 1.5 : 1); }
 
         recomputeRates() {
-            const r = { gold: 0, elixir: 0, dark: 0 };
-            this.capBonus = 0;
-            this.goldMult = 1;
-            this.xpMult = 1;
-            this.rallyHeal = 0.2;
-            this.waveGems = 1;
+            const r = { gold: 0, elixir: 0, dark: 0, gems: 0 };
+            this.capBonus = 0; this.goldMult = 1; this.xpMult = 1 + 0.1 * this.perks.study; this.rallyHeal = 0.2; this.waveGems = 1;
+            let pros = 0;
             for (const b of this.buildings) {
                 const def = BLD[b.type];
-                if (def.production) {
-                    const p = def.production(b.level);
-                    for (const k in p) r[k] = (r[k] || 0) + p[k];
-                }
+                if (def.production) { const p = def.production(b.level); for (const k in p) r[k] = (r[k] || 0) + p[k]; }
                 if (def.provides && b.type !== 'townhall') {
                     const p = def.provides(b.level);
                     if (p.cap) this.capBonus += p.cap;
@@ -1560,179 +766,392 @@
                     if (p.xpMult) this.xpMult += p.xpMult;
                     if (p.rallyMult) this.rallyHeal += p.rallyMult;
                     if (p.waveGems) this.waveGems = Math.max(this.waveGems, 1 + p.waveGems);
+                    if (p.prosperity) pros += p.prosperity;
                 }
             }
-            r.gold *= this.goldMult;
+            this.prosperity = Math.min(CFG.prosperityCap, pros);
+            const pm = this.prodMult();
+            r.gold *= this.goldMult * pm; r.elixir *= pm; r.dark *= pm;
             this.rates = r;
         }
 
-        isNight() {
-            return this.dayTime < 0.2 || this.dayTime > 0.8;
+        isNight() { return this.dayTime < 0.2 || this.dayTime > 0.8; }
+        // 0 in daylight, 1 in deep night, smooth through dawn and dusk
+        nightAmount() {
+            const t = this.dayTime;
+            if (t < 0.17 || t > 0.86) return 1;
+            if (t < 0.31) return 1 - (t - 0.17) / 0.14;
+            if (t > 0.72) return (t - 0.72) / 0.14;
+            return 0;
+        }
+        rateMult() { return this.boost.mult * (this.isNight() ? 1.25 : 1); }
+
+        // ---------- combat ----------
+        buildQueue(n) {
+            const table = waveTable(n);
+            const total = Math.min(4 + n * 2, 48);
+            const sum = table.reduce((s, e) => s + e.w, 0);
+            const q = [];
+            for (let i = 0; i < total; i++) {
+                let r = Math.random() * sum, kind = table[0].kind;
+                for (const e of table) { r -= e.w; if (r <= 0) { kind = e.kind; break; } }
+                q.push(kind);
+            }
+            if (n % 10 === 0) { q.length = Math.max(4, Math.floor(total * 0.6)); q.unshift('golem'); }
+            return q;
         }
 
-        // Live production multiplier: gem boost x night bonus (+25% at night)
-        rateMult() {
-            return this.boost.mult * (this.isNight() ? 1.25 : 1);
-        }
-
-        // ---------- Combat ----------
         startWave() {
             this.wave.number++;
             this.wave.active = true;
-            this.wave.enemiesToSpawn = Math.min(4 + this.wave.number * 2, 48);
-            this.wave.spawnLeft = this.wave.enemiesToSpawn;
+            this.wave.queue = (this.wave.next && this.wave.next.length) ? this.wave.next.slice() : this.buildQueue(this.wave.number);
+            this.wave.total = this.wave.queue.length;
+            this.wave.spawnLeft = this.wave.queue.length;
             this.wave.spawnCd = 0.8;
+            this.wave.next = this.buildQueue(this.wave.number + 1);
             this.audio.wave();
-            this.toast(`Wave ${this.wave.number} — ${this.wave.enemiesToSpawn} raiders incoming!`, 'warn');
-            this.showAlert(`⚔ WAVE ${this.wave.number} INCOMING ⚔`, 3);
+            const boss = this.wave.queue.includes('golem');
+            this.toast(boss ? `Wave ${this.wave.number}: a Stone Golem approaches!` : `Wave ${this.wave.number}: ${this.wave.total} raiders incoming`, 'warn');
+            this.showAlert(boss ? `BOSS WAVE ${this.wave.number}` : `WAVE ${this.wave.number}`, 3, boss);
         }
 
-        spawnEnemy() {
+        spawnEnemy(kind) {
+            const T = ENEMY[kind];
             const edge = randi(0, 4);
             let tx, ty;
-            if (edge === 0)      { tx = randi(0, CFG.gridW); ty = -1; }
-            else if (edge === 1) { tx = CFG.gridW; ty = randi(0, CFG.gridH); }
-            else if (edge === 2) { tx = randi(0, CFG.gridW); ty = CFG.gridH; }
-            else                 { tx = -1; ty = randi(0, CFG.gridH); }
-            const tier = Math.min(Math.floor(this.wave.number / 4), 3);
-            const groundTypes = [
-                { kind: 'goblin', hp: 40, dmg: 8, spd: 1.4, gold: 18, xp: 3, color: '#6a8e3a', size: 10 },
-                { kind: 'orc',    hp: 110, dmg: 16, spd: 1.1, gold: 40, xp: 6, color: '#8a3a3a', size: 14 },
-                { kind: 'troll',  hp: 280, dmg: 32, spd: 0.8, gold: 85, xp: 12, color: '#6a2c8a', size: 18 },
-                { kind: 'ogre',   hp: 620, dmg: 55, spd: 0.6, gold: 180, xp: 24, color: '#3a2c6a', size: 22 },
-            ];
-            const flyingTypes = [
-                { kind: 'bat',    hp: 30,  dmg: 6,  spd: 2.0, gold: 25,  xp: 5,  color: '#5a2a4a', size: 9 },
-                { kind: 'dragon', hp: 200, dmg: 28, spd: 1.2, gold: 100, xp: 15, color: '#c93535', size: 17 },
-            ];
-            // From wave 6+, 30% chance of a flying enemy
-            const isFlying = this.wave.number >= 6 && Math.random() < 0.3;
-            let t;
-            if (isFlying) {
-                const flyTier = this.wave.number >= 12 ? 1 : 0;
-                t = flyingTypes[flyTier];
-            } else {
-                t = groundTypes[Math.min(tier, groundTypes.length - 1)];
-            }
+            if (edge === 0)      { tx = randi(0, CFG.gridW); ty = -2; }
+            else if (edge === 1) { tx = CFG.gridW + 1; ty = randi(0, CFG.gridH); }
+            else if (edge === 2) { tx = randi(0, CFG.gridW); ty = CFG.gridH + 1; }
+            else                 { tx = -2; ty = randi(0, CFG.gridH); }
             const hpScale = 1 + this.wave.number * 0.12;
-            const sp = this.worldIso(tx + 0.5, ty + 0.5);
+            const p = this.worldIso(tx + 0.5, ty + 0.5);
             this.enemies.push({
-                kind: t.kind,
-                flying: isFlying,
-                tx: tx + 0.5, ty: ty + 0.5,
-                x: sp.x, y: sp.y,
-                hp: t.hp * hpScale, maxHp: t.hp * hpScale,
-                dmg: t.dmg, spd: t.spd,
-                reward: { gold: t.gold, xp: t.xp },
-                color: t.color, size: t.size,
-                target: null,
-                attackCd: 0,
-                wobble: Math.random() * Math.PI * 2,
+                kind, flying: !!T.flying, boss: !!T.boss, size: T.size, tx: tx + 0.5, ty: ty + 0.5, x: p.x, y: p.y, air: 0,
+                hp: T.hp * hpScale, maxHp: T.hp * hpScale, dmg: T.dmg * (1 + this.wave.number * 0.03), spd: T.spd, reach: T.reach || (T.flying ? 0.9 : 0.75),
+                reward: { gold: T.gold, xp: T.xp }, target: null, attackCd: rand(0, 0.6), walk: rand(0, 6), wobble: rand(0, 6), dir: 1,
+                off: { x: rand(-0.28, 0.28), y: rand(-0.28, 0.28) }, slow: 0, slowAmt: 0, hit: 0, atkAnim: 0, retarget: 0,
             });
         }
 
-        pickTarget(enemy) {
-            // Flying enemies ignore walls entirely — they fly over.
-            // Ground enemies hit the nearest wall that stands between them and
-            // their ideal target, forcing them to break through.
-            let best = null;
-            let bestD = Infinity;
+        pickTarget(e) {
+            const pref = ENEMY[e.kind].prefers;
+            let best = null, bestD = Infinity;
             for (const b of this.buildings) {
-                if (b.hp <= 0) continue;
                 const def = BLD[b.type];
-                // Flying troops skip walls
-                if (enemy.flying && b.type === 'wall') continue;
-                const cx = b.tx + def.size / 2;
-                const cy = b.ty + def.size / 2;
-                const d = Math.hypot(cx - enemy.tx, cy - enemy.ty);
-                let prio = 1;
-                if (b.type === 'townhall') prio = 0.4;
-                if (def.production)        prio = 0.6;
-                // Ground enemies prioritize nearby walls so they break through
-                // instead of walking past them
-                if (b.type === 'wall' && !enemy.flying) prio = 0.3;
-                const score = d * prio;
-                if (score < bestD) { bestD = score; best = b; }
+                if (def.decor || b.hp <= 0 || b.type === 'wall') continue;
+                const s = def.size, cx = b.tx + s / 2, cy = b.ty + s / 2;
+                let d = Math.hypot(cx - e.tx, cy - e.ty);
+                if (pref === 'economy' && (def.cat === 'economy' || def.cat === 'core')) d *= 0.55;
+                else if (pref === 'defense' && def.defense) d *= 0.55;
+                else if (pref === 'core' && b.type === 'townhall') d *= 0.3;
+                else if (b.type === 'townhall') d *= 0.9;
+                if (d < bestD) { bestD = d; best = b; }
             }
             return best;
         }
 
-        /**
-         * Check if a wall tile blocks the line between two tile positions.
-         * Returns the wall building if one is in the way, null otherwise.
-         */
-        wallBetween(fromTx, fromTy, _toTx, _toTy) {
-            // Simple: check each wall building to see if the enemy's movement
-            // vector passes within 0.8 tiles of the wall center
-            for (const b of this.buildings) {
-                if (b.type !== 'wall' || b.hp <= 0) continue;
-                const wx = b.tx + 0.5, wy = b.ty + 0.5;
-                // Point-to-segment distance approximation
-                const d = Math.hypot(wx - fromTx, wy - fromTy);
-                if (d < 1.0) return b; // standing on/next to wall → attack it
-            }
-            return null;
+        // Distance in tiles from a point to the edge of a building's footprint
+        distToBuilding(x, y, b) {
+            const s = BLD[b.type].size;
+            const dx = Math.max(b.tx - x, 0, x - (b.tx + s));
+            const dy = Math.max(b.ty - y, 0, y - (b.ty + s));
+            return Math.hypot(dx, dy);
         }
 
+        // Walking costs toward a target, for every tile: open ground 1, wall 6 (chew through),
+        // other buildings 12, decorations are solid. Raiders step downhill.
+        flowFor(target) {
+            let f = this._flow.get(target.id);
+            if (f && f.ver === this.gridVer) return f;
+            const W = CFG.gridW + MARGIN * 2, H = CFG.gridH + MARGIN * 2;
+            const dist = new Float32Array(W * H).fill(Infinity);
+            const idx = (x, y) => (y + MARGIN) * W + (x + MARGIN);
+            const cost = (x, y) => {
+                const o = this.cell(x, y);
+                if (!o) return 1;
+                if (o.type === 'wall') return 6;
+                if (BLD[o.type].decor) return Infinity;
+                return 12;
+            };
+            const heap = new Heap();
+            const s = BLD[target.type].size;
+            for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) { const i = idx(target.tx + dx, target.ty + dy); dist[i] = 0; heap.push(0, i); }
+            while (heap.size) {
+                const { key: d, val: i } = heap.pop();
+                if (d > dist[i]) continue;
+                const x = (i % W) - MARGIN, y = Math.floor(i / W) - MARGIN;
+                for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
+                    if (nx < -MARGIN || ny < -MARGIN || nx >= CFG.gridW + MARGIN || ny >= CFG.gridH + MARGIN) continue;
+                    const nd = d + cost(nx, ny);
+                    const j = idx(nx, ny);
+                    if (nd < dist[j]) { dist[j] = nd; heap.push(nd, j); }
+                }
+            }
+            f = { ver: this.gridVer, dist, W, MARGIN };
+            this._flow.set(target.id, f);
+            return f;
+        }
+        // The neighbouring tile with the lowest remaining cost, or null if boxed in
+        nextStep(f, tx, ty) {
+            const { dist, W } = f;
+            const at = (x, y) => (x < -MARGIN || y < -MARGIN || x >= CFG.gridW + MARGIN || y >= CFG.gridH + MARGIN) ? Infinity : dist[(y + MARGIN) * W + (x + MARGIN)];
+            const solid = (x, y) => { const o = this.cell(x, y); return !!o; };
+            let best = null, bestD = at(tx, ty);
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                if (!dx && !dy) continue;
+                const nx = tx + dx, ny = ty + dy;
+                let d = at(nx, ny);
+                if (dx && dy) {
+                    if (solid(tx + dx, ty) || solid(tx, ty + dy)) continue;      // no cutting corners through walls
+                    d += 0.4;
+                }
+                if (d < bestD) { bestD = d; best = { tx: nx, ty: ny }; }
+            }
+            return best;
+        }
+
+        enemyTick(dt) {
+            if (this.occDirty) this.rebuildOcc();
+            for (const e of this.enemies) {
+                if (e.hp <= 0) continue;
+                e.wobble += dt * 8;
+                if (e.hit > 0) e.hit = Math.max(0, e.hit - dt * 4);
+                if (e.atkAnim > 0) e.atkAnim = Math.max(0, e.atkAnim - dt * 3.5);
+                if (e.slow > 0) e.slow -= dt;
+                const spd = e.spd * (e.slow > 0 ? 1 - e.slowAmt : 1);
+                e.retarget -= dt;
+                if (!e.target || e.target.hp <= 0 || e.retarget <= 0) {
+                    const t = this.pickTarget(e);
+                    if (t !== e.target) e.target = t;
+                    e.retarget = 2.5;
+                }
+                const tgt = e.target;
+                let moveX = 0, moveY = 0, attack = null;
+                if (!tgt) {
+                    const dx = CFG.gridW / 2 - e.tx, dy = CFG.gridH / 2 - e.ty, d = Math.hypot(dx, dy) || 1;
+                    moveX = dx / d; moveY = dy / d;
+                } else {
+                    const dB = this.distToBuilding(e.tx, e.ty, tgt);
+                    const s = BLD[tgt.type].size;
+                    if (dB <= e.reach) attack = tgt;
+                    else if (e.flying) {
+                        const dx = tgt.tx + s / 2 - e.tx, dy = tgt.ty + s / 2 - e.ty, d = Math.hypot(dx, dy) || 1;
+                        moveX = dx / d; moveY = dy / d;
+                    } else {
+                        const f = this.flowFor(tgt);
+                        const step = this.nextStep(f, Math.floor(e.tx), Math.floor(e.ty));
+                        if (!step) {
+                            const dx = tgt.tx + s / 2 - e.tx, dy = tgt.ty + s / 2 - e.ty, d = Math.hypot(dx, dy) || 1;
+                            moveX = dx / d; moveY = dy / d;
+                        } else {
+                            const blocker = this.cell(step.tx, step.ty);
+                            const cx = step.tx + 0.5 + e.off.x, cy = step.ty + 0.5 + e.off.y;
+                            const dx = cx - e.tx, dy = cy - e.ty, d = Math.hypot(dx, dy) || 1;
+                            if (blocker && blocker !== tgt && this.distToBuilding(e.tx, e.ty, blocker) < 0.7) attack = blocker;
+                            else { moveX = dx / d; moveY = dy / d; }
+                        }
+                    }
+                }
+                if (attack) {
+                    e.attackCd -= dt;
+                    const s = BLD[attack.type].size;
+                    const ddx = (attack.tx + s / 2) - e.tx, ddy = (attack.ty + s / 2) - e.ty;
+                    e.dir = (ddx - ddy) >= 0 ? 1 : -1;
+                    if (e.attackCd <= 0) {
+                        e.attackCd = e.kind === 'golem' ? 1.6 : 1.1;
+                        e.atkAnim = 1;
+                        this.enemyStrike(e, attack);
+                    }
+                } else {
+                    e.tx += moveX * spd * dt; e.ty += moveY * spd * dt;
+                    if (moveX - moveY) e.dir = (moveX - moveY) >= 0 ? 1 : -1;
+                    e.walk += dt * spd * 5.2;
+                }
+            }
+            // gentle separation so a wave doesn't collapse into one pixel
+            const list = this.enemies;
+            for (let i = 0; i < list.length; i++) {
+                const a = list[i]; if (a.hp <= 0 || a.flying) continue;
+                for (let j = i + 1; j < list.length; j++) {
+                    const b = list[j]; if (b.hp <= 0 || b.flying) continue;
+                    const dx = a.tx - b.tx, dy = a.ty - b.ty, d2 = dx * dx + dy * dy;
+                    if (d2 < 0.12 && d2 > 1e-6) { const d = Math.sqrt(d2), push = (0.35 - d) * 0.5 * Math.min(1, dt * 14); a.tx += dx / d * push; a.ty += dy / d * push; b.tx -= dx / d * push; b.ty -= dy / d * push; }
+                }
+            }
+            for (const e of list) {
+                const p = this.worldIso(e.tx, e.ty);
+                e.x = p.x;
+                if (e.flying) { e.air = 40 + Math.sin(e.wobble * 0.5) * 5; e.y = p.y - e.air; } else e.y = p.y;
+            }
+            compact(this.enemies, e => e.hp > 0);
+        }
+
+        enemyStrike(e, b) {
+            if (ENEMY[e.kind].reach >= 2) {      // ranged: throw something
+                const from = { x: e.x, y: e.y - 14 }, c = this.centerOf(b);
+                this.projectiles.push({ type: 'bone', x: from.x, y: from.y, sx: from.x, sy: from.y, tx: c.x, ty: c.y - 14, t: 0, dur: 0.45, arc: 26, building: b, dmg: e.dmg });
+                this.audio.bow();
+                return;
+            }
+            this.damageBuilding(b, e.dmg, e);
+        }
+
+        damageBuilding(b, dmg, e) {
+            if (BLD[b.type].decor || b.hp <= 0) return;
+            b.hp -= dmg;
+            b.hurt = 0.25;
+            const c = this.centerOf(b);
+            this.popups.push({ x: c.x + rand(-8, 8), y: c.y - 30, text: `-${Math.floor(dmg)}`, color: '#ff6a5a', life: 0.9, max: 0.9, size: 13 });
+            this.audio.hit();
+            for (let i = 0; i < 4; i++) this.particles.push({ x: c.x + rand(-10, 10), y: c.y - rand(8, 24), vx: rand(-60, 60), vy: rand(-70, -10), life: 0.45, max: 0.45, color: '#d8c8a8', size: rand(2, 3.5), kind: 'dust' });
+            if (e && e.kind === 'golem') { this.shake = Math.max(this.shake, 4); }
+            if (b.hp <= 0) this.destroyBuilding(b);
+        }
+
+        destroyBuilding(b) {
+            const def = BLD[b.type];
+            const p = this.centerOf(b);
+            for (let i = 0; i < 34; i++) this.particles.push({ x: p.x + rand(-14, 14), y: p.y - rand(0, 20), vx: rand(-150, 150), vy: rand(-210, -40), life: 1.1, max: 1.1, color: i % 3 === 0 ? '#ff7a35' : (i % 3 === 1 ? '#8a6a44' : '#4a4048'), size: rand(3, 7), kind: 'p' });
+            for (let i = 0; i < 6; i++) this.particles.push({ x: p.x + rand(-12, 12), y: p.y - rand(4, 18), vx: rand(-12, 12), vy: rand(-40, -18), life: rand(1.4, 2.4), max: 2.4, color: 'rgba(60,56,64,', size: rand(6, 11), kind: 'smoke' });
+            this.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.5, max: 0.5, color: '#ffb050', size: 46, kind: 'ring' });
+            this.shake = Math.max(this.shake, 5);
+            this.removeBuilding(b);
+            this.audio.boom();
+            this.toast(`${def.name} destroyed!`, 'error');
+            if (b.type === 'townhall') this.gameOver();
+        }
+
+        // ---------- towers ----------
         defenseTick(dt) {
             for (const b of this.buildings) {
                 const def = BLD[b.type];
                 if (!def.defense) continue;
+                if (b.rec > 0) b.rec = Math.max(0, b.rec - dt * 5);
+                if (b.fl > 0) b.fl = Math.max(0, b.fl - dt * 6);
+                if (b.hurt > 0) b.hurt -= dt;
                 b.lastShot -= dt;
-                if (b.lastShot > 0) continue;
                 const d = def.defense(b.level);
-                const cx = b.tx + def.size / 2;
-                const cy = b.ty + def.size / 2;
+                const c = { x: b.tx + def.size / 2, y: b.ty + def.size / 2 };
                 let target = null, best = Infinity;
                 for (const e of this.enemies) {
                     if (e.hp <= 0) continue;
-                    const dd = Math.hypot(e.tx - cx, e.ty - cy);
+                    if (e.flying && GROUND_ONLY.has(b.type)) continue;
+                    if (!e.flying && AIR_ONLY.has(b.type)) continue;
+                    const dd = Math.hypot(e.tx - c.x, e.ty - c.y);
                     if (dd <= d.range && dd < best) { best = dd; target = e; }
                 }
+                b.hasT = !!target;
                 if (target) {
-                    b.lastShot = d.cd;
-                    this.fireProjectile(b, target, d);
+                    // swing the barrel / bow round toward the target
+                    const mc = this.centerOf(b);
+                    const ang = Math.atan2(target.y - 14 - (mc.y - 40), target.x - mc.x);
+                    let diff = ang - (b.aim ?? 0.5);
+                    while (diff > Math.PI) diff -= TAU; while (diff < -Math.PI) diff += TAU;
+                    b.aim = (b.aim ?? 0.5) + diff * Math.min(1, dt * 12);
+                    if (b.lastShot <= 0) { b.lastShot = d.cd; this.fireAt(b, target, d); }
                 }
             }
         }
 
-        fireProjectile(from, target, d) {
-            const def = BLD[from.type];
-            const sx = this.worldIso(from.tx + def.size / 2, from.ty + def.size / 2);
-            this.projectiles.push({
-                x: sx.x, y: sx.y - 25,
-                target,
-                dmg: d.dmg * (this.warCry.active ? 1.5 : 1),
-                splash: d.splash || 0,
-                speed: 640,
-                ttl: 2,
-                type: from.type,
-            });
-            this.audio.shoot();
-        }
-
-        hitEnemy(e, dmg, splash = 0) {
-            e.hp -= dmg;
-            this.popups.push({ x: e.x, y: e.y - 20, text: `-${Math.floor(dmg)}`, color: '#ff9a6b', life: 0.8, max: 0.8 });
-            for (let i = 0; i < 4; i++) {
-                this.particles.push({
-                    x: e.x, y: e.y,
-                    vx: rand(-80, 80), vy: rand(-60, 60),
-                    life: 0.4, max: 0.4, color: '#ff6b35', size: rand(2, 4),
-                });
-            }
-            if (splash > 0) {
-                for (const other of this.enemies) {
-                    if (other === e || other.hp <= 0) continue;
-                    const dd = Math.hypot(other.tx - e.tx, other.ty - e.ty);
-                    if (dd <= splash) {
-                        other.hp -= dmg * 0.5;
-                        this.popups.push({ x: other.x, y: other.y - 20, text: `-${Math.floor(dmg * 0.5)}`, color: '#ff9a6b', life: 0.8, max: 0.8 });
-                        // Splash kills count too (they used to vanish with no gold or kill credit)
-                        if (other.hp <= 0) this.killEnemy(other);
+        fireAt(b, target, d) {
+            const def = BLD[b.type];
+            const sp = this.spriteOf(b);
+            const m = sp.anchors.find(a => a.name === 'mount');
+            const c = this.centerOf(b);
+            const mx = c.x + (m ? m.x : 0), my = c.y + (m ? m.y : -30);
+            const dmg = d.dmg * this.towerMult();
+            b.rec = 1; b.fl = 1;
+            const tgtp = { x: target.x, y: target.y - (target.flying ? 0 : 12) };
+            const type = b.type;
+            if (type === 'tesla' || type === 'inferno') {
+                // instant hit: a beam or a bolt that jumps to nearby raiders
+                this.beams.push({ type, x0: mx, y0: my, x1: tgtp.x, y1: tgtp.y, life: type === 'inferno' ? 0.12 : 0.16, max: type === 'inferno' ? 0.12 : 0.16, seed: Math.random() * 99 });
+                this.hitEnemy(target, dmg);
+                if (type === 'tesla') {
+                    let prev = target, n = 0;
+                    for (const e of this.enemies) {
+                        if (n >= 2 || e === target || e.hp <= 0) continue;
+                        if (Math.hypot(e.tx - prev.tx, e.ty - prev.ty) < 1.8) {
+                            this.beams.push({ type, x0: prev.x, y0: prev.y - 12, x1: e.x, y1: e.y - 12, life: 0.16, max: 0.16, seed: Math.random() * 99 });
+                            this.hitEnemy(e, dmg * 0.6); prev = e; n++;
+                        }
                     }
-                }
+                    this.audio.zap();
+                } else if (this.audio.gate('inf', 160)) this.audio.beep(180, 0.1, 'sawtooth', 0.12, 0.6);
+                return;
             }
+            const spec = ({
+                cannon:     { dur: 0.32, arc: 24, sound: 'shoot' },
+                mortar:     { dur: 0.9, arc: 90, sound: 'boom' },
+                archer:     { dur: 0.26, arc: 14, sound: 'bow' },
+                xbow:       { dur: 0.2, arc: 6, sound: 'bow' },
+                airdef:     { dur: 0.5, arc: 18, sound: 'shoot' },
+                wizard:     { dur: 0.34, arc: 8, sound: 'zap' },
+                frost:      { dur: 0.3, arc: 6, sound: 'zap' },
+                clancastle: { dur: 0.4, arc: 16, sound: 'shoot' },
+            })[type] || { dur: 0.3, arc: 10, sound: 'shoot' };
+            this.projectiles.push({
+                type, x: mx, y: my, sx: mx, sy: my, target, t: 0, dur: Math.max(0.12, spec.dur * (0.6 + Math.hypot(tgtp.x - mx, tgtp.y - my) / 520)),
+                arc: spec.arc, dmg, splash: d.splash || 0, slow: d.slow || 0, tx: tgtp.x, ty: tgtp.y, trail: [],
+            });
+            this.audio[spec.sound]();
+            // muzzle puff for the big guns
+            if (type === 'cannon' || type === 'mortar') {
+                this.particles.push({ x: mx + Math.cos(b.aim || 0) * 14, y: my + Math.sin(b.aim || 0) * 8, vx: rand(-10, 10), vy: rand(-26, -10), life: 0.8, max: 0.8, color: 'rgba(210,210,215,', size: rand(5, 8), kind: 'smoke' });
+            }
+        }
+
+        projectileTick(dt) {
+            for (const p of this.projectiles) {
+                p.t += dt / (p.dur || 0.3);
+                if (p.building) {                     // an enemy's thrown bone
+                    const k = Math.min(1, p.t);
+                    p.x = p.sx + (p.tx - p.sx) * k; p.y = p.sy + (p.ty - p.sy) * k - Math.sin(k * Math.PI) * p.arc;
+                    if (p.t >= 1) { p.dead = true; if (p.building.hp > 0) this.damageBuilding(p.building, p.dmg); }
+                    continue;
+                }
+                const tg = p.target;
+                if (tg && tg.hp > 0) { p.tx = tg.x; p.ty = tg.y - (tg.flying ? 0 : 12); }
+                const k = Math.min(1, p.t);
+                p.x = p.sx + (p.tx - p.sx) * k;
+                p.y = p.sy + (p.ty - p.sy) * k - Math.sin(k * Math.PI) * p.arc;
+                if (p.trail) { p.trail.push(p.x, p.y); if (p.trail.length > 16) p.trail.splice(0, 2); }
+                if (p.t >= 1) { p.dead = true; this.projectileImpact(p); }
+            }
+            compact(this.projectiles, p => !p.dead);
+            for (const b of this.beams) b.life -= dt;
+            compact(this.beams, b => b.life > 0);
+        }
+
+        projectileImpact(p) {
+            const tg = p.target;
+            if (p.splash > 0) {
+                const cx = tg && tg.hp > 0 ? tg.tx : null;
+                const ex = tg ? tg.tx : 0, ey = tg ? tg.ty : 0;
+                for (const e of this.enemies) {
+                    if (e.hp <= 0) continue;
+                    const dd = Math.hypot(e.tx - ex, e.ty - ey);
+                    if (dd <= p.splash) this.hitEnemy(e, e === tg ? p.dmg : p.dmg * 0.55);
+                }
+                if (cx === null && tg) { /* the target died on the way; the shell still bursts */ }
+                this.particles.push({ x: p.x, y: p.y + 6, vx: 0, vy: 0, life: 0.45, max: 0.45, color: p.type === 'wizard' ? '#7ad8ff' : '#ffb050', size: p.splash * 24, kind: 'ring' });
+                if (p.type === 'mortar') { this.shake = Math.max(this.shake, 2.4); this.audio.boom(); }
+            } else if (tg && tg.hp > 0) {
+                this.hitEnemy(tg, p.dmg);
+                if (p.slow) { tg.slow = 1.8; tg.slowAmt = p.slow; }
+            }
+            const col = ({ wizard: '#7ad8ff', frost: '#bff0ff', airdef: '#ffb050', mortar: '#ffb050', cannon: '#ffcf70' })[p.type] || '#ffe3a1';
+            for (let i = 0; i < (p.splash ? 10 : 5); i++) {
+                const a = rand(0, TAU), s = rand(30, 120);
+                this.particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 40, life: rand(0.25, 0.5), max: 0.5, color: col, size: rand(2, 4), kind: p.type === 'frost' ? 'shard' : 'spark' });
+            }
+        }
+
+        hitEnemy(e, dmg) {
+            if (e.hp <= 0) return;
+            e.hp -= dmg;
+            e.hit = 1;
+            this.popups.push({ x: e.x + rand(-6, 6), y: e.y - e.size * 2.2, text: `${Math.floor(dmg)}`, color: '#ffd9a0', life: 0.7, max: 0.7, size: 12 });
             if (e.hp <= 0) this.killEnemy(e);
         }
 
@@ -1740,98 +1159,20 @@
             if (e.dead) return;
             e.dead = true;
             this.stats.kills++;
+            if (e.boss) { this.stats.bosses++; this.res.gems += 5; this.floatText('+5 gems', e.x, e.y - 50, '#5cd8ff'); this.shake = Math.max(this.shake, 8); this.showAlert('GOLEM DEFEATED', 2.5); }
             this.stats.goldEarned += this.addRes('gold', e.reward.gold);
             this.gainXp(e.reward.xp);
-            if (Math.random() < 0.05) {
-                this.res.gems += 1;
-                this.floatText('+1 ♦', e.x, e.y - 30, '#5cd8ff');
-            }
+            if (Math.random() < 0.05) { this.res.gems += 1; this.floatText('+1 gem', e.x, e.y - 40, '#5cd8ff'); }
             this.audio.die();
-            for (let i = 0; i < 14; i++) {
-                this.particles.push({
-                    x: e.x, y: e.y,
-                    vx: rand(-140, 140), vy: rand(-180, -30),
-                    life: 0.9, max: 0.9, color: i % 2 ? '#ff6b35' : '#ffc857', size: rand(3, 6),
-                });
-            }
-            this.floatText(`+${e.reward.gold}`, e.x, e.y - 20, '#ffc857');
+            for (let i = 0; i < (e.boss ? 40 : 12); i++) this.particles.push({ x: e.x, y: e.y - e.size, vx: rand(-130, 130), vy: rand(-170, -20), life: 0.8, max: 0.8, color: i % 2 ? '#ff7a35' : '#ffc857', size: rand(2.5, 5.5), kind: 'p' });
+            this.particles.push({ x: e.x, y: e.y - e.size * 0.6, vx: 0, vy: -20, life: 0.9, max: 0.9, color: 'rgba(230,230,235,', size: e.size * 0.9, kind: 'smoke' });
+            // a coin spills out
+            this.particles.push({ x: e.x, y: e.y - e.size, vx: rand(-30, 30), vy: -rand(110, 150), life: 0.9, max: 0.9, color: '#ffd34a', size: 4, kind: 'coin' });
+            this.floatText(`+${e.reward.gold}`, e.x, e.y - e.size * 2.6, '#ffc857');
             this.checkAchievements();
         }
 
-        enemyTick(dt) {
-            for (const e of this.enemies) {
-                if (e.hp <= 0) continue;
-                if (!e.target || e.target.hp <= 0) e.target = this.pickTarget(e);
-                e.wobble += dt * 8;
-
-                if (!e.target) {
-                    const cx = CFG.gridW / 2, cy = CFG.gridH / 2;
-                    const dx = cx - e.tx, dy = cy - e.ty;
-                    const d = Math.hypot(dx, dy) || 1;
-                    e.tx += (dx / d) * e.spd * dt;
-                    e.ty += (dy / d) * e.spd * dt;
-                } else {
-                    const def = BLD[e.target.type];
-                    const tx = e.target.tx + def.size / 2;
-                    const ty = e.target.ty + def.size / 2;
-                    const dx = tx - e.tx, dy = ty - e.ty;
-                    const d = Math.hypot(dx, dy);
-
-                    // Ground troops check for wall collision — if a wall is
-                    // adjacent, stop and attack it instead of walking through.
-                    if (!e.flying && d > 0.6 && e.target.type !== 'wall') {
-                        const blocker = this.wallBetween(e.tx, e.ty, tx, ty);
-                        if (blocker && blocker.hp > 0) {
-                            // Re-target the blocking wall
-                            e.target = blocker;
-                            // Fall through to the attack/move logic below with
-                            // the new target on next tick
-                            continue;
-                        }
-                    }
-
-                    if (d > 0.6) {
-                        e.tx += (dx / d) * e.spd * dt;
-                        e.ty += (dy / d) * e.spd * dt;
-                    } else {
-                        e.attackCd -= dt;
-                        if (e.attackCd <= 0) {
-                            e.attackCd = 1.2;
-                            e.target.hp -= e.dmg;
-                            this.popups.push({ x: e.x, y: e.y - 30, text: `-${e.dmg}`, color: '#ff5d5d', life: 0.9, max: 0.9 });
-                            this.audio.hit();
-                            if (e.target.hp <= 0) this.destroyBuilding(e.target);
-                        }
-                    }
-                }
-                const p = this.worldIso(e.tx, e.ty);
-                e.x = p.x;
-                // Flying enemies float much higher above the ground + bob
-                e.y = p.y - (e.flying ? 40 + Math.sin(e.wobble * 0.5) * 6 : 10);
-            }
-            compact(this.enemies, e => e.hp > 0);
-        }
-
-        projectileTick(dt) {
-            for (const p of this.projectiles) {
-                const dx = p.target.x - p.x;
-                const dy = p.target.y - p.y;
-                const d = Math.hypot(dx, dy);
-                if (d < 8 || p.target.hp <= 0) {
-                    if (p.target.hp > 0) this.hitEnemy(p.target, p.dmg, p.splash);
-                    p.dead = true;
-                    continue;
-                }
-                const mv = p.speed * dt;
-                p.x += (dx / d) * mv;
-                p.y += (dy / d) * mv;
-                p.ttl -= dt;
-                if (p.ttl <= 0) p.dead = true;
-            }
-            compact(this.projectiles, p => !p.dead);
-        }
-
-        // ---------- XP / Level ----------
+        // ---------- xp / level ----------
         gainXp(amt) {
             this.player.xp += amt * this.xpMult;
             let leveled = false;
@@ -1842,2088 +1183,42 @@
             }
             if (leveled) {
                 this.audio.levelup();
-                this.toast(`Level up! Now Lv ${this.player.level}`, 'success');
+                this.toast(`Level up! You are level ${this.player.level}`, 'success');
                 this.res.gems += 2;
-                this.showAlert(`★ LEVEL ${this.player.level} ★`, 2.5);
-                this.buildMenu();
+                this.showAlert(`LEVEL ${this.player.level}`, 2.5);
+                const unlocked = Object.values(BLD).filter(d => d.unlockLevel === this.player.level).map(d => d.name);
+                if (unlocked.length) setTimeout(() => this.toast(`Unlocked: ${unlocked.join(', ')}`, 'success'), 700);
+                this.buildMenu(true);
                 this.checkAchievements();
             }
         }
 
-        // ---------- Pause ----------
-        togglePause() {
-            if (this.gameOverShown) return;
-            this.paused = !this.paused;
-            const btn = document.getElementById('actPause');
-            if (btn) {
-                const lbl = btn.querySelector('.action-label');
-                if (lbl) lbl.textContent = this.paused ? 'Resume' : 'Pause';
-                btn.classList.toggle('on', this.paused);
-                btn.setAttribute('aria-pressed', String(this.paused));
-            }
-            // Reset dt so the first post-resume tick doesn't jump.
-            if (!this.paused) this.lastTime = performance.now();
-            this.toast(this.paused ? '⏸ Paused' : '▶ Resumed', 'warn');
-        }
-
-        // ---------- Main loop ----------
-        loop(ts) {
-            let elapsed = (ts - this.lastTime) / 1000;
-            this.lastTime = ts;
-            // When paused (manual, tab hidden, or game-over), skip sim tick but
-            // keep rendering so the UI stays responsive to the user.
-            if (!this.paused && elapsed > 0) {
-                // A long frame used to be clamped to 0.1s, so a throttled tab
-                // (window covered, laptop lid half shut) ran the kingdom slow
-                // and lost most of its production. A short gap is now simulated
-                // in 0.1s steps so timers and raids stay on the clock, and a
-                // long one is paid out like time away instead of being dropped.
-                if (elapsed > CFG.catchUpMaxSec) {
-                    this.applyOfflineEarnings(elapsed - CFG.catchUpMaxSec);
-                    elapsed = CFG.catchUpMaxSec;
-                }
-                while (elapsed > 0) {
-                    const dt = Math.min(elapsed, 0.1);
-                    this.update(dt);
-                    elapsed -= dt;
-                }
-            }
-            this.render();
-            requestAnimationFrame((t) => this.loop(t));
-        }
-
-        update(dt) {
-            this.tnow += dt;
-            this.stats.playTime += dt;
-
-            // Day cycle
-            this.dayTime += dt / CFG.dayLengthSec;
-            if (this.dayTime >= 1) { this.dayTime -= 1; this.dayCount++; }
-
-            // Resources (night bonus: +25% during night hours)
-            const rm = this.rateMult();
-            this.stats.goldEarned += this.addRes('gold', this.rates.gold * dt * rm);
-            this.addRes('elixir', this.rates.elixir * dt * rm);
-            this.addRes('dark', this.rates.dark * dt * rm);
-
-            // Boost timer
-            if (this.boost.timeLeft > 0) {
-                this.boost.timeLeft -= dt;
-                if (this.boost.timeLeft <= 0) {
-                    this.boost.mult = 1;
-                    this.toast('Boost expired', 'warn');
-                }
-            }
-
-            // War Cry timer
-            if (this.warCry.active) {
-                this.warCry.timeLeft -= dt;
-                if (this.warCry.timeLeft <= 0) {
-                    this.warCry.active = false;
-                    this.toast('War Cry ended', 'warn');
-                }
-            }
-            if (this.warCry.cooldown > 0) this.warCry.cooldown -= dt;
-
-            // Combo decay
-            if (this.combo.time > 0) {
-                this.combo.time -= dt;
-                if (this.combo.time <= 0) {
-                    this.combo.count = 0;
-                    this.combo.mult = 1;
-                }
-            }
-
-            // Building bob anim
-            for (const b of this.buildings) {
-                if (b.animScale < 1) b.animScale = Math.min(1, b.animScale + dt * 3);
-            }
-
-            // Wave spawn
-            if (this.wave.active) {
-                if (this.wave.spawnLeft > 0) {
-                    this.wave.spawnCd -= dt;
-                    if (this.wave.spawnCd <= 0) {
-                        this.spawnEnemy();
-                        this.wave.spawnLeft--;
-                        this.wave.spawnCd = rand(0.6, 1.2);
-                    }
-                }
-                if (this.wave.spawnLeft <= 0 && this.enemies.length === 0) {
-                    this.wave.active = false;
-                    this.wave.timer = Math.max(CFG.waveMinSec, CFG.waveBaseSec - this.wave.number * 2);
-                    this.stats.wavesCleared++;
-                    this.res.gems += this.waveGems;
-                    this.gainXp(25 + this.wave.number * 5);
-                    this.toast(`Wave ${this.wave.number} cleared! +${this.waveGems} ♦`, 'success');
-                    this.showAlert('✓ WAVE CLEARED', 2);
-                }
-            } else {
-                this.wave.timer -= dt;
-                if (this.wave.timer <= 0) this.startWave();
-            }
-
-            // Combat
-            this.defenseTick(dt);
-            this.enemyTick(dt);
-            this.projectileTick(dt);
-
-            // Particles (cap budget — performance)
-            if (this.particles.length > 240) {
-                // Drop oldest
-                this.particles.splice(0, this.particles.length - 240);
-            }
-            for (const p of this.particles) {
-                p.x += p.vx * dt;
-                p.y += p.vy * dt;
-                p.vy += 280 * dt;
-                p.life -= dt;
-            }
-            compact(this.particles, alive);
-
-            // Popups
-            for (const p of this.popups) {
-                p.y -= 40 * dt;
-                p.life -= dt;
-            }
-            compact(this.popups, alive);
-
-            // Alert timer
-            if (this.alertTimer > 0) {
-                this.alertTimer -= dt;
-                if (this.alertTimer <= 0) {
-                    document.getElementById('alertPanel').classList.remove('active');
-                }
-            }
-
-            // Flash decay
-            if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 2);
-
-            // Selection ring decay (clicked non-collector pulse)
-            if (this.selectHighlight > 0) this.selectHighlight = Math.max(0, this.selectHighlight - dt * 0.9);
-
-            // Auto-collect tick — every 5 seconds, trigger the full "Collect All"
-            // action (same as the bottom-bar button) when the toggle is on.
-            // Shows the floating numbers but skips the toast so it doesn't spam.
-            if (this.autoCollect) {
-                this._autoCollectAcc = (this._autoCollectAcc || 0) + dt;
-                if (this._autoCollectAcc >= 5) {
-                    this._autoCollectAcc = 0;
-                    this.collectAll(true);
-                }
-            }
-
-            // UI tick (less frequent)
-            this._uiAcc = (this._uiAcc || 0) + dt;
-            if (this._uiAcc >= 0.1) { this._uiAcc = 0; this.updateUI(); }
-        }
-
-        // ---------- Render ----------
-        render() {
-            const ctx = this.ctx;
-            ctx.save();
-            ctx.scale(this.dpr, this.dpr);
-            ctx.clearRect(0, 0, this.vw, this.vh);
-
-            // Sky (screen space)
-            this.drawSky(ctx);
-
-            // World transform
-            ctx.save();
-            ctx.translate(this.cam.x, this.cam.y);
-            ctx.scale(this.cam.zoom, this.cam.zoom);
-
-            this.drawGround(ctx);
-            if (this.buildMode && this.hoverTile) this.drawBuildGhost(ctx);
-            if (this.moveMode && this.hoverTile) this.drawMoveGhost(ctx);
-            if (this.spellMode && this.hoverTile) this.drawSpellGhost(ctx);
-
-            // Defense range indicator for hovered defense building
-            if (this.hoverBuilding && BLD[this.hoverBuilding.type].defense) {
-                const b = this.hoverBuilding;
-                const def = BLD[b.type];
-                const d = def.defense(b.level);
-                const c = this.worldIso(b.tx + def.size / 2, b.ty + def.size / 2);
-                ctx.strokeStyle = 'rgba(255, 200, 87, 0.5)';
-                ctx.lineWidth = 2 / this.cam.zoom;
-                ctx.setLineDash([6 / this.cam.zoom, 6 / this.cam.zoom]);
-                ctx.beginPath();
-                ctx.ellipse(c.x, c.y + CFG.tileH / 2, d.range * CFG.tileW / 2, d.range * CFG.tileH / 2, 0, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-
-            // Depth-sorted draw list. The array is reused and each entity carries
-            // its own depth, so there are no per-frame closures to collect.
-            const draws = this._draws;
-            draws.length = 0;
-            for (const b of this.buildings) {
-                b._depth = b.tx + b.ty + BLD[b.type].size;
-                draws.push(b);
-            }
-            for (const e of this.enemies) {
-                e._depth = e.tx + e.ty + 0.5;
-                draws.push(e);
-            }
-            draws.sort((a, b) => a._depth - b._depth);
-            for (const d of draws) {
-                if (d.kind) this.drawEnemy(ctx, d);   // only enemies have a kind
-                else this.drawBuilding(ctx, d);
-            }
-
-            // Projectiles on top
-            for (const p of this.projectiles) this.drawProjectile(ctx, p);
-
-            // Particles
-            for (const p of this.particles) {
-                const lifeFrac = p.life / p.max;
-                if (p.smoke) {
-                    // Smoke: expands, fades
-                    const a = Math.max(0, lifeFrac * 0.35);
-                    ctx.fillStyle = p.color + a.toFixed(3) + ')';
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, p.size * (2 - lifeFrac), 0, Math.PI * 2);
-                    ctx.fill();
-                } else {
-                    ctx.globalAlpha = lifeFrac;
-                    ctx.fillStyle = p.color;
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, p.size * lifeFrac, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            }
-            ctx.globalAlpha = 1;
-
-            // Floating text popups
-            for (const p of this.popups) {
-                ctx.globalAlpha = Math.min(1, p.life / p.max);
-                ctx.font = 'bold 14px Inter, sans-serif';
-                ctx.fillStyle = p.color;
-                ctx.strokeStyle = 'rgba(0,0,0,.85)';
-                ctx.lineWidth = 3;
-                ctx.textAlign = 'center';
-                ctx.strokeText(p.text, p.x, p.y);
-                ctx.fillText(p.text, p.x, p.y);
-            }
-            ctx.globalAlpha = 1;
-
-            ctx.restore(); // pop world transform
-
-            // Night vignette overlay in screen space
-            this.drawNightOverlay(ctx);
-
-            // Flash effect
-            if (this.flash > 0) {
-                ctx.fillStyle = `rgba(255,255,255,${this.flash})`;
-                ctx.fillRect(0, 0, this.vw, this.vh);
-            }
-
-            // Paused overlay — dimmed backdrop + label in the center of the
-            // canvas. Only shown for user-initiated pauses (not game over,
-            // which has its own modal).
-            if (this.paused && !this.gameOverShown) {
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-                ctx.fillRect(0, 0, this.vw, this.vh);
-                ctx.fillStyle = '#ffe3a1';
-                ctx.font = 'bold 42px Cinzel, serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText('⏸ PAUSED', this.vw / 2, this.vh / 2 - 14);
-                ctx.font = '14px Inter, sans-serif';
-                ctx.fillStyle = '#a7a08a';
-                ctx.fillText('Press P or the Pause button to resume', this.vw / 2, this.vh / 2 + 22);
-            }
-
-            ctx.restore();
-        }
-
-        drawSky(ctx) {
-            const t = this.dayTime;
-            const colors = [
-                { t: 0.00, top: '#020410', bot: '#0a0820' },
-                { t: 0.22, top: '#1c2a50', bot: '#d2623a' },
-                { t: 0.35, top: '#55a7d4', bot: '#d4c896' },
-                { t: 0.50, top: '#62b8e0', bot: '#a9d3a3' },
-                { t: 0.70, top: '#5c72a0', bot: '#c9986c' },
-                { t: 0.82, top: '#3a254a', bot: '#a63a3a' },
-                { t: 1.00, top: '#020410', bot: '#0a0820' },
-            ];
-            let a = colors[0], b = colors[colors.length - 1];
-            for (let i = 0; i < colors.length - 1; i++) {
-                if (t >= colors[i].t && t <= colors[i+1].t) { a = colors[i]; b = colors[i+1]; break; }
-            }
-            const f = (t - a.t) / (b.t - a.t || 1);
-            // The sky only moves a hair per frame; mix the hex strings once per step of the day
-            const q = Math.round(t * 2000);
-            if (!this._skyMix || this._skyMix.q !== q) {
-                this._skyMix = { q, top: mixColor(a.top, b.top, f), bot: mixColor(a.bot, b.bot, f) };
-            }
-            const top = this._skyMix.top;
-            const bot = this._skyMix.bot;
-            // Cache gradient — recompute only when colors change appreciably
-            if (!this._skyCache || this._skyCache.top !== top || this._skyCache.bot !== bot || this._skyCache.h !== this.vh) {
-                const g = ctx.createLinearGradient(0, 0, 0, this.vh);
-                g.addColorStop(0, top);
-                g.addColorStop(1, bot);
-                this._skyCache = { top, bot, h: this.vh, grad: g };
-            }
-            ctx.fillStyle = this._skyCache.grad;
-            ctx.fillRect(0, 0, this.vw, this.vh);
-
-            // Sun / moon — cheap shape, big visual upgrade
-            const dayPhase = Math.sin(Math.PI * t);
-            if (dayPhase > 0.02) {
-                const cx = this.vw * (t * 1.05 - 0.025);
-                const cy = this.vh * (0.75 - dayPhase * 0.55);
-                const isNight = t < 0.25 || t > 0.75;
-                if (!isNight) {
-                    ctx.save();
-                    // One gradient built at the origin and moved into place,
-                    // instead of a new gradient object every frame
-                    if (!this._sunGrad) {
-                        const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, 60);
-                        gg.addColorStop(0, 'rgba(255, 230, 160, 0.9)');
-                        gg.addColorStop(0.3, 'rgba(255, 180, 100, 0.5)');
-                        gg.addColorStop(1, 'rgba(255, 120, 40, 0)');
-                        this._sunGrad = gg;
-                    }
-                    ctx.translate(cx, cy);
-                    ctx.fillStyle = this._sunGrad;
-                    ctx.fillRect(-60, -60, 120, 120);
-                    ctx.fillStyle = '#ffe3a1';
-                    ctx.beginPath();
-                    ctx.arc(0, 0, 14, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.restore();
-                } else {
-                    ctx.save();
-                    ctx.fillStyle = 'rgba(240, 240, 255, 0.9)';
-                    ctx.beginPath();
-                    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
-                    ctx.fill();
-                    // Crater pattern
-                    ctx.fillStyle = 'rgba(180, 180, 210, 0.5)';
-                    ctx.beginPath(); ctx.arc(cx - 3, cy - 2, 2, 0, Math.PI * 2); ctx.fill();
-                    ctx.beginPath(); ctx.arc(cx + 3, cy + 2, 1.5, 0, Math.PI * 2); ctx.fill();
-                    ctx.restore();
-                }
-            }
-
-            // Distant mountains silhouette
-            ctx.save();
-            ctx.fillStyle = `rgba(${Math.floor((1 - f) * 20 + 5)}, ${Math.floor((1 - f) * 25 + 8)}, ${Math.floor((1 - f) * 50 + 20)}, 0.55)`;
-            ctx.beginPath();
-            ctx.moveTo(0, this.vh * 0.7);
-            const peaks = 8;
-            for (let i = 0; i <= peaks; i++) {
-                const px = (this.vw / peaks) * i;
-                const py = this.vh * (0.7 - (Math.sin(i * 1.7) * 0.5 + 0.5) * 0.12);
-                ctx.lineTo(px, py);
-            }
-            ctx.lineTo(this.vw, this.vh);
-            ctx.lineTo(0, this.vh);
-            ctx.closePath();
-            ctx.fill();
-            ctx.restore();
-        }
-
-        drawNightOverlay(ctx) {
-            const t = this.dayTime;
-            let darkness = 0;
-            if (t < 0.2 || t > 0.82) darkness = 0.45;
-            else if (t < 0.3) darkness = (0.3 - t) * 4.5;
-            else if (t > 0.72) darkness = (t - 0.72) * 4.5;
-            if (darkness > 0) {
-                ctx.fillStyle = `rgba(5, 3, 20, ${darkness})`;
-                ctx.fillRect(0, 0, this.vw, this.vh);
-            }
-        }
-
-        drawGround(ctx) {
-            // The ground map never changes — bake it to an offscreen canvas once and blit.
-            this.ensureGroundCache();
-            if (this.groundCache) {
-                // Our cache is painted in world space starting at (cache.offsetX, cache.offsetY).
-                ctx.drawImage(this.groundCache, this.groundCacheOffsetX, this.groundCacheOffsetY);
-            }
-            if (this.hoverTile) {
-                this.drawTileAt(ctx, this.hoverTile.tx, this.hoverTile.ty, null, '#ffc85799', 2);
-            }
-        }
-
-        ensureGroundCache() {
-            if (this.groundCache) return;
-            // World-space bounding box of the full grid + a large scenery frame.
-            const corners = [
-                this.worldIso(0, 0),
-                this.worldIso(CFG.gridW, 0),
-                this.worldIso(CFG.gridW, CFG.gridH),
-                this.worldIso(0, CFG.gridH),
-            ];
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (const p of corners) {
-                if (p.x < minX) minX = p.x;
-                if (p.y < minY) minY = p.y;
-                if (p.x > maxX) maxX = p.x;
-                if (p.y > maxY) maxY = p.y;
-            }
-            // Wide scenery frame so camera pan always shows terrain + decorations.
-            // Computed dynamically so the cache always covers the full viewport at
-            // CFG.zoomMin — this prevents the sky from peeking through when the player
-            // zooms out to the limit.
-            const basePadX = 760;
-            const basePadY = 520;
-            const vwW = this.vw || 1600;
-            const vhH = this.vh || 900;
-            const needPadX = (vwW / CFG.zoomMin) / 2 + 240;
-            const needPadY = (vhH / CFG.zoomMin) / 2 + 240;
-            const padX = Math.max(basePadX, needPadX);
-            const padY = Math.max(basePadY, needPadY);
-            minX -= padX; minY -= padY; maxX += padX; maxY += padY + CFG.tileH;
-            const w = Math.ceil(maxX - minX);
-            const h = Math.ceil(maxY - minY);
-            // Remember the world-space bounds of the cache so camera pan can be
-            // clamped to them — this is what prevents the sky from peeking in
-            // when the user drags the view to the edge on a wide screen.
-            this.cacheMinX = minX;
-            this.cacheMinY = minY;
-            this.cacheMaxX = maxX;
-            this.cacheMaxY = maxY;
-            const cv = document.createElement('canvas');
-            cv.width = w;
-            cv.height = h;
-            const gctx = cv.getContext('2d');
-            // Shift world (0,0) to (offsetX, offsetY) within the cache
-            gctx.translate(-minX, -minY);
-
-            // Pseudo-random per-coord hash without runtime cost at frame time
-            const hash = (x, y) => {
-                let h = (x * 374761393 ^ y * 668265263) >>> 0;
-                h = (h ^ (h >>> 13)) >>> 0;
-                h = (h * 1274126177) >>> 0;
-                return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-            };
-
-            // ===== FAR BACKGROUND — outer "sea of grass / dirt" terrain =====
-            // Base wash so there's no black outside the grid
-            const bgGrad = gctx.createLinearGradient(minX, minY, maxX, maxY);
-            bgGrad.addColorStop(0, '#1f321a');
-            bgGrad.addColorStop(0.5, '#253a1d');
-            bgGrad.addColorStop(1, '#1a2e14');
-            gctx.fillStyle = bgGrad;
-            gctx.fillRect(minX, minY, w, h);
-
-            // Sprinkled darker patches to break the wash up
-            for (let i = 0; i < 260; i++) {
-                const r = hash(i * 13, i * 29);
-                const r2 = hash(i * 17, i * 31);
-                const x = minX + r * w;
-                const y = minY + r2 * h;
-                gctx.fillStyle = `rgba(10, 20, 8, ${0.08 + r * 0.12})`;
-                gctx.beginPath();
-                gctx.ellipse(x, y, 30 + r * 60, 16 + r2 * 30, 0, 0, Math.PI * 2);
-                gctx.fill();
-            }
-
-            // ===== SCENERY OBJECTS in the frame (outside the grid) =====
-            // Determine if a world point is INSIDE the grid (diamond shape)
-            const inGrid = (wx, wy) => {
-                // Convert world point back to tile space
-                const tx = wx / CFG.tileW + wy / CFG.tileH;
-                const ty = -wx / CFG.tileW + wy / CFG.tileH;
-                return tx > -0.5 && tx < CFG.gridW + 0.5 && ty > -0.5 && ty < CFG.gridH + 0.5;
-            };
-
-            const drawTree = (x, y, scale = 1) => {
-                // Dark trunk
-                gctx.fillStyle = '#3a260e';
-                gctx.fillRect(x - 2 * scale, y - 6 * scale, 4 * scale, 10 * scale);
-                // Pine canopy — three stacked triangles
-                const layers = [
-                    { w: 22, h: 14, off: 6 },
-                    { w: 18, h: 12, off: 14 },
-                    { w: 14, h: 10, off: 21 },
-                ];
-                for (const L of layers) {
-                    gctx.fillStyle = '#2c4a1a';
-                    gctx.beginPath();
-                    gctx.moveTo(x, y - (L.off + L.h) * scale);
-                    gctx.lineTo(x + (L.w / 2) * scale, y - L.off * scale);
-                    gctx.lineTo(x - (L.w / 2) * scale, y - L.off * scale);
-                    gctx.closePath();
-                    gctx.fill();
-                    gctx.strokeStyle = 'rgba(0,0,0,0.35)';
-                    gctx.lineWidth = 1;
-                    gctx.stroke();
-                    // Highlight edge
-                    gctx.fillStyle = 'rgba(140, 180, 90, 0.25)';
-                    gctx.beginPath();
-                    gctx.moveTo(x - (L.w / 2) * scale, y - L.off * scale);
-                    gctx.lineTo(x, y - (L.off + L.h) * scale);
-                    gctx.lineTo(x - 2 * scale, y - L.off * scale);
-                    gctx.closePath();
-                    gctx.fill();
-                }
-            };
-
-            const drawRock = (x, y, scale = 1) => {
-                gctx.fillStyle = 'rgba(0,0,0,0.3)';
-                gctx.beginPath();
-                gctx.ellipse(x, y + 3 * scale, 9 * scale, 3 * scale, 0, 0, Math.PI * 2);
-                gctx.fill();
-                const g = gctx.createRadialGradient(x - 2, y - 3, 1, x, y, 10 * scale);
-                g.addColorStop(0, '#8c8890');
-                g.addColorStop(1, '#4a4850');
-                gctx.fillStyle = g;
-                gctx.beginPath();
-                gctx.moveTo(x - 8 * scale, y + 2 * scale);
-                gctx.quadraticCurveTo(x - 10 * scale, y - 6 * scale, x - 2 * scale, y - 7 * scale);
-                gctx.quadraticCurveTo(x + 7 * scale, y - 8 * scale, x + 9 * scale, y - 2 * scale);
-                gctx.quadraticCurveTo(x + 8 * scale, y + 4 * scale, x - 8 * scale, y + 2 * scale);
-                gctx.closePath();
-                gctx.fill();
-                gctx.strokeStyle = 'rgba(0,0,0,0.45)';
-                gctx.lineWidth = 1;
-                gctx.stroke();
-            };
-
-            const drawBush = (x, y) => {
-                gctx.fillStyle = '#2e4e1d';
-                gctx.beginPath();
-                gctx.arc(x, y, 6, 0, Math.PI * 2);
-                gctx.arc(x + 5, y - 2, 5, 0, Math.PI * 2);
-                gctx.arc(x - 5, y - 2, 5, 0, Math.PI * 2);
-                gctx.fill();
-                gctx.strokeStyle = 'rgba(0,0,0,0.35)';
-                gctx.lineWidth = 0.8;
-                gctx.stroke();
-                // Tiny flowers
-                gctx.fillStyle = '#f5d260';
-                gctx.beginPath();
-                gctx.arc(x + 2, y - 3, 1, 0, Math.PI * 2);
-                gctx.arc(x - 3, y - 1, 1, 0, Math.PI * 2);
-                gctx.fill();
-            };
-
-            // Water pool / lake on one side
-            const drawLake = (cx, cy, rx, ry) => {
-                // Shoreline shadow
-                gctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-                gctx.beginPath();
-                gctx.ellipse(cx + 4, cy + 4, rx + 8, ry + 6, 0, 0, Math.PI * 2);
-                gctx.fill();
-                // Water
-                const wg = gctx.createRadialGradient(cx - rx * 0.3, cy - ry * 0.3, 4, cx, cy, Math.max(rx, ry));
-                wg.addColorStop(0, '#5aa9d8');
-                wg.addColorStop(0.5, '#3079b0');
-                wg.addColorStop(1, '#1b4668');
-                gctx.fillStyle = wg;
-                gctx.beginPath();
-                gctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-                gctx.fill();
-                // Reed clumps on the edge
-                for (let i = 0; i < 8; i++) {
-                    const ang = (i / 8) * Math.PI * 2;
-                    const xx = cx + Math.cos(ang) * rx * 0.95;
-                    const yy = cy + Math.sin(ang) * ry * 0.95;
-                    gctx.strokeStyle = '#486b2a';
-                    gctx.lineWidth = 1.5;
-                    gctx.beginPath();
-                    gctx.moveTo(xx - 1, yy);
-                    gctx.lineTo(xx - 1, yy - 8);
-                    gctx.moveTo(xx + 1, yy);
-                    gctx.lineTo(xx + 1, yy - 9);
-                    gctx.moveTo(xx + 3, yy);
-                    gctx.lineTo(xx + 3, yy - 6);
-                    gctx.stroke();
-                }
-                // Water highlight ripple
-                gctx.strokeStyle = 'rgba(255,255,255,0.25)';
-                gctx.lineWidth = 1;
-                gctx.beginPath();
-                gctx.ellipse(cx - rx * 0.2, cy - ry * 0.3, rx * 0.5, ry * 0.25, 0, 0, Math.PI);
-                gctx.stroke();
-            };
-
-            // Lay out scenery deterministically (looks like someone placed it)
-            // Scatter trees heavily in the frame but NEVER inside the playable grid
-            const sceneryBudget = 240;
-            for (let i = 0; i < sceneryBudget; i++) {
-                const rx = hash(i * 19 + 1, i * 5);
-                const ry = hash(i * 23 + 7, i * 11);
-                // Bias toward edges so the playable area stays visually clean
-                const tx = minX + rx * w;
-                const ty = minY + ry * h;
-                if (inGrid(tx, ty)) continue;
-                const kind = hash(i * 3, i * 7);
-                if (kind < 0.55) {
-                    drawTree(tx, ty, 0.8 + hash(i, i * 2) * 0.6);
-                } else if (kind < 0.75) {
-                    drawRock(tx, ty, 0.8 + hash(i, i + 1) * 0.5);
-                } else if (kind < 0.92) {
-                    drawBush(tx, ty);
-                } else {
-                    // Flower cluster
-                    for (let k = 0; k < 5; k++) {
-                        gctx.fillStyle = k % 2 ? '#f5d260' : '#e3a8ff';
-                        gctx.beginPath();
-                        gctx.arc(tx + (hash(i, k) - 0.5) * 14, ty + (hash(k, i) - 0.5) * 8, 1.4, 0, Math.PI * 2);
-                        gctx.fill();
-                    }
-                }
-            }
-
-            // Pond north-east of the grid
-            const gCenter = this.worldIso(CFG.gridW / 2, CFG.gridH / 2);
-            drawLake(gCenter.x + 460, gCenter.y - 340, 120, 60);
-            // Another smaller pond south-west
-            drawLake(gCenter.x - 520, gCenter.y + 220, 90, 48);
-
-            // ===== PLAYABLE GRID (drawn LAST so it sits on top of the scenery wash) =====
-            const palette = [
-                '#2f4b28', '#35582e', '#2a4623', '#3c5f34',
-                '#2d4a2a', '#3a5c30', '#28421f', '#40633a'
-            ];
-            for (let y = 0; y < CFG.gridH; y++) {
-                for (let x = 0; x < CFG.gridW; x++) {
-                    const r = hash(x, y);
-                    const base = palette[Math.floor(r * palette.length)];
-                    this.drawTileAt(gctx, x, y, base, 'rgba(0,0,0,0.22)', 1);
-                    // Scatter cosmetic clutter for visual interest
-                    const rr = hash(x + 97, y + 31);
-                    const p = this.worldIso(x + 0.5, y + 0.5);
-                    if (rr < 0.07) {
-                        gctx.fillStyle = rr < 0.035 ? '#f5d260' : '#e3a8ff';
-                        gctx.beginPath();
-                        gctx.arc(p.x + (rr - 0.035) * 40, p.y + CFG.tileH * 0.3, 1.6, 0, Math.PI * 2);
-                        gctx.fill();
-                    } else if (rr < 0.12) {
-                        gctx.fillStyle = '#6a6a6c';
-                        gctx.beginPath();
-                        gctx.ellipse(p.x - 4, p.y + CFG.tileH * 0.35, 2.2, 1.2, 0, 0, Math.PI * 2);
-                        gctx.fill();
-                    } else if (rr < 0.16) {
-                        gctx.strokeStyle = '#5a8a3a';
-                        gctx.lineWidth = 1;
-                        gctx.beginPath();
-                        gctx.moveTo(p.x - 2, p.y + CFG.tileH * 0.4);
-                        gctx.lineTo(p.x - 2, p.y + CFG.tileH * 0.4 - 3);
-                        gctx.moveTo(p.x, p.y + CFG.tileH * 0.4);
-                        gctx.lineTo(p.x, p.y + CFG.tileH * 0.4 - 4);
-                        gctx.moveTo(p.x + 2, p.y + CFG.tileH * 0.4);
-                        gctx.lineTo(p.x + 2, p.y + CFG.tileH * 0.4 - 3);
-                        gctx.stroke();
-                    }
-                }
-            }
-
-            // Ornate border around the playable grid
-            gctx.strokeStyle = 'rgba(255, 200, 87, 0.32)';
-            gctx.lineWidth = 4;
-            gctx.beginPath();
-            const p0 = this.worldIso(0, 0);
-            const p1 = this.worldIso(CFG.gridW, 0);
-            const p2 = this.worldIso(CFG.gridW, CFG.gridH);
-            const p3 = this.worldIso(0, CFG.gridH);
-            gctx.moveTo(p0.x, p0.y + CFG.tileH / 2);
-            gctx.lineTo(p1.x, p1.y + CFG.tileH / 2);
-            gctx.lineTo(p2.x, p2.y + CFG.tileH / 2);
-            gctx.lineTo(p3.x, p3.y + CFG.tileH / 2);
-            gctx.closePath();
-            gctx.stroke();
-            gctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-            gctx.lineWidth = 2;
-            gctx.stroke();
-
-            this.groundCache = cv;
-            this.groundCacheOffsetX = minX;
-            this.groundCacheOffsetY = minY;
-            // Now that we know the cache bounds, clamp the camera so any stale
-            // pan from before the cache was (re)built is brought back in range.
-            this.clampCamera();
-        }
-
-        // Draws the diamond for tile (tx, ty) in world coords
-        drawTileAt(ctx, tx, ty, fill, stroke, lw = 1) {
-            const p = this.worldIso(tx, ty);
-            const w = CFG.tileW / 2;
-            const h = CFG.tileH / 2;
-            ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
-            ctx.lineTo(p.x + w, p.y + h);
-            ctx.lineTo(p.x, p.y + h * 2);
-            ctx.lineTo(p.x - w, p.y + h);
-            ctx.closePath();
-            if (fill)   { ctx.fillStyle = fill; ctx.fill(); }
-            if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
-        }
-
-        drawBuildGhost(ctx) {
-            const def = BLD[this.buildMode];
-            const { tx, ty } = this.hoverTile;
-            const ok = this.canPlace(this.buildMode, tx, ty) && this.canAfford(def.baseCost);
-            const color = ok ? '#6bff95' : '#ff5d5d';
-            for (let dy = 0; dy < def.size; dy++) {
-                for (let dx = 0; dx < def.size; dx++) {
-                    this.drawTileAt(ctx, tx + dx, ty + dy, color + '33', color + 'cc', 2);
-                }
-            }
-            if (ok) {
-                ctx.globalAlpha = 0.65;
-                this.drawBuilding(ctx, this.ghostFor(this.buildMode, tx, ty, 1, 100, 100));
-                ctx.globalAlpha = 1;
-            }
-        }
-
-        // The build/move previews are drawn every frame: fill in one reusable object
-        ghostFor(type, tx, ty, level, hp, maxHp) {
-            const g = this._ghost || (this._ghost = { ghost: true, animScale: 1 });
-            g.type = type; g.tx = tx; g.ty = ty;
-            g.level = level; g.hp = hp; g.maxHp = maxHp;
-            return g;
-        }
-
-        drawMoveGhost(ctx) {
-            const def = BLD[this.moveMode.type];
-            const { tx, ty } = this.hoverTile;
-            // Temporarily hide the building so canPlace can see this tile as empty
-            const origTx = this.moveMode.tx, origTy = this.moveMode.ty;
-            this.moveMode.tx = -999; this.moveMode.ty = -999;
-            const ok = this.canPlace(this.moveMode.type, tx, ty);
-            this.moveMode.tx = origTx; this.moveMode.ty = origTy;
-            const color = ok ? '#5cd8ff' : '#ff5d5d';
-            // Thick pulsing snap indicator on the target tile(s) — very
-            // prominent so the drop target is obvious at a glance.
-            const pulse = 0.5 + 0.5 * Math.sin(this.tnow * 6);
-            const fillAlpha = ok ? (0x88 + Math.floor(pulse * 0x55)) : 0x88;
-            const fillHex = color + Math.min(0xff, fillAlpha).toString(16).padStart(2, '0');
-            for (let dy = 0; dy < def.size; dy++) {
-                for (let dx = 0; dx < def.size; dx++) {
-                    this.drawTileAt(ctx, tx + dx, ty + dy, fillHex, color, 4);
-                }
-            }
-            // Extra glowing outer ring around the target footprint
-            if (ok) {
-                ctx.save();
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 2 + pulse * 2;
-                ctx.globalAlpha = 0.6 + pulse * 0.4;
-                const cx = this.worldIso(tx + def.size / 2, ty + def.size / 2);
-                ctx.beginPath();
-                ctx.ellipse(cx.x, cx.y + CFG.tileH / 2, CFG.tileW * def.size * 0.65, CFG.tileH * def.size * 0.65, 0, 0, Math.PI * 2);
-                ctx.stroke();
-                ctx.restore();
-            }
-            // Draw a mostly-opaque ghost of the building at the target tile so
-            // the player clearly sees exactly what/where it'll land.
-            if (ok) {
-                ctx.save();
-                ctx.globalAlpha = 0.9;
-                const m = this.moveMode;
-                this.drawBuilding(ctx, this.ghostFor(m.type, tx, ty, m.level, m.hp, m.maxHp));
-                ctx.restore();
-            }
-        }
-
-        drawSpellGhost(ctx) {
-            const { tx, ty } = this.hoverTile;
-            const c = this.worldIso(tx + 0.5, ty + 0.5);
-            ctx.save();
-            ctx.globalAlpha = 0.5;
-            ctx.strokeStyle = '#a6ecff';
-            ctx.lineWidth = 3 / this.cam.zoom;
-            ctx.setLineDash([8 / this.cam.zoom, 4 / this.cam.zoom]);
-            ctx.beginPath();
-            ctx.ellipse(c.x, c.y + CFG.tileH / 2, CFG.spellRadius * CFG.tileW / 2, CFG.spellRadius * CFG.tileH / 2, 0, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.restore();
-        }
-
-        drawBuilding(ctx, b) {
+        // ---------- clicks, spells, abilities ----------
+        collectFrom(b) {
             const def = BLD[b.type];
-            const size = def.size;
-            const scale = b.animScale ?? 1;
-            // If this building is currently being drag-moved AND we're rendering the
-            // original (not the ghost), fade it almost out so the target ghost
-            // is the clear focus.
-            const isDraggedSource = this.input?.dragMove && this.moveMode === b && !b.ghost;
-            // During any drag-move operation, fade ALL other buildings down
-            // hard so the player can clearly see open tiles through the crowd.
-            const anyDragging = this.input?.dragMove && !b.ghost;
-            let savedAlpha = false;
-            if (isDraggedSource) {
-                ctx.save();
-                ctx.globalAlpha = 0.12;
-                savedAlpha = true;
-            } else if (anyDragging && this.moveMode !== b) {
-                ctx.save();
-                ctx.globalAlpha = 0.3;
-                savedAlpha = true;
+            if (!def.clickBonus) return;
+            if (this.combo.time > 0) this.combo.count++; else this.combo.count = 1;
+            this.combo.time = CFG.comboWindow;
+            this.combo.mult = this.combo.count >= 10 ? 3 : this.combo.count >= 6 ? 2 : this.combo.count >= 3 ? 1.5 : 1;
+            if (this.combo.count > this.stats.maxCombo) this.stats.maxCombo = this.combo.count;
+            const p = this.centerOf(b);
+            const bonus = def.clickBonus(b.level);
+            let i = 0;
+            for (const [k, v] of Object.entries(bonus)) {
+                const mul = this.boost.mult * this.combo.mult * (k === 'gold' ? this.goldMult : 1) * this.prodMult();
+                const amt = Math.floor(v * mul);
+                const got = this.addRes(k, amt);
+                if (k === 'gold') this.stats.goldEarned += got;
+                this.floatText(got < amt && got === 0 ? 'FULL' : `+${fmt(amt)}`, p.x, p.y - 48 - i * 14, got === 0 ? '#ff9a6b' : this.resColor(k));
+                for (let n = 0; n < 4; n++) this.particles.push({ x: p.x + rand(-8, 8), y: p.y - 24, vx: rand(-40, 40), vy: -rand(90, 150), life: 0.9, max: 0.9, color: this.resColor(k), size: 4, kind: 'coin' });
+                i++;
             }
-            // Per-building idle bob so the village doesn't feel static
-            if (b._seed === undefined) b._seed = Math.random() * Math.PI * 2;
-            const idleBob = Math.sin(this.tnow * 1.4 + b._seed) * 0.6;
-            const centerP = this.worldIso(b.tx + size / 2, b.ty + size / 2);
-            centerP.y += idleBob;
-            const fw = CFG.tileW * size / 2;
-            const fh = CFG.tileH * size / 2;
-
-            // Walls get their own dedicated rendering — proper stone block faces
-            // with crenellations on top instead of the generic building shape.
-            const isWall = b.type === 'wall';
-
-            // Layered shadow (softer inner + harder outer for depth)
-            ctx.fillStyle = 'rgba(0,0,0,.22)';
-            ctx.beginPath();
-            ctx.ellipse(centerP.x, centerP.y + fh * 0.3, fw * 1.0, fh * 0.65, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = 'rgba(0,0,0,.45)';
-            ctx.beginPath();
-            ctx.ellipse(centerP.x, centerP.y + fh * 0.25, fw * 0.8, fh * 0.5, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Buildings grow slightly taller as they level up — another
-            // glance-level cue that a structure has been upgraded.
-            const lvlProgress = Math.min(1, ((b.level || 1) - 1) / Math.max(1, (def.maxLevel || 20) - 1));
-            const heightMult = 1 + lvlProgress * 0.28;
-            const h = this.buildHeight(b.type) * scale * heightMult;
-
-            if (isWall) {
-                this.drawWall(ctx, b, centerP, h, fw, fh);
-            } else {
-                // Per-level color shift — buildings evolve visibly every few levels.
-                // Low levels use their defined colors; mid levels get a strong
-                // darken + saturation boost; high levels get a brilliant gold
-                // wash on the roof. Shifts are aggressive enough that you can
-                // tell a Lv 1 from a Lv 5 at a glance.
-                const lvl = b.level || 1;
-                // The three mixed colors only change on upgrade, so they live on
-                // the building instead of being re-mixed from hex every frame
-                if (!b._col || b._col.level !== lvl || b._col.type !== b.type) {
-                    const maxLv = def.maxLevel || 20;
-                    const progress = Math.min(1, (lvl - 1) / Math.max(1, maxLv - 1));
-                    b._col = {
-                        level: lvl, type: b.type,
-                        // Darken right face toward a rich shadow color (up to 55%)
-                        c1: progress > 0 ? mixColor(def.color1, '#0a0410', progress * 0.55) : def.color1,
-                        // Left face shifts toward a warm ember tone as buildings grow
-                        c2: progress > 0 ? mixColor(def.color2, '#4a1808', progress * 0.45) : def.color2,
-                        // Roof shifts toward a brilliant gold tone
-                        rf: progress > 0 ? mixColor(def.roof, '#ffc857', Math.min(0.8, progress * 0.85)) : def.roof,
-                    };
-                }
-                const { c1, c2, rf } = b._col;
-
-                // Right face
-                ctx.fillStyle = c1;
-                ctx.beginPath();
-                ctx.moveTo(centerP.x, centerP.y + fh);
-                ctx.lineTo(centerP.x + fw, centerP.y);
-                ctx.lineTo(centerP.x + fw, centerP.y - h);
-                ctx.lineTo(centerP.x, centerP.y + fh - h);
-                ctx.closePath();
-                ctx.fill();
-                ctx.strokeStyle = 'rgba(0,0,0,.35)';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-
-                // Left face
-                ctx.fillStyle = c2;
-                ctx.beginPath();
-                ctx.moveTo(centerP.x, centerP.y + fh);
-                ctx.lineTo(centerP.x - fw, centerP.y);
-                ctx.lineTo(centerP.x - fw, centerP.y - h);
-                ctx.lineTo(centerP.x, centerP.y + fh - h);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-
-                // Top diamond
-                ctx.fillStyle = rf;
-                ctx.beginPath();
-                ctx.moveTo(centerP.x, centerP.y - fh - h);
-                ctx.lineTo(centerP.x + fw, centerP.y - h);
-                ctx.lineTo(centerP.x, centerP.y + fh - h);
-                ctx.lineTo(centerP.x - fw, centerP.y - h);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-
-                // Roof shine line (hand-painted highlight)
-                ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-                ctx.lineWidth = 1.2;
-                ctx.beginPath();
-                ctx.moveTo(centerP.x - fw * 0.6, centerP.y - h - fh * 0.3);
-                ctx.lineTo(centerP.x, centerP.y - fh - h + 2);
-                ctx.stroke();
-
-                // Shared wall decorations — plank/brick lines + windows that glow at night.
-                if (!b.ghost) {
-                    this.drawBuildingBody(ctx, b, centerP, h, fw, fh);
-                }
-
-                // Type-specific details
-                this.drawBuildingDetail(ctx, b, centerP, h, fw, fh);
-
-                // ---------- LEVEL MILESTONE ACCENTS ----------
-                // Every 5 levels the building earns a visible upgrade accent so
-                // progression is readable at a glance without opening the modal.
-                if (!b.ghost) {
-                    const lv = b.level || 1;
-                    // Gold trim line on the roof seam at level 5+
-                    if (lv >= 5) {
-                        ctx.strokeStyle = '#ffc857';
-                        ctx.lineWidth = 1.5;
-                        ctx.beginPath();
-                        ctx.moveTo(centerP.x - fw, centerP.y - h);
-                        ctx.lineTo(centerP.x, centerP.y - fh - h);
-                        ctx.lineTo(centerP.x + fw, centerP.y - h);
-                        ctx.stroke();
-                    }
-                    // Pair of pennant flags at level 10+
-                    if (lv >= 10) {
-                        const flagY = centerP.y - h - fh - 10;
-                        // Left flag
-                        ctx.strokeStyle = '#c0a060';
-                        ctx.lineWidth = 1.5;
-                        ctx.beginPath();
-                        ctx.moveTo(centerP.x - fw * 0.45, centerP.y - h - fh * 0.3);
-                        ctx.lineTo(centerP.x - fw * 0.45, flagY);
-                        ctx.stroke();
-                        ctx.fillStyle = '#c73535';
-                        ctx.beginPath();
-                        ctx.moveTo(centerP.x - fw * 0.45, flagY);
-                        ctx.lineTo(centerP.x - fw * 0.45 + 8, flagY + 3);
-                        ctx.lineTo(centerP.x - fw * 0.45, flagY + 6);
-                        ctx.closePath();
-                        ctx.fill();
-                        // Right flag
-                        ctx.strokeStyle = '#c0a060';
-                        ctx.beginPath();
-                        ctx.moveTo(centerP.x + fw * 0.45, centerP.y - h - fh * 0.3);
-                        ctx.lineTo(centerP.x + fw * 0.45, flagY);
-                        ctx.stroke();
-                        ctx.fillStyle = '#c73535';
-                        ctx.beginPath();
-                        ctx.moveTo(centerP.x + fw * 0.45, flagY);
-                        ctx.lineTo(centerP.x + fw * 0.45 - 8, flagY + 3);
-                        ctx.lineTo(centerP.x + fw * 0.45, flagY + 6);
-                        ctx.closePath();
-                        ctx.fill();
-                    }
-                    // Golden crown marker at level 15+
-                    if (lv >= 15) {
-                        ctx.fillStyle = '#ffe3a1';
-                        ctx.font = 'bold 12px Cinzel, serif';
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.fillText('♛', centerP.x, centerP.y - h - fh - 20);
-                    }
-                    // Ember halo pulse at level 20+ (max-tier aesthetic)
-                    if (lv >= 20) {
-                        const pulse = 0.5 + 0.5 * Math.sin(this.tnow * 2 + (b._seed || 0));
-                        ctx.strokeStyle = `rgba(255, 107, 53, ${0.3 + pulse * 0.3})`;
-                        ctx.lineWidth = 1.5;
-                        ctx.beginPath();
-                        ctx.ellipse(centerP.x, centerP.y + fh * 0.2, fw * 1.1, fh * 0.65, 0, 0, Math.PI * 2);
-                        ctx.stroke();
-                    }
-                }
-            }
-
-            // Chimney smoke for buildings with clickBonus / production — rises continuously
-            if (!b.ghost && (def.production || b.type === 'builderhut' || b.type === 'lab')) {
-                this.spawnChimneyPuff(b, centerP, h, fw);
-            }
-
-            if (b.ghost) return;
-
-            // Level badge — small circle tucked against the top-right of the
-            // building. Tiny like Clash of Clans (not a big floating tag).
-            // The polygon hex hit-test already covers the whole building shape,
-            // so this is purely visual — no need for a separate hit target.
-            const badgeX = centerP.x + fw * 0.42;
-            const badgeY = centerP.y - h - fh * 0.12;
-            ctx.fillStyle = 'rgba(0,0,0,.8)';
-            ctx.beginPath();
-            ctx.arc(badgeX, badgeY, 9, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = '#ffc857';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.fillStyle = '#ffc857';
-            ctx.font = 'bold 9px Inter, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(b.level, badgeX, badgeY);
-
-            // HP bar
-            if (b.hp < b.maxHp) {
-                const bw = fw * 1.5;
-                const bh = 5;
-                const bx = centerP.x - bw / 2;
-                const by = centerP.y - fh - h - 18;
-                ctx.fillStyle = 'rgba(0,0,0,.75)';
-                ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
-                ctx.fillStyle = '#3a1010';
-                ctx.fillRect(bx, by, bw, bh);
-                const pct = Math.max(0, b.hp / b.maxHp);
-                const col = pct > 0.5 ? '#6bff95' : pct > 0.25 ? '#ffc857' : '#ff5d5d';
-                ctx.fillStyle = col;
-                ctx.fillRect(bx, by, bw * pct, bh);
-            }
-
-            // Move mode highlight
-            if (this.moveMode === b) {
-                ctx.strokeStyle = '#5cd8ff';
-                ctx.lineWidth = 3;
-                ctx.setLineDash([6, 4]);
-                ctx.beginPath();
-                ctx.moveTo(centerP.x, centerP.y - h - fh);
-                ctx.lineTo(centerP.x + fw, centerP.y - h);
-                ctx.lineTo(centerP.x, centerP.y - h + fh);
-                ctx.lineTo(centerP.x - fw, centerP.y - h);
-                ctx.closePath();
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-
-            // Selection pulse ring (fades out after left-click on a non-collector)
-            if (this.selectedBuilding === b && this.selectHighlight > 0) {
-                const s = this.selectHighlight;
-                ctx.save();
-                ctx.globalAlpha = s * 0.9;
-                ctx.strokeStyle = '#ffe3a1';
-                ctx.lineWidth = 2.5 + (1 - s) * 3;
-                ctx.beginPath();
-                ctx.ellipse(
-                    centerP.x,
-                    centerP.y + fh * 0.25,
-                    fw * (0.85 + (1 - s) * 0.35),
-                    fh * (0.55 + (1 - s) * 0.25),
-                    0, 0, Math.PI * 2
-                );
-                ctx.stroke();
-                ctx.restore();
-            }
-
-            if (savedAlpha) ctx.restore();
-        }
-
-        buildHeight(type) {
-            return ({
-                townhall: 78, goldmine: 40, elixirwell: 42, darkdrill: 48,
-                wall: 22,
-                cannon: 38, archer: 58, mortar: 44, airdef: 58,
-                wizard: 54, tesla: 52, xbow: 48, inferno: 62,
-                storage: 46, builderhut: 36, lab: 46, clancastle: 72, armycamp: 40,
-            })[type] || 40;
-        }
-
-        /**
-         * Dedicated wall renderer — replaces the generic building shape with a
-         * chunky stone rampart: two-tone stone block faces, mortared seams, and
-         * proper merlon crenellations along the top back edges.
-         */
-        drawWall(ctx, b, c, h, fw, fh) {
-            // Stone palette — slight level-based tint (walls look stronger as they level)
-            const level = Math.max(1, b.level || 1);
-            const tint = Math.min(0.25, (level - 1) * 0.03);
-            const lerp = (a, t) => Math.round(a + (90 - a) * t);
-            const rightR = lerp(0x6a, tint), rightG = lerp(0x6a, tint), rightB = lerp(0x74, tint);
-            const leftR  = lerp(0x3c, tint), leftG  = lerp(0x3c, tint), leftB  = lerp(0x46, tint);
-            const topR   = lerp(0x84, tint), topG   = lerp(0x84, tint), topB   = lerp(0x90, tint);
-            const rightFill = `rgb(${rightR},${rightG},${rightB})`;
-            const leftFill  = `rgb(${leftR},${leftG},${leftB})`;
-            const topFill   = `rgb(${topR},${topG},${topB})`;
-            const mortar    = 'rgba(12,12,16,0.75)';
-            const edge      = 'rgba(0,0,0,0.6)';
-
-            // ---------- RIGHT FACE (lit side) ----------
-            ctx.fillStyle = rightFill;
-            ctx.beginPath();
-            ctx.moveTo(c.x, c.y + fh);
-            ctx.lineTo(c.x + fw, c.y);
-            ctx.lineTo(c.x + fw, c.y - h);
-            ctx.lineTo(c.x, c.y + fh - h);
-            ctx.closePath();
-            ctx.fill();
-
-            // Stone block seams on right face — one horizontal mid-seam + staggered
-            // verticals to imply bricks without drawing every block individually
-            ctx.strokeStyle = mortar;
-            ctx.lineWidth = 1;
-            // Horizontal mid-seam: from (c.x, c.y+fh-h*0.5) to (c.x+fw, c.y-h*0.5)
-            ctx.beginPath();
-            ctx.moveTo(c.x, c.y + fh - h * 0.5);
-            ctx.lineTo(c.x + fw, c.y - h * 0.5);
-            ctx.stroke();
-            // Top-row vertical seam at ~1/3 across
-            ctx.beginPath();
-            let tx = 0.38;
-            ctx.moveTo(c.x + fw * tx, c.y + fh * (1 - tx));
-            ctx.lineTo(c.x + fw * tx, c.y + fh * (1 - tx) - h * 0.5);
-            ctx.stroke();
-            // Top-row vertical seam at ~2/3 across
-            ctx.beginPath();
-            tx = 0.72;
-            ctx.moveTo(c.x + fw * tx, c.y + fh * (1 - tx));
-            ctx.lineTo(c.x + fw * tx, c.y + fh * (1 - tx) - h * 0.5);
-            ctx.stroke();
-            // Bottom-row verticals staggered for brick offset
-            ctx.beginPath();
-            tx = 0.22;
-            ctx.moveTo(c.x + fw * tx, c.y + fh * (1 - tx) - h * 0.5);
-            ctx.lineTo(c.x + fw * tx, c.y + fh * (1 - tx) - h);
-            ctx.stroke();
-            ctx.beginPath();
-            tx = 0.55;
-            ctx.moveTo(c.x + fw * tx, c.y + fh * (1 - tx) - h * 0.5);
-            ctx.lineTo(c.x + fw * tx, c.y + fh * (1 - tx) - h);
-            ctx.stroke();
-
-            // Right face outline
-            ctx.strokeStyle = edge;
-            ctx.lineWidth = 1.2;
-            ctx.beginPath();
-            ctx.moveTo(c.x, c.y + fh);
-            ctx.lineTo(c.x + fw, c.y);
-            ctx.lineTo(c.x + fw, c.y - h);
-            ctx.lineTo(c.x, c.y + fh - h);
-            ctx.closePath();
-            ctx.stroke();
-
-            // ---------- LEFT FACE (shadow side) ----------
-            ctx.fillStyle = leftFill;
-            ctx.beginPath();
-            ctx.moveTo(c.x, c.y + fh);
-            ctx.lineTo(c.x - fw, c.y);
-            ctx.lineTo(c.x - fw, c.y - h);
-            ctx.lineTo(c.x, c.y + fh - h);
-            ctx.closePath();
-            ctx.fill();
-
-            ctx.strokeStyle = mortar;
-            ctx.lineWidth = 1;
-            // Horizontal mid-seam
-            ctx.beginPath();
-            ctx.moveTo(c.x, c.y + fh - h * 0.5);
-            ctx.lineTo(c.x - fw, c.y - h * 0.5);
-            ctx.stroke();
-            // Top-row vertical seams
-            ctx.beginPath();
-            tx = 0.38;
-            ctx.moveTo(c.x - fw * tx, c.y + fh * (1 - tx));
-            ctx.lineTo(c.x - fw * tx, c.y + fh * (1 - tx) - h * 0.5);
-            ctx.stroke();
-            ctx.beginPath();
-            tx = 0.72;
-            ctx.moveTo(c.x - fw * tx, c.y + fh * (1 - tx));
-            ctx.lineTo(c.x - fw * tx, c.y + fh * (1 - tx) - h * 0.5);
-            ctx.stroke();
-            // Bottom-row verticals
-            ctx.beginPath();
-            tx = 0.22;
-            ctx.moveTo(c.x - fw * tx, c.y + fh * (1 - tx) - h * 0.5);
-            ctx.lineTo(c.x - fw * tx, c.y + fh * (1 - tx) - h);
-            ctx.stroke();
-            ctx.beginPath();
-            tx = 0.55;
-            ctx.moveTo(c.x - fw * tx, c.y + fh * (1 - tx) - h * 0.5);
-            ctx.lineTo(c.x - fw * tx, c.y + fh * (1 - tx) - h);
-            ctx.stroke();
-
-            ctx.strokeStyle = edge;
-            ctx.lineWidth = 1.2;
-            ctx.beginPath();
-            ctx.moveTo(c.x, c.y + fh);
-            ctx.lineTo(c.x - fw, c.y);
-            ctx.lineTo(c.x - fw, c.y - h);
-            ctx.lineTo(c.x, c.y + fh - h);
-            ctx.closePath();
-            ctx.stroke();
-
-            // ---------- TOP WALKWAY ----------
-            ctx.fillStyle = topFill;
-            ctx.beginPath();
-            ctx.moveTo(c.x, c.y - fh - h);
-            ctx.lineTo(c.x + fw, c.y - h);
-            ctx.lineTo(c.x, c.y + fh - h);
-            ctx.lineTo(c.x - fw, c.y - h);
-            ctx.closePath();
-            ctx.fill();
-            ctx.strokeStyle = edge;
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
-
-            // Subtle inner highlight on the top so it reads as a walkway
-            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(c.x - fw * 0.85, c.y - h - fh * 0.1);
-            ctx.lineTo(c.x, c.y - fh - h + 2);
-            ctx.stroke();
-
-            // ---------- CRENELLATIONS (merlons) ----------
-            // A row of chunky merlons along the two back edges of the top diamond.
-            // Back-right edge: from back point (c.x, c.y-fh-h) → right point (c.x+fw, c.y-h)
-            // Back-left edge:  from back point (c.x, c.y-fh-h) → left point (c.x-fw, c.y-h)
-            const merlonH = 6;
-            const merlonHalfW = 4;
-            const drawMerlon = (mx, my) => {
-                // Front face (facing camera)
-                ctx.fillStyle = rightFill;
-                ctx.beginPath();
-                ctx.moveTo(mx - merlonHalfW, my - merlonH);
-                ctx.lineTo(mx + merlonHalfW, my - merlonH);
-                ctx.lineTo(mx + merlonHalfW, my);
-                ctx.lineTo(mx - merlonHalfW, my);
-                ctx.closePath();
-                ctx.fill();
-                ctx.strokeStyle = edge;
-                ctx.stroke();
-                // Tiny top highlight
-                ctx.fillStyle = topFill;
-                ctx.fillRect(mx - merlonHalfW, my - merlonH - 1, merlonHalfW * 2, 1.5);
-            };
-
-            // Back-right edge merlons
-            for (let k = 0; k < 3; k++) {
-                const t = 0.2 + k * 0.3;
-                const mx = c.x + fw * t;
-                const my = c.y - h - fh * (1 - t);
-                drawMerlon(mx, my);
-            }
-            // Back-left edge merlons
-            for (let k = 0; k < 3; k++) {
-                const t = 0.2 + k * 0.3;
-                const mx = c.x - fw * t;
-                const my = c.y - h - fh * (1 - t);
-                drawMerlon(mx, my);
-            }
-
-            // Small moss tuft on the base for character
-            ctx.fillStyle = '#5a8a3a';
-            ctx.beginPath();
-            ctx.arc(c.x - fw * 0.5, c.y - h * 0.2, 1.3, 0, Math.PI * 2);
-            ctx.arc(c.x + fw * 0.45, c.y - h * 0.75, 1.3, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        /** Paints the visible wall faces with plank/brick lines + glowing windows. */
-        drawBuildingBody(ctx, b, c, h, fw, fh) {
-            // RIGHT FACE (runs from (c.x, c.y+fh) → (c.x+fw, c.y) with height h upward)
-            // LEFT FACE  (runs from (c.x, c.y+fh) → (c.x-fw, c.y) with height h upward)
-            // Stones/planks: horizontal lines at fractional heights
-            ctx.save();
-            // Plank lines on right face
-            ctx.strokeStyle = 'rgba(0,0,0,0.28)';
-            ctx.lineWidth = 1;
-            for (let t = 0.25; t < 1; t += 0.32) {
-                const y = -h * t;
-                ctx.beginPath();
-                ctx.moveTo(c.x + 2, c.y + fh - h * t - (fh * t));
-                // Easier: draw along the face's top edge at fraction t down from top.
-                ctx.moveTo(c.x, c.y + fh + y);
-                ctx.lineTo(c.x + fw, c.y + y);
-                ctx.moveTo(c.x, c.y + fh + y);
-                ctx.lineTo(c.x - fw, c.y + y);
-                ctx.stroke();
-            }
-
-            // Windows — warm glow at night, dim plank at day
-            const isNight = this.dayTime < 0.25 || this.dayTime > 0.78;
-            const winFill = isNight ? '#ffcc6a' : '#1a140a';
-            const glow = isNight ? 'rgba(255, 204, 106, 0.45)' : 'rgba(0,0,0,0.2)';
-            // Lookup from hoisted module-level WINDOW_SPEC (see top of file)
-            const spec = WINDOW_SPEC[b.type] || [];
-            for (const w of spec) {
-                // Compute window center on the given face
-                // Right face parametric: from (c.x + fw, c.y) along to (c.x, c.y + fh), lifted by -h*v
-                let wx, wy;
-                if (w.face === 'R') {
-                    wx = c.x + fw * (1 - w.u);
-                    wy = c.y + fh * w.u - h * w.v;
-                } else {
-                    wx = c.x - fw * (1 - w.u);
-                    wy = c.y + fh * w.u - h * w.v;
-                }
-                if (isNight) {
-                    // Soft glow halo
-                    ctx.fillStyle = glow;
-                    ctx.beginPath();
-                    ctx.arc(wx, wy, 5 * w.s, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                ctx.fillStyle = winFill;
-                ctx.fillRect(wx - 1.6 * w.s, wy - 2.4 * w.s, 3.2 * w.s, 4.8 * w.s);
-                // Frame cross
-                ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-                ctx.lineWidth = 0.8;
-                ctx.beginPath();
-                ctx.moveTo(wx - 1.6 * w.s, wy);
-                ctx.lineTo(wx + 1.6 * w.s, wy);
-                ctx.moveTo(wx, wy - 2.4 * w.s);
-                ctx.lineTo(wx, wy + 2.4 * w.s);
-                ctx.stroke();
-            }
-            ctx.restore();
-        }
-
-        /** Emits smoke puff particles from a chimney on top of the building, throttled per building. */
-        spawnChimneyPuff(b, c, h, fw) {
-            if (b._nextSmoke === undefined) b._nextSmoke = this.tnow + Math.random() * 2;
-            if (this.tnow < b._nextSmoke) return;
-            b._nextSmoke = this.tnow + rand(0.9, 1.6);
-            // Cap particles for perf
-            if (this.particles.length > 200) return;
-            const cx = c.x + fw * 0.35;
-            const cy = c.y - h - 6;
-            this.particles.push({
-                x: cx + rand(-2, 2),
-                y: cy,
-                vx: rand(-8, 14),
-                vy: rand(-28, -18),
-                life: rand(1.6, 2.6),
-                max: 2.6,
-                color: 'rgba(220,220,225,',
-                size: rand(3, 5),
-                smoke: true,
-            });
-        }
-
-        drawBuildingDetail(ctx, b, c, h, fw, fh) {
-            ctx.save();
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-
-            switch (b.type) {
-                case 'townhall': {
-                    ctx.fillStyle = '#d4c0a0';
-                    ctx.fillRect(c.x - 2, c.y - h - fh - 26, 3, 26);
-                    ctx.fillStyle = '#c73535';
-                    ctx.beginPath();
-                    ctx.moveTo(c.x + 1, c.y - h - fh - 26);
-                    ctx.lineTo(c.x + 24, c.y - h - fh - 21);
-                    ctx.lineTo(c.x + 1, c.y - h - fh - 16);
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.fillStyle = '#ffc857';
-                    ctx.font = 'bold 26px Cinzel, serif';
-                    ctx.fillText('♔', c.x, c.y - h * 0.4);
-                    break;
-                }
-                case 'goldmine': {
-                    for (let i = 0; i < 4; i++) {
-                        ctx.fillStyle = i % 2 ? '#ffc857' : '#d49b20';
-                        ctx.beginPath();
-                        ctx.arc(c.x - 5 + i * 3, c.y - h - fh * 0.3 - i * 2, 4, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-                    ctx.fillStyle = '#ffe3a1';
-                    ctx.font = 'bold 14px Inter';
-                    ctx.fillText('◈', c.x, c.y - h * 0.35);
-                    break;
-                }
-                case 'elixirwell': {
-                    ctx.fillStyle = '#e3a8ff';
-                    ctx.beginPath();
-                    ctx.ellipse(c.x, c.y - h - fh * 0.2, fw * 0.35, fh * 0.45, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                    for (let i = 0; i < 3; i++) {
-                        ctx.fillStyle = '#f5d5ff';
-                        ctx.beginPath();
-                        ctx.arc(c.x - 6 + i * 6 + Math.sin(this.tnow * 3.3 + i) * 2, c.y - h - fh * 0.3 - (i * 2), 2, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-                    break;
-                }
-                case 'darkdrill': {
-                    ctx.fillStyle = '#8a4de0';
-                    ctx.font = 'bold 18px Inter';
-                    ctx.fillText('✦', c.x, c.y - h * 0.35);
-                    ctx.strokeStyle = '#3e1d66';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    for (let i = 0; i < 5; i++) {
-                        ctx.moveTo(c.x - 5, c.y - h - fh * 0.2 - i * 3);
-                        ctx.lineTo(c.x + 5, c.y - h - fh * 0.2 - i * 3);
-                    }
-                    ctx.stroke();
-                    break;
-                }
-                case 'cannon': {
-                    ctx.strokeStyle = '#1a1a1a';
-                    ctx.lineWidth = 8;
-                    ctx.lineCap = 'round';
-                    ctx.beginPath();
-                    ctx.moveTo(c.x - 8, c.y - h - fh * 0.15);
-                    ctx.lineTo(c.x + 14, c.y - h - fh * 0.55);
-                    ctx.stroke();
-                    ctx.fillStyle = '#444';
-                    ctx.beginPath();
-                    ctx.arc(c.x - 8, c.y - h - fh * 0.15, 4, 0, Math.PI * 2);
-                    ctx.fill();
-                    break;
-                }
-                case 'archer': {
-                    ctx.fillStyle = '#e0c896';
-                    ctx.fillRect(c.x - 2, c.y - h - fh * 0.5, 4, 10);
-                    ctx.strokeStyle = '#8b6b3d';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.arc(c.x + 6, c.y - h - fh * 0.45, 6, -Math.PI/2, Math.PI/2);
-                    ctx.stroke();
-                    ctx.fillStyle = '#5a3c1f';
-                    for (let i = -2; i <= 2; i++) ctx.fillRect(c.x + i * 6 - 2, c.y - h - fh * 0.15, 4, 4);
-                    break;
-                }
-                case 'mortar': {
-                    // Thick short barrel pointing up
-                    ctx.fillStyle = '#1a1c28';
-                    ctx.beginPath();
-                    ctx.ellipse(c.x, c.y - h - fh * 0.25, 10, 6, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.strokeStyle = '#0a0c16';
-                    ctx.lineWidth = 1.5;
-                    ctx.stroke();
-                    ctx.fillStyle = '#3a3f55';
-                    ctx.beginPath();
-                    ctx.arc(c.x, c.y - h - fh * 0.4, 6, 0, Math.PI * 2);
-                    ctx.fill();
-                    break;
-                }
-                case 'airdef': {
-                    // Missile launcher with 3 tubes
-                    for (let i = -1; i <= 1; i++) {
-                        ctx.fillStyle = '#1a2610';
-                        ctx.fillRect(c.x + i * 6 - 2, c.y - h - fh * 0.55, 4, 16);
-                        ctx.fillStyle = '#89c055';
-                        ctx.beginPath();
-                        ctx.arc(c.x + i * 6, c.y - h - fh * 0.55, 2.5, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-                    break;
-                }
-                case 'wizard': {
-                    const t = this.tnow * 2.5;
-                    const r = 8 + Math.sin(t) * 2;
-                    // Use a solid fill instead of a per-frame radial gradient — cheaper
-                    // and visually nearly identical once layered with the white core.
-                    ctx.fillStyle = 'rgba(92, 216, 255, 0.55)';
-                    ctx.beginPath();
-                    ctx.arc(c.x, c.y - h - fh * 0.4, r + 4, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.fillStyle = 'rgba(166, 236, 255, 0.85)';
-                    ctx.beginPath();
-                    ctx.arc(c.x, c.y - h - fh * 0.4, r + 1, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.fillStyle = '#ffffff';
-                    ctx.beginPath();
-                    ctx.arc(c.x, c.y - h - fh * 0.4, 3, 0, Math.PI * 2);
-                    ctx.fill();
-                    break;
-                }
-                case 'tesla': {
-                    // Crackling lightning coil
-                    const t = this.tnow * 8.3;
-                    ctx.strokeStyle = '#a6c8ff';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.moveTo(c.x, c.y - h - fh * 0.55);
-                    for (let i = 0; i < 4; i++) {
-                        ctx.lineTo(c.x + Math.sin(t + i) * 5, c.y - h - fh * 0.55 + i * 4);
-                    }
-                    ctx.stroke();
-                    ctx.fillStyle = '#ffffff';
-                    ctx.beginPath();
-                    ctx.arc(c.x, c.y - h - fh * 0.55, 3, 0, Math.PI * 2);
-                    ctx.fill();
-                    break;
-                }
-                case 'xbow': {
-                    // Horizontal bow arm
-                    ctx.strokeStyle = '#5a3c1f';
-                    ctx.lineWidth = 3;
-                    ctx.beginPath();
-                    ctx.moveTo(c.x - 14, c.y - h - fh * 0.3);
-                    ctx.lineTo(c.x + 14, c.y - h - fh * 0.3);
-                    ctx.stroke();
-                    // String
-                    ctx.strokeStyle = '#d4c0a0';
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.moveTo(c.x - 14, c.y - h - fh * 0.3);
-                    ctx.lineTo(c.x, c.y - h - fh * 0.15);
-                    ctx.lineTo(c.x + 14, c.y - h - fh * 0.3);
-                    ctx.stroke();
-                    // Bolt
-                    ctx.fillStyle = '#a9855a';
-                    ctx.fillRect(c.x - 1, c.y - h - fh * 0.35, 2, 10);
-                    break;
-                }
-                case 'inferno': {
-                    // Glowing core — layered solid fills instead of per-frame radial
-                    // gradient (gradients are expensive; this version is visually
-                    // nearly identical and runs ~10× faster.)
-                    const t = this.tnow * 5;
-                    const r = 7 + Math.sin(t) * 2;
-                    ctx.fillStyle = 'rgba(255, 107, 53, 0.45)';
-                    ctx.beginPath();
-                    ctx.arc(c.x, c.y - h - fh * 0.5, r + 6, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.fillStyle = 'rgba(255, 180, 70, 0.75)';
-                    ctx.beginPath();
-                    ctx.arc(c.x, c.y - h - fh * 0.5, r + 2, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.fillStyle = '#ffee99';
-                    ctx.beginPath();
-                    ctx.arc(c.x, c.y - h - fh * 0.5, r - 1, 0, Math.PI * 2);
-                    ctx.fill();
-                    break;
-                }
-                case 'storage': {
-                    ctx.strokeStyle = '#3a2814';
-                    ctx.lineWidth = 1.5;
-                    ctx.beginPath();
-                    ctx.moveTo(c.x - fw * 0.4, c.y - h * 0.4);
-                    ctx.lineTo(c.x + fw * 0.4, c.y - h * 0.4);
-                    ctx.moveTo(c.x, c.y - h * 0.8);
-                    ctx.lineTo(c.x, c.y - fh * 0.5);
-                    ctx.stroke();
-                    break;
-                }
-                case 'builderhut': {
-                    // Hammer
-                    ctx.fillStyle = '#8b6b3d';
-                    ctx.fillRect(c.x - 1, c.y - h - fh * 0.6, 2, 18);
-                    ctx.fillStyle = '#888';
-                    ctx.fillRect(c.x - 6, c.y - h - fh * 0.65, 12, 6);
-                    break;
-                }
-                case 'lab': {
-                    // Flask
-                    ctx.fillStyle = '#4bb08e';
-                    ctx.beginPath();
-                    ctx.moveTo(c.x - 5, c.y - h - fh * 0.55);
-                    ctx.lineTo(c.x + 5, c.y - h - fh * 0.55);
-                    ctx.lineTo(c.x + 8, c.y - h - fh * 0.25);
-                    ctx.lineTo(c.x - 8, c.y - h - fh * 0.25);
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(c.x - 3, c.y - h - fh * 0.65, 6, 4);
-                    // Bubbles
-                    const t = this.tnow * 5;
-                    for (let i = 0; i < 3; i++) {
-                        ctx.fillStyle = '#a8e5d0';
-                        ctx.beginPath();
-                        ctx.arc(c.x - 3 + i * 3, c.y - h - fh * 0.35 + Math.sin(t + i) * 2, 1.5, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-                    break;
-                }
-                case 'clancastle': {
-                    // Multiple flags
-                    ctx.fillStyle = '#d4c0a0';
-                    ctx.fillRect(c.x - 18, c.y - h - fh - 20, 2, 20);
-                    ctx.fillRect(c.x + 16, c.y - h - fh - 20, 2, 20);
-                    ctx.fillStyle = '#2a3a5a';
-                    ctx.fillRect(c.x - 16, c.y - h - fh - 20, 10, 6);
-                    ctx.fillRect(c.x + 18, c.y - h - fh - 20, 10, 6);
-                    // Central crown
-                    ctx.fillStyle = '#ffc857';
-                    ctx.font = 'bold 24px Cinzel, serif';
-                    ctx.fillText('♖', c.x, c.y - h * 0.4);
-                    break;
-                }
-                case 'armycamp': {
-                    // Tent triangle
-                    ctx.fillStyle = '#a58048';
-                    ctx.beginPath();
-                    ctx.moveTo(c.x, c.y - h - fh * 0.6);
-                    ctx.lineTo(c.x + 14, c.y - h - fh * 0.2);
-                    ctx.lineTo(c.x - 14, c.y - h - fh * 0.2);
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.strokeStyle = '#62421c';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                    ctx.fillStyle = '#62421c';
-                    ctx.beginPath();
-                    ctx.moveTo(c.x - 3, c.y - h - fh * 0.2);
-                    ctx.lineTo(c.x + 3, c.y - h - fh * 0.2);
-                    ctx.lineTo(c.x, c.y - h - fh * 0.35);
-                    ctx.closePath();
-                    ctx.fill();
-                    break;
-                }
-            }
-            ctx.restore();
-        }
-
-        drawEnemy(ctx, e) {
-            const bob = Math.sin(e.wobble) * 3;
-
-            // Flying enemies: draw a ground shadow far below and wings
-            if (e.flying) {
-                // Ground shadow (on the "real" ground plane, ~30px below)
-                ctx.fillStyle = 'rgba(0,0,0,.25)';
-                ctx.beginPath();
-                ctx.ellipse(e.x, e.y + 38, e.size * 0.7, e.size * 0.2, 0, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Wings — triangle flaps that animate with wobble
-                const wingAngle = Math.sin(e.wobble * 0.8) * 0.5;
-                ctx.fillStyle = e.color;
-                ctx.globalAlpha = 0.6;
-                // Left wing
-                ctx.beginPath();
-                ctx.moveTo(e.x - e.size * 0.4, e.y + bob);
-                ctx.lineTo(e.x - e.size * 2.2, e.y - e.size * 0.3 + bob - wingAngle * 14);
-                ctx.lineTo(e.x - e.size * 0.2, e.y - e.size * 0.5 + bob);
-                ctx.closePath();
-                ctx.fill();
-                // Right wing
-                ctx.beginPath();
-                ctx.moveTo(e.x + e.size * 0.4, e.y + bob);
-                ctx.lineTo(e.x + e.size * 2.2, e.y - e.size * 0.3 + bob + wingAngle * 14);
-                ctx.lineTo(e.x + e.size * 0.2, e.y - e.size * 0.5 + bob);
-                ctx.closePath();
-                ctx.fill();
-                ctx.globalAlpha = 1;
-            } else {
-                // Ground shadow for walking enemies
-                ctx.fillStyle = 'rgba(0,0,0,.45)';
-                ctx.beginPath();
-                ctx.ellipse(e.x, e.y + e.size + 4, e.size * 0.9, e.size * 0.3, 0, 0, Math.PI * 2);
-                ctx.fill();
-            }
-
-            // Body
-            if (!e._hi) e._hi = mixColor(e.color, '#ffffff', 0.3);
-            ctx.fillStyle = e.color;
-            ctx.beginPath();
-            ctx.arc(e.x, e.y + bob, e.size, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = e._hi;
-            ctx.beginPath();
-            ctx.arc(e.x - e.size * 0.3, e.y - e.size * 0.3 + bob, e.size * 0.55, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(0,0,0,.6)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(e.x, e.y + bob, e.size, 0, Math.PI * 2);
-            ctx.stroke();
-
-            // Eyes
-            ctx.fillStyle = '#fff';
-            ctx.beginPath();
-            ctx.arc(e.x - e.size * 0.3, e.y - e.size * 0.2 + bob, 2.2, 0, Math.PI * 2);
-            ctx.arc(e.x + e.size * 0.3, e.y - e.size * 0.2 + bob, 2.2, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = e.flying ? '#ff3333' : '#000';
-            ctx.beginPath();
-            ctx.arc(e.x - e.size * 0.3, e.y - e.size * 0.2 + bob, 1.1, 0, Math.PI * 2);
-            ctx.arc(e.x + e.size * 0.3, e.y - e.size * 0.2 + bob, 1.1, 0, Math.PI * 2);
-            ctx.fill();
-
-            const bw = e.size * 2.2;
-            const bx = e.x - bw / 2;
-            const by = e.y - e.size - 10 + bob;
-            ctx.fillStyle = 'rgba(0,0,0,.7)';
-            ctx.fillRect(bx - 1, by - 1, bw + 2, 5);
-            ctx.fillStyle = '#2a0a0a';
-            ctx.fillRect(bx, by, bw, 3);
-            ctx.fillStyle = '#ff5d5d';
-            ctx.fillRect(bx, by, bw * (e.hp / e.maxHp), 3);
-        }
-
-        drawProjectile(ctx, p) {
-            if (p.type === 'cannon' || p.type === 'mortar') {
-                ctx.fillStyle = p.type === 'mortar' ? '#444' : '#222';
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, p.type === 'mortar' ? 5 : 4, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = '#888';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-            } else if (p.type === 'archer' || p.type === 'xbow') {
-                ctx.strokeStyle = '#e0c896';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                const dx = p.target.x - p.x, dy = p.target.y - p.y;
-                const d = Math.hypot(dx, dy) || 1;
-                ctx.moveTo(p.x - dx / d * 8, p.y - dy / d * 8);
-                ctx.lineTo(p.x + dx / d * 8, p.y + dy / d * 8);
-                ctx.stroke();
-            } else if (p.type === 'wizard') {
-                if (!this._orbGrad) {
-                    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 8);
-                    g.addColorStop(0, '#fff');
-                    g.addColorStop(0.4, '#5cd8ff');
-                    g.addColorStop(1, 'rgba(92,216,255,0)');
-                    this._orbGrad = g;
-                }
-                ctx.save();
-                ctx.translate(p.x, p.y);
-                ctx.fillStyle = this._orbGrad;
-                ctx.beginPath();
-                ctx.arc(0, 0, 8, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
-            } else if (p.type === 'tesla') {
-                // Lightning bolt segment
-                ctx.strokeStyle = '#a6c8ff';
-                ctx.lineWidth = 2.5;
-                ctx.beginPath();
-                const dx = p.target.x - p.x, dy = p.target.y - p.y;
-                const d = Math.hypot(dx, dy) || 1;
-                const perpX = -dy / d * 3, perpY = dx / d * 3;
-                const mx = (p.x + p.target.x) / 2 + perpX * (Math.random() - 0.5) * 4;
-                const my = (p.y + p.target.y) / 2 + perpY * (Math.random() - 0.5) * 4;
-                ctx.moveTo(p.x, p.y);
-                ctx.lineTo(mx, my);
-                ctx.lineTo(p.target.x, p.target.y);
-                ctx.stroke();
-            } else if (p.type === 'inferno') {
-                // Orange beam
-                ctx.strokeStyle = '#ff8a3a';
-                ctx.lineWidth = 4;
-                ctx.beginPath();
-                ctx.moveTo(p.x, p.y);
-                ctx.lineTo(p.target.x, p.target.y);
-                ctx.stroke();
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-            } else if (p.type === 'airdef') {
-                // Missile
-                ctx.fillStyle = '#89c055';
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillStyle = '#ffcc66';
-                ctx.beginPath();
-                ctx.arc(p.x, p.y + 4, 2, 0, Math.PI * 2);
-                ctx.fill();
-            } else if (p.type === 'clancastle') {
-                ctx.fillStyle = '#d4c0a0';
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-
-        // ---------- UI ----------
-        /**
-         * Render (or refresh) the build shop. The cards are kept in place across
-         * refreshes — we only update class names for affordability / selection
-         * state rather than wiping innerHTML. This eliminates the 500ms flicker
-         * that was happening because updateUI calls buildMenu() on a timer.
-         *
-         * `forceRebuild` is true when the card set itself changes (e.g. town hall
-         * placed → its card disappears, or player level unlocks a new card).
-         */
-        buildMenu(forceRebuild = false) {
-            const menu = document.getElementById('buildMenu');
-            if (!menu) return;
-            const hasTownHall = this.buildings.some(b => b.type === 'townhall');
-
-            // Compute the stable key of which cards should exist right now
-            const entries = Object.entries(BLD).filter(([type]) => {
-                if (type === 'townhall' && hasTownHall) return false;
-                return true;
-            });
-            const setKey = entries.map(([type, def]) => {
-                const locked = this.player.level < def.unlockLevel;
-                return type + (locked ? 'L' : '');
-            }).join('|');
-
-            // Only rebuild DOM if the card set changed (or first render)
-            if (forceRebuild || this._buildMenuKey !== setKey) {
-                this._buildMenuKey = setKey;
-                menu.innerHTML = '';
-                for (const [type, def] of entries) {
-                    const locked = this.player.level < def.unlockLevel;
-                    const afford = this.canAfford(def.baseCost);
-                    // Real buttons so the shop works from the keyboard too
-                    const card = document.createElement('button');
-                    card.type = 'button';
-                    card.className = 'build-card' + (locked ? ' locked' : '') + (!afford && !locked ? ' cannot-afford' : '');
-                    card.dataset.type = type;
-                    const cost = Object.entries(def.baseCost).map(([k,v]) => `${fmt(v)} ${this.resSymbol(k)}`).join(' · ') || 'Free';
-                    card.innerHTML = `
-                        <span class="build-icon" aria-hidden="true">${def.icon}</span>
-                        <span class="build-name">${def.name}</span>
-                        ${locked
-                            ? `<span class="build-lock">Unlocks Lv ${def.unlockLevel}</span>`
-                            : `<span class="build-cost ${!afford ? 'red' : ''}">${cost}</span>`}
-                    `;
-                    card.addEventListener('click', () => {
-                        // Re-evaluate affordability at click time — state may have changed
-                        const curLocked = this.player.level < def.unlockLevel;
-                        const curAfford = this.canAfford(def.baseCost);
-                        if (curLocked) { this.audio.error(); this.toast(`Requires player level ${def.unlockLevel}`, 'warn'); return; }
-                        if (!curAfford) { this.audio.error(); this.toast('Not enough resources', 'warn'); return; }
-                        this.setBuildMode(type);
-                    });
-                    menu.appendChild(card);
-                }
-            }
-
-            // Cheap refresh: just update per-card class state in place. No reflow,
-            // no flicker, no re-binding event listeners.
-            const cards = menu.children;
-            for (let i = 0; i < cards.length; i++) {
-                const card = cards[i];
-                const type = card.dataset.type;
-                if (!type) continue;
-                const def = BLD[type];
-                const locked = this.player.level < def.unlockLevel;
-                const afford = this.canAfford(def.baseCost);
-                card.classList.toggle('locked', locked);
-                card.classList.toggle('cannot-afford', !afford && !locked);
-                card.classList.toggle('selected', this.buildMode === type);
-                card.setAttribute('aria-pressed', String(this.buildMode === type));
-                card.setAttribute('aria-disabled', String(locked));
-                // Also refresh the red-cost color on the cost line
-                const costEl = card.querySelector('.build-cost');
-                if (costEl) costEl.classList.toggle('red', !afford);
-            }
-        }
-
-        showTab(name) {
-            document.querySelectorAll('.tab').forEach(t => {
-                const on = t.dataset.tab === name;
-                t.classList.toggle('active', on);
-                t.setAttribute('aria-selected', String(on));
-            });
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.dataset.tab === name));
-            this.updateUI(); // fill the newly shown tab right away instead of on the next tick
-        }
-
-        setBuildMode(type) {
-            // Hard guard: only ONE Town Hall per kingdom. Refuse the mode even
-            // if a stale card somehow makes it into the DOM.
-            if (type === 'townhall' && this.buildings.some(b => b.type === 'townhall')) {
-                this.audio.error();
-                this.toast('You already have a Town Hall', 'warn');
-                this.buildMenu(true); // force-rebuild so the card is removed
-                return;
-            }
-            this.buildMode = type;
-            this.moveMode = null;
-            this.spellMode = false;
-            this.updateCanvasCursor();
-            this.buildMenu();
-        }
-
-        updateCanvasCursor() {
-            const busy = !!(this.buildMode || this.moveMode || this.spellMode);
-            this.canvas.classList.toggle('building', busy);
-            this.el.cancel.hidden = !busy;
-        }
-
-        bindUI() {
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.addEventListener('click', () => {
-                    this.showTab(tab.dataset.tab);
-                    this.audio.click();
-                });
-            });
-
-            document.getElementById('actCollect').addEventListener('click', () => { this.audio.click(); this.collectAll(); });
-            document.getElementById('actRally').addEventListener('click', () => { this.audio.click(); this.rally(); });
-            document.getElementById('actBoost').addEventListener('click', () => { this.audio.click(); this.activateBoost(); });
-            document.getElementById('actCancel').addEventListener('click', () => { this.audio.click(); this.setBuildMode(null); this.moveMode = null; this.spellMode = false; this.updateCanvasCursor(); });
-
-            const warCryBtn = document.getElementById('actWarCry');
-            if (warCryBtn) warCryBtn.addEventListener('click', () => { this.audio.click(); this.activateWarCry(); });
-
-            const pauseBtn = document.getElementById('actPause');
-            if (pauseBtn) pauseBtn.addEventListener('click', () => { this.audio.click(); this.togglePause(); });
-
-            const autoBtn = document.getElementById('actAutoCollect');
-            if (autoBtn) autoBtn.addEventListener('click', () => { this.audio.click(); this.toggleAutoCollect(); });
-
-            const soundBtn = document.getElementById('btnSound');
-            if (soundBtn) soundBtn.addEventListener('click', () => this.toggleSound());
-            document.querySelectorAll('#notationSeg .seg-btn').forEach(b => {
-                b.addEventListener('click', () => { this.audio.click(); this.setNotation(b.dataset.notation); });
-            });
-            const keysBtn = document.getElementById('btnShortcuts');
-            if (keysBtn) keysBtn.addEventListener('click', () => { this.audio.click(); this.showShortcuts(); });
-            this.syncToggles(); // the save may have turned these on
-
-            // Auto-pause when the tab becomes hidden so raiders don't attack
-            // the kingdom while the player has the app closed or backgrounded.
-            // Production still counts: it's paid out at the offline rate on return.
-            document.addEventListener('visibilitychange', () => {
-                if (document.hidden) {
-                    this._wasPausedBeforeHide = this.paused;
-                    this._hiddenAt = Date.now();
-                    this.paused = true;
-                    this.save();
-                } else {
-                    const away = (Date.now() - (this._hiddenAt || Date.now())) / 1000;
-                    this._hiddenAt = 0;
-                    if (!this._wasPausedBeforeHide && !this.gameOverShown) {
-                        this.paused = false;
-                        // Reset frame delta so the first post-resume tick doesn't
-                        // jump forward by the entire hidden duration.
-                        this.lastTime = performance.now();
-                        this.applyOfflineEarnings(away);
-                        this.updateUI();
-                    }
-                }
-            });
-
-            const spellBtn = document.getElementById('actSpell');
-            if (spellBtn) spellBtn.addEventListener('click', () => {
-                this.audio.click();
-                if (this.res.gems < CFG.spellCost.gems) { this.toast('Need 1 ♦ gem', 'warn'); return; }
-                this.spellMode = true;
-                this.setBuildMode(null);
-                this.moveMode = null;
-                this.updateCanvasCursor();
-                this.toast('⚡ Click a tile to strike', 'warn');
-            });
-
-            document.getElementById('modalClose').addEventListener('click', () => this.closeModal());
-            document.getElementById('modal').addEventListener('click', (e) => {
-                if (e.target.id === 'modal') this.closeModal();
-            });
-
-            document.getElementById('btnSave').addEventListener('click', () => { this.save(); this.toast('Game saved', 'success'); this.audio.click(); });
-            document.getElementById('btnExport').addEventListener('click', () => { this.audio.click(); this.exportSave(); });
-            const importInput = document.getElementById('importFile');
-            document.getElementById('btnImport').addEventListener('click', () => { this.audio.click(); importInput.click(); });
-            importInput.addEventListener('change', () => {
-                this.importSave(importInput.files[0]);
-                importInput.value = ''; // so picking the same file again still fires change
-            });
-            document.getElementById('btnReset').addEventListener('click', () => {
-                this.showConfirm({
-                    title: 'Reset Kingdom',
-                    icon: '⚠',
-                    body: 'Erase all progress and start a new kingdom?<br><br><span class="warn-text">This cannot be undone.</span>',
-                    yesText: 'Erase Everything',
-                    noText: 'Keep Playing',
-                    danger: true,
-                    onYes: () => this.wipeSave(),
-                });
-            });
-
-            // Zoom controls
-            const zIn  = document.getElementById('zoomIn');
-            const zOut = document.getElementById('zoomOut');
-            const zReset = document.getElementById('zoomReset');
-            if (zIn)  zIn.addEventListener('click', () => { this.audio.click(); this.zoomBy(1.2, this.vw/2, this.vh/2); });
-            if (zOut) zOut.addEventListener('click', () => { this.audio.click(); this.zoomBy(1/1.2, this.vw/2, this.vh/2); });
-            if (zReset) zReset.addEventListener('click', () => { this.audio.click(); this.cam.zoom = 1; this.centerCamera(); });
-        }
-
-        // Labels/state for the on/off buttons (auto-collect, sound)
-        syncToggles() {
-            const autoBtn = document.getElementById('actAutoCollect');
-            if (autoBtn) {
-                autoBtn.querySelector('.action-label').textContent = this.autoCollect ? 'Auto: On' : 'Auto: Off';
-                autoBtn.classList.toggle('on', this.autoCollect);
-                autoBtn.setAttribute('aria-pressed', String(this.autoCollect));
-            }
-            const soundBtn = document.getElementById('btnSound');
-            if (soundBtn) {
-                soundBtn.textContent = this.audio.muted ? 'Off' : 'On';
-                soundBtn.setAttribute('aria-pressed', String(!this.audio.muted));
-            }
-            document.querySelectorAll('#notationSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.notation === notation)));
-        }
-
-        toggleAutoCollect() {
-            this.autoCollect = !this.autoCollect;
-            this.syncToggles();
-            this.toast(this.autoCollect ? 'Auto-collect enabled' : 'Auto-collect disabled', 'success');
-        }
-
-        toggleSound() {
-            this.audio.muted = !this.audio.muted;
-            this.syncToggles();
-            this.audio.click();
-            this.save();
-        }
-
-        setNotation(n) {
-            if (!NOTATIONS.includes(n) || n === notation) return;
-            notation = n;
-            this.syncToggles();
-            this.buildMenu(true);   // the costs on the cards are baked into their markup
-            this.updateUI();
-            if (this.modalBuilding) this.openBuildingModal(this.modalBuilding);
-            this.save();
-        }
-
-        // Open the shared modal with something that isn't a building (help, welcome back)
-        openPlainModal(html) {
-            const modal = this.el.modal;
-            if (!modal.classList.contains('open')) this._modalReturnFocus = document.activeElement;
-            this.modalBuilding = null;
-            this._modalUpCost = null;
-            this.el.modalBody.innerHTML = html;
-            modal.classList.add('open');
-            document.getElementById('modalClose').focus({ preventScroll: true });
-        }
-
-        showShortcuts() {
-            // Static text only; nothing here comes from a save or a peer
-            const rows = [
-                [['Space'], 'Collect from every mine and well'],
-                [['P'], 'Pause / resume'],
-                [['W'], 'War Cry'],
-                [['L'], 'Lightning spell, then click a tile'],
-                [['A'], 'Auto-collect on / off'],
-                [['R'], 'Rally defenses'],
-                [['M'], 'Sound on / off'],
-                [['T'], 'Light / dark theme'],
-                [['1', '2', '3', '4'], 'Build · Army · Co-op · Stats tab'],
-                [['+', '−'], 'Zoom in / out'],
-                [['0'], 'Reset the view'],
-                [['Esc'], 'Cancel a build, move or spell · close a menu'],
-                [['Shift + click'], 'Upgrade a building without the menu'],
-                [['Right-click', 'long-press'], 'Building menu'],
-                [['Drag'], 'Move a building'],
-                [['?'], 'This list'],
-            ];
-            this.openPlainModal(`
-                <h2 id="modalTitle">Keyboard</h2>
-                <div class="subtitle">Shortcuts work whenever you're not typing in a box.</div>
-                <table class="keys">${rows.map(([keys, what]) =>
-                    `<tr><td>${keys.map(k => `<kbd>${k}</kbd>`).join('')}</td><td>${what}</td></tr>`).join('')}</table>
-            `);
-        }
-
-        // Breakdown of what came in while the tab was closed or hidden. A toast
-        // used to carry this and was gone in two seconds; longer absences get
-        // a dialog the player can actually read.
-        showOfflineSummary(sec, got, capped) {
-            const boxes = [['gold', 'Gold', '◈'], ['elixir', 'Elixir', '❂'], ['dark', 'Dark Elixir', '✦']]
-                .filter(([k]) => got[k] >= 1)
-                .map(([k, name, sym]) => `<div class="stat-box ${k}"><div class="label">${name}</div><div class="value">+${fmt(got[k])} ${sym}</div></div>`)
-                .join('');
-            const note = capped
-                ? 'Earnings stop after 4 hours away, and never go past your storage.'
-                : 'Time away pays half the live rate, up to 4 hours, within your storage.';
-            this.openPlainModal(`
-                <h2 id="modalTitle">Welcome back</h2>
-                <div class="subtitle">You were away for ${fmtDuration(sec)}. ${boxes ? 'The kingdom kept working:' : 'Your storage was already full, so nothing new came in.'}</div>
-                ${boxes ? `<div class="stat-grid away-grid">${boxes}</div>` : ''}
-                <div class="modal-hint">${note}</div>
-                <div class="modal-actions center"><button class="btn primary" id="awayOk">Back to the kingdom</button></div>
-            `);
-            const ok = document.getElementById('awayOk');
-            ok.addEventListener('click', () => { this.audio.click(); this.closeModal(); });
-            ok.focus({ preventScroll: true });
+            if (this.combo.count >= 3) { this.floatText(`COMBO x${this.combo.mult}`, p.x, p.y - 76, '#ffc857'); this.audio.combo(); }
+            this.stats.clicks++;
+            b.pop = 1;
+            this.audio.coin();
+            this.pulseRes(Object.keys(bonus)[0]);
+            this.updateUI(); this.checkAchievements();
         }
 
         collectAll(quiet = false) {
@@ -3933,1459 +1228,778 @@
                 if (!def.clickBonus) continue;
                 const bonus = def.clickBonus(b.level);
                 for (const k in bonus) {
-                    const amt = Math.floor(bonus[k] * this.boost.mult * 0.5);
+                    const amt = Math.floor(bonus[k] * this.boost.mult * 0.5 * (k === 'gold' ? this.goldMult : 1) * this.prodMult());
                     const got = this.addRes(k, amt);
                     if (k === 'gold') { this.stats.goldEarned += got; total += got; }
-                    if (got > 0) {
-                        const p = this.worldIso(b.tx + 0.5, b.ty + 0.5);
-                        this.floatText(`+${fmt(got)}`, p.x, p.y - 30, this.resColor(k));
-                    }
+                    if (got > 0) { const p = this.centerOf(b); this.floatText(`+${fmt(got)}`, p.x, p.y - 44, this.resColor(k)); b.pop = 1; }
                 }
             }
             if (total > 0) {
-                this.audio.coin();
-                this.pulseRes('gold');
-                // Auto-collect runs every 5s; keep it from burying real alerts in toasts
+                this.audio.coin(); this.pulseRes('gold');
                 if (!quiet) this.toast(`Collected ${fmt(total)} gold`, 'success');
             } else if (!quiet) {
-                this.toast(this.res.gold >= this.cap() ? 'Gold storage is full — upgrade the Town Hall or build a Vault' : 'Nothing to collect', 'warn');
+                this.toast(this.res.gold >= this.cap() ? 'Storage is full. Upgrade the Town Hall or build a Vault.' : 'Nothing to collect', 'warn');
             }
             this.updateUI();
+        }
+
+        beginSpell() {
+            if (this.res.gems < CFG.spellCost.gems) { this.audio.error(); this.toast('A lightning strike costs 1 gem', 'warn'); return; }
+            this.setBuildMode(null); this.moveMode = null; this.spellMode = true;
+            this.updateCanvasCursor();
+            this.toast('Tap the map to call down lightning', 'warn');
+        }
+
+        castLightning(tfx, tfy) {
+            this.stats.spells++;
+            this.flash = 0.55; this.shake = Math.max(this.shake, 6);
+            this.audio.spell();
+            const dmg = CFG.spellBaseDmg + this.player.level * 80;
+            const c = this.worldIso(tfx, tfy);
+            for (let i = 0; i < 50; i++) {
+                const a = Math.random() * TAU, sp = rand(80, 400);
+                this.particles.push({ x: c.x, y: c.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6 - 60, life: rand(0.4, 1.0), max: 1.0, color: i % 2 ? '#a6ecff' : '#ffffff', size: rand(2, 5), kind: 'spark' });
+            }
+            this.beams.push({ type: 'bolt', x0: c.x + rand(-30, 30), y0: c.y - 420, x1: c.x, y1: c.y, life: 0.3, max: 0.3, seed: Math.random() * 99 });
+            this.particles.push({ x: c.x, y: c.y, vx: 0, vy: 0, life: 0.6, max: 0.6, color: '#a6ecff', size: CFG.spellRadius * 30, kind: 'ring' });
+            let hits = 0;
+            for (const e of this.enemies) {
+                if (e.hp <= 0) continue;
+                if (Math.hypot(e.tx - tfx, e.ty - tfy) <= CFG.spellRadius) { this.hitEnemy(e, dmg); hits++; }
+            }
+            this.toast(hits ? `Lightning struck ${hits} raider${hits > 1 ? 's' : ''}` : 'Lightning struck nothing', hits ? 'success' : 'warn');
+            this.checkAchievements();
         }
 
         rally() {
             let healed = 0;
-            const healPct = this.rallyHeal;
             for (const b of this.buildings) {
-                const def = BLD[b.type];
-                if (def.defense) {
-                    b.lastShot = 0;
-                    const heal = Math.min(b.maxHp - b.hp, b.maxHp * healPct);
-                    b.hp += heal;
-                    if (heal > 0) healed++;
-                }
+                if (BLD[b.type].decor) continue;
+                b.lastShot = 0;
+                const heal = Math.min(b.maxHp - b.hp, b.maxHp * this.rallyHeal);
+                if (heal > 0) { b.hp += heal; healed++; const p = this.centerOf(b); this.particles.push({ x: p.x, y: p.y - 20, vx: 0, vy: -30, life: 0.8, max: 0.8, color: '#7adf6a', size: 5, kind: 'spark' }); }
             }
             this.audio.upgrade();
-            this.toast(`Defenses rallied! (${healed} healed, +${(healPct*100).toFixed(0)}%)`, 'success');
+            this.toast(`Rally! ${healed} building${healed === 1 ? '' : 's'} repaired (+${Math.round(this.rallyHeal * 100)}%)`, 'success');
         }
 
         activateBoost() {
-            if (this.res.gems < 1) {
-                this.audio.error();
-                this.toast('Need 1 ♦ gem', 'warn');
-                return;
-            }
+            if (this.res.gems < 1) { this.audio.error(); this.toast('A boost costs 1 gem', 'warn'); return; }
             this.res.gems -= 1;
-            this.boost.mult = 2;
-            this.boost.timeLeft = 60;
+            this.boost.mult = 2; this.boost.timeLeft = 60;
             this.audio.levelup();
-            this.toast('2x boost for 60s!', 'success');
+            this.toast('Production doubled for 60 seconds', 'success');
             this.updateUI();
         }
 
-        openBuildingModal(b) {
-            const def = BLD[b.type];
-            const modal = document.getElementById('modal');
-            const body = document.getElementById('modalBody');
-            const stats = [];
-            stats.push({ label: 'Level', value: `${b.level} / ${def.maxLevel}` });
-            stats.push({ label: 'Health', value: `${fmt(Math.ceil(b.hp))}/${fmt(b.maxHp)}` });
-            if (def.production) {
-                const p = def.production(b.level);
-                for (const k in p) stats.push({ label: `${k[0].toUpperCase()+k.slice(1)} / sec`, value: `+${p[k].toFixed(2)}` });
+        activateWarCry() {
+            if (this.warCry.active) { this.toast('War Cry is already ringing out', 'warn'); return; }
+            if (this.warCry.cooldown > 0) { this.audio.error(); this.toast(`War Cry is recharging (${Math.ceil(this.warCry.cooldown)}s)`, 'warn'); return; }
+            this.warCry.active = true; this.warCry.timeLeft = 15; this.warCry.cooldown = 90;
+            this.audio.spell();
+            this.toast('War Cry! Towers hit 50% harder for 15s', 'success');
+            this.showAlert('WAR CRY', 2);
+        }
+
+        togglePause() {
+            if (this.gameOverShown) return;
+            this.paused = !this.paused;
+            if (!this.paused) this.lastTime = performance.now();
+            this.syncToggles();
+            this.toast(this.paused ? 'Paused' : 'Resumed', 'warn');
+        }
+        cycleSpeed() {
+            this.speed = this.speed >= 3 ? 1 : this.speed + 1;
+            this.syncToggles();
+            this.toast(`Game speed x${this.speed}`, 'success');
+        }
+
+        // ---------- treasure goblin ----------
+        spawnGoblin() {
+            const side = randi(0, 4);
+            const g = CFG.gridW;
+            let a, b;
+            if (side === 0) { a = [rand(2, g - 2), -3]; b = [rand(2, g - 2), g + 3]; }
+            else if (side === 1) { a = [g + 3, rand(2, g - 2)]; b = [-3, rand(2, g - 2)]; }
+            else if (side === 2) { a = [rand(2, g - 2), g + 3]; b = [rand(2, g - 2), -3]; }
+            else { a = [-3, rand(2, g - 2)]; b = [g + 3, rand(2, g - 2)]; }
+            const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy);
+            this.goblin = { tx: a[0], ty: a[1], vx: dx / d * 1.9, vy: dy / d * 1.9, x: 0, y: 0, dir: 1, ph: 0, left: d / 1.9 + 1, gone: false };
+            this.showAlert('A TREASURE GOBLIN!', 2.2);
+            this.audio.beep(1568, 0.12, 'triangle', 0.3); setTimeout(() => this.audio.beep(2093, 0.16, 'triangle', 0.3), 120);
+        }
+        goblinTick(dt) {
+            const gb = this.goblin;
+            if (!gb) {
+                if (this.wave.active) return;
+                this.goblinTimer -= dt;
+                if (this.goblinTimer <= 0) { this.spawnGoblin(); this.goblinTimer = rand(130, 230); }
+                return;
             }
-            if (def.defense) {
-                const d = def.defense(b.level);
-                stats.push({ label: 'Damage', value: d.dmg });
-                stats.push({ label: 'Cooldown', value: d.cd + 's' });
-                stats.push({ label: 'Range', value: d.range });
-                if (d.splash) stats.push({ label: 'Splash', value: d.splash });
+            gb.tx += gb.vx * dt; gb.ty += gb.vy * dt; gb.left -= dt; gb.ph += dt * 9;
+            gb.dir = (gb.vx - gb.vy) >= 0 ? 1 : -1;
+            const p = this.worldIso(gb.tx, gb.ty);
+            gb.x = p.x; gb.y = p.y - Math.abs(Math.sin(gb.ph)) * 4;
+            if (Math.random() < dt * 14) this.particles.push({ x: gb.x + rand(-6, 6), y: gb.y - rand(6, 26), vx: rand(-14, 14), vy: rand(-30, -8), life: 0.7, max: 0.7, color: '#ffe066', size: rand(1.5, 3), kind: 'spark' });
+            if (gb.left <= 0) { this.goblin = null; this.toast('The Treasure Goblin got away', 'warn'); }
+        }
+        catchGoblin() {
+            const gb = this.goblin; if (!gb) return;
+            const gold = Math.max(600, Math.floor((this.rates.gold + this.rates.elixir) * 60 * this.rateMult()));
+            const got = this.addRes('gold', gold);
+            this.stats.goldEarned += got;
+            this.stats.goblins++;
+            const gems = 1 + (Math.random() < 0.3 ? 1 : 0);
+            this.res.gems += gems;
+            for (let i = 0; i < 40; i++) this.particles.push({ x: gb.x, y: gb.y - 14, vx: rand(-140, 140), vy: -rand(80, 240), life: 1.1, max: 1.1, color: i % 4 ? '#ffd34a' : '#5cd8ff', size: rand(3, 5), kind: 'coin' });
+            this.floatText(got > 0 ? `+${fmt(got)}` : 'STORAGE FULL', gb.x, gb.y - 40, '#ffc857');
+            this.floatText(`+${gems} gem${gems > 1 ? 's' : ''}`, gb.x, gb.y - 60, '#5cd8ff');
+            this.audio.coin(); this.audio.levelup();
+            this.goblin = null;
+            this.toast('Caught the Treasure Goblin!', 'success');
+            this.updateUI(); this.checkAchievements();
+        }
+
+        // ---------- quests ----------
+        questKind(q) { return QUEST_KINDS.find(k => k.id === q.kind); }
+        newQuest(excluding) {
+            const lv = this.player.level;
+            const pool = QUEST_KINDS.filter(k => !excluding.includes(k.id));
+            const kind = pool[randi(0, pool.length)];
+            let target = Math.max(kind.min, Math.round(kind.base + kind.per * lv));
+            if (kind.big) target = Math.round(target / 100) * 100;
+            else if (target > 20) target = Math.round(target / 5) * 5;
+            return { kind: kind.id, target, start: this.stats[kind.stat] || 0, gems: 2 + Math.min(4, Math.floor(lv / 5)), done: false };
+        }
+        fillQuests() {
+            while (this.quests.length < 3) this.quests.push(this.newQuest(this.quests.map(q => q.kind)));
+        }
+        questProgress(q) { return Math.max(0, (this.stats[this.questKind(q).stat] || 0) - q.start); }
+        checkQuests() {
+            let any = false;
+            for (const q of this.quests) {
+                if (!q.done && this.questProgress(q) >= q.target) { q.done = true; any = true; this.toast(`Quest done: ${this.questKind(q).text(q.target)}`, 'success'); this.audio.levelup(); }
             }
-            if (def.provides) {
-                const p = def.provides(b.level);
-                if (p.cap) stats.push({ label: 'Storage', value: `+${fmt(p.cap)}` });
-                if (p.goldMult) stats.push({ label: 'Gold Mult', value: `+${(p.goldMult*100).toFixed(0)}%` });
-                if (p.xpMult) stats.push({ label: 'XP Mult', value: `+${(p.xpMult*100).toFixed(0)}%` });
-                if (p.rallyMult) stats.push({ label: 'Rally Heal', value: `+${(p.rallyMult*100).toFixed(0)}%` });
-                if (p.waveGems) stats.push({ label: 'Wave Gems', value: `+${p.waveGems}` });
-            }
-
-            const canUp = b.level < def.maxLevel;
-            const upCost = canUp ? def.upgradeCost(b.level) : null;
-            const costStr = canUp ? Object.entries(upCost).map(([k,v]) => `${fmt(v)} ${this.resSymbol(k)}`).join(' · ') : '';
-            const afford = canUp && this.canAfford(upCost);
-
-            // Preview of the click-bonus burst (for resource buildings)
-            let collectPreview = '';
-            if (def.clickBonus) {
-                const preview = def.clickBonus(b.level);
-                collectPreview = Object.entries(preview)
-                    .map(([k, v]) => `+${Math.floor(v)} ${this.resSymbol(k)}`)
-                    .join(' · ');
-            }
-
-            body.innerHTML = `
-                <h2 id="modalTitle">${def.icon} ${def.name}</h2>
-                <div class="subtitle">${def.desc}</div>
-                <div class="stat-grid">
-                    ${stats.map(s => `
-                        <div class="stat-box">
-                            <div class="label">${s.label}</div>
-                            <div class="value">${s.value}</div>
-                        </div>
-                    `).join('')}
-                </div>
-                ${def.clickBonus ? `
-                    <div class="collect-block">
-                        <div class="collect-label">Tap to Collect</div>
-                        <div class="collect-preview">${collectPreview}</div>
-                        <button class="btn collect" id="collectBtn">◉ Collect Burst</button>
-                        <div class="hint mt-6">Keep clicking for combo multipliers</div>
-                    </div>
-                ` : ''}
-                ${canUp ? `
-                    <div class="upgrade-block">
-                        <div class="upgrade-label">Next Level</div>
-                        <div class="upgrade-cost">${costStr}</div>
-                        <button class="btn primary" id="upgradeBtn" ${afford ? '' : 'disabled'}>Upgrade →</button>
-                    </div>
-                ` : `<div class="upgrade-block"><div class="upgrade-label">Max level reached</div></div>`}
-                <div class="modal-actions">
-                    ${b.type !== 'townhall' ? `<button class="btn small" id="moveBtn">Move</button>` : ''}
-                    ${b.type !== 'townhall' ? `<button class="btn small danger" id="sellBtn">Sell (50%)</button>` : ''}
-                </div>
-                <div class="modal-hint">
-                    Right-click or long-press a building = this menu · Drag it to move · Shift+click = quick upgrade
-                </div>
-            `;
-
-            if (!modal.classList.contains('open')) this._modalReturnFocus = document.activeElement;
-            this.modalBuilding = b;
-            this._modalUpCost = upCost;
-            modal.classList.add('open');
-            const upBtn = document.getElementById('upgradeBtn');
-            if (upBtn) upBtn.addEventListener('click', () => this.upgradeBuilding(b));
-            const collectBtn = document.getElementById('collectBtn');
-            if (collectBtn) collectBtn.addEventListener('click', () => {
-                this.collectFrom(b);
-                // Refresh preview numbers (combo scales them) without full re-open
-                const cp = document.querySelector('.collect-preview');
-                if (cp && def.clickBonus) {
-                    const pr = def.clickBonus(b.level);
-                    cp.textContent = Object.entries(pr)
-                        .map(([k, v]) => {
-                            const mul = this.boost.mult * this.combo.mult * (k === 'gold' ? this.goldMult : 1);
-                            return `+${Math.floor(v * mul)} ${this.resSymbol(k)}`;
-                        }).join(' · ');
-                }
-            });
-            const moveBtn = document.getElementById('moveBtn');
-            if (moveBtn) moveBtn.addEventListener('click', () => {
-                // setBuildMode(null) clears moveMode, so it has to run first
-                this.setBuildMode(null);
-                this.moveMode = b;
-                this.spellMode = false;
-                this.updateCanvasCursor();
-                this.closeModal();
-                this.toast('Tap an empty tile to move it there', 'warn');
-            });
-            const sellBtn = document.getElementById('sellBtn');
-            if (sellBtn) sellBtn.addEventListener('click', () => {
-                // Refund half of every resource it cost to place (not just gold)
-                const refund = {};
-                for (const k in def.baseCost) refund[k] = Math.floor(def.baseCost[k] * 0.5);
-                const refundStr = Object.entries(refund).map(([k, v]) => `${fmt(v)} ${this.resSymbol(k)}`).join(' · ');
-                const lostLevels = b.level > 1 ? `<br><br><span class="warn-text">Its ${b.level - 1} upgrade${b.level > 2 ? 's' : ''} won't be refunded.</span>` : '';
-                this.closeModal();
-                this.showConfirm({
-                    title: `Sell ${def.name}?`,
-                    icon: def.icon,
-                    body: `You'll get back ${refundStr}.${lostLevels}`,
-                    yesText: 'Sell',
-                    noText: 'Keep it',
-                    danger: true,
-                    onYes: () => {
-                        if (!this.buildings.includes(b)) return; // destroyed while the dialog was up
-                        for (const k in refund) this.addRes(k, refund[k]);
-                        this.removeBuilding(b);
-                        this.toast(`Sold for ${refundStr}`, 'success');
-                        this.audio.coin();
-                        this.updateUI();
-                    },
-                });
-            });
-
-            // Keyboard users land on the main action instead of somewhere behind the overlay
-            (upBtn && !upBtn.disabled ? upBtn : document.getElementById('modalClose')).focus({ preventScroll: true });
+            if (any) this.updateUI();
+        }
+        claimQuest(i) {
+            const q = this.quests[i];
+            if (!q || !q.done) return;
+            this.res.gems += q.gems;
+            this.gainXp(40);
+            this.floatText(`+${q.gems} gems`, this.vw / 2, 0, '#5cd8ff');
+            this.audio.coin();
+            this.toast(`Quest reward: ${q.gems} gems`, 'success');
+            this.quests[i] = this.newQuest(this.quests.filter((_, j) => j !== i).map(x => x.kind));
+            this.updateUI();
         }
 
-        closeModal() {
-            const modal = document.getElementById('modal');
-            if (!modal.classList.contains('open')) return;
-            modal.classList.remove('open');
-            this.modalBuilding = null;
-            // Hand focus back to whatever had it before the menu opened
-            if (this._modalReturnFocus && document.contains(this._modalReturnFocus)) this._modalReturnFocus.focus();
-            this._modalReturnFocus = null;
+        // ---------- ascension ----------
+        ascendGain() {
+            const w = Math.max(0, this.wave.number - 1);
+            return Math.floor(w / 3 + this.player.level / 4 + this.stats.upgrades / 60);
+        }
+        canAscend() { return this.wave.number >= CFG.ascendMinWave; }
+        perkRank(k) { return this.perks[k] || 0; }
+        buyPerk(k) {
+            const P = PERKS[k], r = this.perkRank(k), cost = K.data.perkCost(r);
+            if (r >= P.max) return;
+            if (this.crowns < cost) { this.audio.error(); this.toast('Not enough crowns', 'warn'); return; }
+            this.crowns -= cost; this.perks[k] = r + 1;
+            this.audio.upgrade();
+            this.recomputeRates(); this.updateUI(); this.save();
+        }
+        ascend() {
+            const gain = this.ascendGain();
+            this.crowns += gain; this.crownsEver += gain; this.ascensions++;
+            // a fresh reign: kingdom, wave and level restart; crowns, perks, achievements and lifetime stats stay
+            this.res = { gold: 500 + 500 * this.perks.headstart, elixir: 150, dark: 0, gems: 5 + this.ascensions };
+            this.player.level = 1; this.player.xp = 0;
+            this.buildings = []; this.enemies = []; this.projectiles = []; this.beams = []; this.goblin = null;
+            this.wave = { number: 0, timer: 90, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
+            this.dayTime = 0.25; this.dayCount = 1;
+            this.boost = { mult: 1, timeLeft: 0 }; this.warCry = { active: false, timeLeft: 0, cooldown: 0 };
+            this.selected = null; this.hoverBuilding = null; this.gameOverShown = false; this.paused = false;
+            this.quests = []; this.fillQuests();
+            this.placeInitial();
+            this.wave.next = this.buildQueue(1);
+            this.checkAchievements();
+            this.buildMenu(true); this.refreshSelection(); this.updateUI();
+            this.centerCamera();
+            this.showAlert(`REIGN ${this.ascensions + 1} BEGINS`, 3.5);
+            this.toast(`Ascended! +${gain} crown${gain === 1 ? '' : 's'}`, 'success');
+            this.audio.levelup();
+            this.closeModal(); this.closePanel();
+            this.save();
         }
 
-        updateUI() {
-            const el = this.el;
-            setText(el.gold, fmt(this.res.gold));
-            setText(el.elixir, fmt(this.res.elixir));
-            setText(el.dark, fmt(this.res.dark));
-            setText(el.gems, fmt(this.res.gems));
-
-            // Keep an open building menu's Upgrade button in sync as resources come in
-            if (this.modalBuilding && this._modalUpCost) {
-                const upBtn = document.getElementById('upgradeBtn');
-                if (upBtn) upBtn.disabled = !this.canAfford(this._modalUpCost);
-            }
-
-            // Show what's actually coming in right now, night bonus included
-            const mult = this.rateMult();
-            const moon = this.isNight() ? ' 🌙' : '';
-            setText(el.rateGold, `+${fmtRate(this.rates.gold * mult)}/s${moon}`);
-            setText(el.rateElixir, `+${fmtRate(this.rates.elixir * mult)}/s`);
-            setText(el.rateDark, `+${fmtRate(this.rates.dark * mult, 2)}/s`);
-
-            setText(el.level, String(this.player.level));
-            const xpNeeded = CFG.xpToLevel(this.player.level);
-            setText(el.xp, `${Math.floor(this.player.xp)} / ${xpNeeded} XP`);
-            const ringLen = 100.5;
-            el.ring.style.strokeDashoffset = ringLen * (1 - this.player.xp / xpNeeded);
-
-            if (this.wave.active) {
-                setText(el.waveTimer, `${this.enemies.length} left`);
-                el.waveTimer.classList.add('danger');
-                setText(el.waveInfo, `Wave ${this.wave.number} · In progress`);
-            } else {
-                setText(el.waveTimer, fmtTime(this.wave.timer));
-                el.waveTimer.classList.toggle('danger', this.wave.timer < 10);
-                setText(el.waveInfo, `Wave ${this.wave.number + 1} · Goblins`);
-            }
-
-            const hours = Math.floor(this.dayTime * 24);
-            const mins = Math.floor((this.dayTime * 24 - hours) * 60);
-            setText(el.dayTime, `${hours.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}`);
-            setText(el.dayCount, `Day ${this.dayCount}`);
-            setText(el.dayLabel, this.isNight() ? 'Night · +25%' : 'Day');
-
-            // Zoom indicator
-            setText(el.zoom, `${Math.round(this.cam.zoom * 100)}%`);
-
-            // Combo indicator
-            if (el.combo) {
-                if (this.combo.count >= 3) {
-                    setText(el.combo, `COMBO x${this.combo.mult}`);
-                    el.combo.style.opacity = '1';
-                } else {
-                    el.combo.style.opacity = '0';
-                }
-            }
-
-            // War Cry button state
-            const wcBtn = el.warCry;
-            if (wcBtn) {
-                if (this.warCry.active) {
-                    wcBtn.classList.add('active');
-                    wcBtn.classList.remove('on-cooldown');
-                    setText(el.warCryLabel, `War Cry ${Math.ceil(this.warCry.timeLeft)}s`);
-                } else if (this.warCry.cooldown > 0) {
-                    wcBtn.classList.remove('active');
-                    wcBtn.classList.add('on-cooldown');
-                    setText(el.warCryLabel, `Cooldown ${Math.ceil(this.warCry.cooldown)}s`);
-                } else {
-                    wcBtn.classList.remove('active', 'on-cooldown');
-                    setText(el.warCryLabel, 'War Cry');
-                }
-            }
-
-            // Only rebuild inner tab content when that tab is actually visible.
-            // updateUI runs at 10Hz, so skipping hidden tabs saves a LOT of DOM work.
-            const activeTab = document.querySelector('.tab.active')?.dataset.tab;
-            if (activeTab === 'army')  this.updateArmyTab();
-            if (activeTab === 'stats') this.updateStatsTab();
-
-            if (!this._menuAcc) this._menuAcc = 0;
-            this._menuAcc++;
-            if (activeTab === 'build' && this._menuAcc % 5 === 0) this.buildMenu();
-        }
-
-        updateArmyTab() {
-            const army = document.getElementById('armyList');
-            const defCount = {};
-            let totalDps = 0;
-            for (const b of this.buildings) {
-                const def = BLD[b.type];
-                if (def.defense) {
-                    defCount[def.name] = (defCount[def.name] || 0) + 1;
-                    const d = def.defense(b.level);
-                    totalDps += d.dmg / d.cd;
-                }
-            }
-            const rows = [
-                { label: 'Buildings', val: this.buildings.length },
-                { label: 'Total DPS', val: totalDps.toFixed(0) },
-                ...Object.entries(defCount).map(([k,v]) => ({ label: k, val: v })),
-            ];
-            setHtml(army, rows.map(r => `<div class="army-item"><span>${r.label}</span><span class="val">${r.val}</span></div>`).join(''));
-
-            const al = document.getElementById('achievementList');
-            setHtml(al, ACHS.map(a => `
-                <div class="achievement ${this.achievements[a.id] ? 'done' : ''}">
-                    <div class="achievement-icon">${a.icon}</div>
-                    <div class="achievement-body">
-                        <div class="achievement-name">${a.name}</div>
-                        <div class="achievement-desc">${a.desc}</div>
-                    </div>
-                </div>
-            `).join(''));
-        }
-
-        updateStatsTab() {
-            const el = document.getElementById('statList');
-            const rows = [
-                { label: 'Buildings Built', val: this.stats.built },
-                { label: 'Upgrades', val: this.stats.upgrades },
-                { label: 'Enemies Slain', val: this.stats.kills },
-                { label: 'Click Bonuses', val: this.stats.clicks },
-                { label: 'Max Combo', val: 'x' + this.stats.maxCombo },
-                { label: 'Spells Cast', val: this.stats.spells },
-                { label: 'Total Gold Earned', val: fmt(this.stats.goldEarned) },
-                { label: 'Waves Cleared', val: this.stats.wavesCleared },
-                { label: 'Time Played', val: fmtDuration(this.stats.playTime) },
-                { label: 'Current Wave', val: this.wave.number },
-                { label: 'Current Day', val: this.dayCount },
-                { label: 'Storage Capacity', val: fmt(this.cap()) },
-                { label: 'Gold Multiplier', val: `x${this.goldMult.toFixed(2)}` },
-                { label: 'XP Multiplier', val: `x${this.xpMult.toFixed(2)}` },
-            ];
-            setHtml(el, rows.map(r => `<div class="stat-row"><span>${r.label}</span><span class="val">${r.val}</span></div>`).join(''));
-        }
-
-        // ---------- Feedback helpers ----------
-        toast(msg, type = '') {
-            const container = document.getElementById('toasts');
-            const el = document.createElement('div');
-            el.className = 'toast ' + type;
-            el.textContent = msg;
-            container.appendChild(el);
-            // Don't let a burst of events stack toasts down the whole screen
-            while (container.children.length > 4) container.firstElementChild.remove();
-            setTimeout(() => {
-                el.classList.add('out');
-                setTimeout(() => el.remove(), 320);
-            }, 2200);
-        }
-
-        showAlert(text, dur = 2) {
-            const p = document.getElementById('alertPanel');
-            p.textContent = text;
-            p.classList.add('active');
-            this.alertTimer = dur;
-        }
-
-        floatText(text, x, y, color) {
-            this.popups.push({ x, y, text, color, life: 1.2, max: 1.2 });
-        }
-
-        pulseRes(key) {
-            const el = document.querySelector(`.res[data-res="${key}"]`);
-            if (!el) return;
-            el.classList.remove('pulse');
-            void el.offsetWidth;
-            el.classList.add('pulse');
-        }
-
-        resColor(k) {
-            return ({ gold: '#ffc857', elixir: '#e3a8ff', dark: '#a06bff', gems: '#5cd8ff' })[k] || '#fff';
-        }
-        resSymbol(k) {
-            return ({ gold: '◈', elixir: '❂', dark: '✦', gems: '♦' })[k] || '?';
-        }
-
-        // ---------- Achievements ----------
+        // ---------- achievements ----------
         checkAchievements() {
             for (const a of ACHS) {
                 if (this.achievements[a.id]) continue;
                 if (a.check(this)) {
                     this.achievements[a.id] = true;
                     this.res.gems += 3;
-                    this.toast(`🏆 ${a.name} unlocked! +3 ♦`, 'success');
+                    this.toast(`Achievement: ${a.name}  +3 gems`, 'success');
                     this.audio.levelup();
                 }
             }
+            this.checkQuests();
         }
 
-        // ---------- Game Over ----------
+        // ---------- game over ----------
         gameOver() {
-            if (this.gameOverShown) return; // don't re-queue if already showing
-            this.showAlert('☠ KINGDOM FALLEN ☠', 4);
-            // Freeze the world during game-over via the pause flag — no more
-            // sentinel values on wave.timer that could leak into saves.
-            this.wave.active = false;
-            this.wave.spawnLeft = 0;
-            this.wave.timer = CFG.waveBaseSec;
-            this.enemies = [];
-            this.projectiles = [];
-            this.gameOverShown = true;
-            this.paused = true;
+            if (this.gameOverShown) return;
+            this.showAlert('KINGDOM FALLEN', 4);
+            this.wave.active = false; this.wave.spawnLeft = 0; this.wave.timer = CFG.waveBaseSec;
+            this.enemies = []; this.projectiles = [];
+            this.gameOverShown = true; this.paused = true;
             setTimeout(() => {
                 this.showConfirm({
-                    title: 'KINGDOM FALLEN',
-                    icon: '☠',
-                    body: `Your Town Hall fell on <b>Day ${this.dayCount}</b>, <b>Wave ${this.wave.number}</b>.<br><br>Raise a new banner and rebuild from the ashes?`,
-                    yesText: '⚔ Rebuild',
-                    noText: 'Not yet',
-                    danger: true,
-                    onYes: () => this.wipeSave(),
+                    title: 'Kingdom Fallen', icon: 'skull',
+                    body: `Your Town Hall fell on <b>Day ${this.dayCount}</b>, <b>Wave ${this.wave.number}</b>.<br><br>${this.canAscend() ? `You can still <b>Ascend</b> from the menu to keep the ${this.ascendGain()} crowns you earned.<br><br>` : ''}Raise a new banner and rebuild?`,
+                    yesText: 'Rebuild', noText: 'Not yet', danger: true,
+                    onYes: () => (this.canAscend() ? this.ascend() : this.wipeSave()),
                     onNo: () => {
-                        // Declined: give them a 60s grace period to rebuild, then waves resume
-                        this.wave.timer = 60;
-                        this.gameOverShown = false;
-                        this.paused = false;
-                        this.toast('60s grace — rebuild your Town Hall', 'warn');
-                        this.buildMenu(true); // refresh so TH card reappears
+                        this.wave.timer = 60; this.gameOverShown = false; this.paused = false;
+                        this.toast('60 seconds of peace. Rebuild your Town Hall.', 'warn');
+                        this.buildCat = 'core'; this.openPanel('build');
                     },
                 });
             }, 1800);
         }
 
-        /**
-         * Custom themed confirm dialog.
-         * opts: { title, body (html), icon, yesText, noText, danger, onYes, onNo }
-         */
-        showConfirm(opts = {}) {
-            // Create once, reuse
-            let el = document.getElementById('confirmDialog');
-            if (!el) {
-                el = document.createElement('div');
-                el.id = 'confirmDialog';
-                el.className = 'confirm-dialog';
-                el.innerHTML = `
-                    <div class="confirm-backdrop"></div>
-                    <div class="confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
-                        <div class="confirm-icon" aria-hidden="true"></div>
-                        <h2 class="confirm-title" id="confirmTitle"></h2>
-                        <div class="confirm-body" id="confirmBody"></div>
-                        <div class="confirm-actions">
-                            <button class="btn small" data-act="no"></button>
-                            <button class="btn primary" data-act="yes"></button>
-                        </div>
-                    </div>
-                `;
-                document.body.appendChild(el);
-            }
-            const panel = el.querySelector('.confirm-panel');
-            el.querySelector('.confirm-icon').textContent = opts.icon || '⚔';
-            el.querySelector('.confirm-title').textContent = opts.title || 'Confirm';
-            el.querySelector('.confirm-body').innerHTML = opts.body || '';
-            const yesBtn = el.querySelector('[data-act="yes"]');
-            const noBtn  = el.querySelector('[data-act="no"]');
-            yesBtn.textContent = opts.yesText || 'Confirm';
-            noBtn.textContent  = opts.noText || 'Cancel';
-            panel.classList.toggle('danger', !!opts.danger);
-
-            const returnFocus = document.activeElement;
-            const close = () => {
-                el.classList.remove('open');
-                if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
-                yesBtn.removeEventListener('click', onYes);
-                noBtn.removeEventListener('click', onNo);
-                el.querySelector('.confirm-backdrop').removeEventListener('click', onNo);
-                document.removeEventListener('keydown', onKey);
-            };
-            const onYes = () => { close(); if (opts.onYes) opts.onYes(); };
-            const onNo  = () => { close(); if (opts.onNo) opts.onNo(); };
-            const onKey = (e) => {
-                if (e.key === 'Escape') onNo();
-                // Enter on a focused button presses that button (so Enter on
-                // "Keep Playing" can't wipe the save); anywhere else it confirms
-                if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') onYes();
-            };
-            yesBtn.addEventListener('click', onYes);
-            noBtn.addEventListener('click', onNo);
-            el.querySelector('.confirm-backdrop').addEventListener('click', onNo);
-            document.addEventListener('keydown', onKey);
-            // Force reflow to restart animation
-            void el.offsetWidth;
-            el.classList.add('open');
-            // Destructive prompts start on the safe choice
-            (opts.danger ? noBtn : yesBtn).focus();
+        // ---------- main loop ----------
+        loop(ts) {
+            let elapsed = (ts - this.lastTime) / 1000;
+            this.lastTime = ts;
+            if (!this.paused && elapsed > 0) {
+                if (elapsed > CFG.catchUpMaxSec) { this.applyOfflineEarnings(elapsed - CFG.catchUpMaxSec); elapsed = CFG.catchUpMaxSec; }
+                elapsed *= this.speed;
+                while (elapsed > 0) { const dt = Math.min(elapsed, 0.1); this.update(dt); elapsed -= dt; }
+            } else this.tnow += Math.max(0, Math.min(elapsed, 0.1)) * 0;
+            this.render();
+            requestAnimationFrame((t) => this.loop(t));
         }
 
-        // ---------- War Cry ----------
-        activateWarCry() {
-            if (this.warCry.active) {
-                this.toast('War Cry already active!', 'warn');
-                return;
-            }
-            if (this.warCry.cooldown > 0) {
-                this.toast(`War Cry on cooldown (${Math.ceil(this.warCry.cooldown)}s)`, 'warn');
-                this.audio.error();
-                return;
-            }
-            this.warCry.active = true;
-            this.warCry.timeLeft = 15;
-            this.warCry.cooldown = 90;
-            this.audio.spell();
-            this.toast('🔥 War Cry! Tower damage +50% for 15s', 'success');
-            this.showAlert('🔥 WAR CRY 🔥', 2);
-        }
+        update(dt) {
+            this.tnow += dt;
+            this.stats.playTime += dt;
+            this.dayTime += dt / CFG.dayLengthSec;
+            if (this.dayTime >= 1) { this.dayTime -= 1; this.dayCount++; }
+            if (this.occDirty) this.rebuildOcc();
 
-        // ---------- Co-op Multiplayer ----------
-        initCoop() {
-            this.bindCoopUI();
-            if (typeof Peer === 'undefined') {
-                console.warn('PeerJS not loaded, co-op disabled');
-                const codeEl = document.getElementById('gameCode');
-                if (codeEl) codeEl.textContent = 'OFFLINE';
-                this.setRelayStatus('offline', 'Co-op offline — the PeerJS script did not load');
-                return;
+            const rm = this.rateMult();
+            this.stats.goldEarned += this.addRes('gold', this.rates.gold * dt * rm);
+            this.addRes('elixir', this.rates.elixir * dt * rm);
+            this.addRes('dark', this.rates.dark * dt * rm);
+            if (this.rates.gems > 0) { this.gemAcc += this.rates.gems * dt * this.boost.mult; if (this.gemAcc >= 1) { const n = Math.floor(this.gemAcc); this.gemAcc -= n; this.res.gems += n; this.toast(`The Gem Quarry found ${n} gem${n > 1 ? 's' : ''}`, 'success'); } }
+
+            if (this.boost.timeLeft > 0) { this.boost.timeLeft -= dt; if (this.boost.timeLeft <= 0) { this.boost.mult = 1; this.toast('Boost ended', 'warn'); } }
+            if (this.warCry.active) { this.warCry.timeLeft -= dt; if (this.warCry.timeLeft <= 0) { this.warCry.active = false; this.toast('War Cry ended', 'warn'); } }
+            if (this.warCry.cooldown > 0) this.warCry.cooldown -= dt;
+            if (this.combo.time > 0) { this.combo.time -= dt; if (this.combo.time <= 0) { this.combo.count = 0; this.combo.mult = 1; } }
+
+            for (const b of this.buildings) {
+                if (b.build < 1) b.build = Math.min(1, (b.build ?? 1) + dt * 2.2);
+                if (b.upg > 0) b.upg = Math.max(0, b.upg - dt * 2.2);
+                if (b.pop > 0) b.pop = Math.max(0, b.pop - dt * 5);
             }
 
-            const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-            const genCode = () => Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-            this.coop.code = genCode();
-
-            const codeEl = document.getElementById('gameCode');
-            if (codeEl) codeEl.textContent = this.coop.code;
-
-            const createPeer = (code) => {
-                const peer = new Peer('ember_' + code, { debug: 0 });
-
-                peer.on('open', () => {
-                    this.coop.reconnectTries = 0;
-                    this.setRelayStatus('ready', 'Ready — share your code');
-                });
-
-                peer.on('connection', (conn) => {
-                    this.handleIncomingConnection(conn);
-                });
-
-                // Lost the signalling server (sleep, a network change). A partner
-                // link already up is direct WebRTC and keeps going; new ones
-                // can't be made until we're back, so get back.
-                peer.on('disconnected', () => {
-                    if (this.coop.peer !== peer) return;
-                    this.setRelayStatus('lost', 'Relay lost — reconnecting…');
-                    this.scheduleReconnect(peer);
-                });
-
-                peer.on('close', () => {
-                    if (this.coop.peer === peer && !this.coop.reconnectTimer) this.setRelayStatus('offline', 'Co-op offline');
-                });
-
-                peer.on('error', (err) => {
-                    const type = err && err.type;
-                    if (type === 'unavailable-id') {
-                        // Someone else holds this code right now: roll a new one
-                        this.coop.code = genCode();
-                        if (codeEl) codeEl.textContent = this.coop.code;
-                        this.coop.peer = null;
-                        peer.destroy();
-                        this.coop.peer = createPeer(this.coop.code);
-                    } else if (type === 'peer-unavailable') {
-                        // The code we tried isn't online. PeerJS reports this on
-                        // the Peer, not the connection, so the 12s timeout used
-                        // to be the only feedback.
-                        clearTimeout(this._connectTimer);
-                        this.audio.error();
-                        this.toast('Nobody is online with that code', 'error');
-                    } else if (type === 'browser-incompatible') {
-                        this.setRelayStatus('offline', 'Co-op needs a browser with WebRTC');
-                    } else if (type === 'network' || type === 'server-error' || type === 'socket-error' || type === 'socket-closed') {
-                        this.setRelayStatus('error', 'Relay unreachable — co-op offline');
-                        this.scheduleReconnect(peer);
-                    } else if (type === 'webrtc') {
-                        clearTimeout(this._connectTimer);
-                        this.toast('Connection failed — the two networks could not link up', 'error');
-                    } else {
-                        console.warn('Peer error:', type, err && err.message);
-                    }
-                });
-
-                return peer;
-            };
-            this._createPeer = createPeer;
-
-            try {
-                this.coop.peer = createPeer(this.coop.code);
-            } catch (e) {
-                console.warn('Co-op init failed:', e);
-                this.setRelayStatus('offline', 'Co-op offline — this browser cannot open a peer link');
-            }
-        }
-
-        // Try the relay again with backoff (2s, 4s, 8s ... up to 30s, five tries).
-        // A peer that never got through was torn down by PeerJS, so it needs
-        // a fresh object; one that was connected before can just reconnect.
-        scheduleReconnect(peer) {
-            if (this.coop.reconnectTimer || this.coop.peer !== peer || !this._createPeer) return;
-            const tries = this.coop.reconnectTries++;
-            if (tries >= 5) {
-                this.setRelayStatus('error', 'Relay unreachable — reload the page to retry co-op');
-                return;
-            }
-            const wait = Math.min(30000, 2000 * Math.pow(2, tries));
-            this.coop.reconnectTimer = setTimeout(() => {
-                this.coop.reconnectTimer = null;
-                if (this.coop.peer !== peer) return;
-                this.setRelayStatus('lost', 'Reconnecting to relay…');
-                if (peer.destroyed) {
-                    this.coop.peer = this._createPeer(this.coop.code);
-                } else if (peer.disconnected) {
-                    try { peer.reconnect(); } catch (e) { this.coop.peer = this._createPeer(this.coop.code); }
+            if (this.wave.active) {
+                if (this.wave.spawnLeft > 0) {
+                    this.wave.spawnCd -= dt;
+                    if (this.wave.spawnCd <= 0) { this.spawnEnemy(this.wave.queue[this.wave.total - this.wave.spawnLeft] || 'goblin'); this.wave.spawnLeft--; this.wave.spawnCd = rand(0.6, 1.2); }
                 }
-            }, wait);
-        }
-
-        setRelayStatus(state, text) {
-            this.coop.relay = state;
-            this.coop.relayText = text;
-            this.updateCoopUI();
-        }
-
-        bindCoopUI() {
-            const copyBtn = document.getElementById('btnCopyCode');
-            if (copyBtn) copyBtn.addEventListener('click', () => {
-                navigator.clipboard.writeText(this.coop.code).then(() => {
-                    this.toast('Code copied!', 'success');
-                    this.audio.click();
-                }).catch(() => {
-                    this.toast(this.coop.code, 'success');
-                    this.audio.click();
-                });
-            });
-
-            const connectBtn = document.getElementById('btnConnect');
-            const codeInput = document.getElementById('partnerCodeInput');
-            if (connectBtn && codeInput) {
-                connectBtn.addEventListener('click', () => {
-                    const code = codeInput.value.trim().toUpperCase();
-                    if (!/^[A-Z0-9]{6}$/.test(code)) {
-                        this.toast('Codes are 6 letters and digits', 'warn');
-                        this.audio.error();
-                        return;
-                    }
-                    if (code === this.coop.code) {
-                        this.toast("That's your own code!", 'warn');
-                        this.audio.error();
-                        return;
-                    }
-                    this.audio.click();
-                    this.connectToPartner(code);
-                });
-                codeInput.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') connectBtn.click();
-                });
-            }
-
-            const disconnectBtn = document.getElementById('btnDisconnect');
-            if (disconnectBtn) disconnectBtn.addEventListener('click', () => {
-                this.audio.click();
-                this.disconnectCoop();
-            });
-
-            const acceptBtn = document.getElementById('btnAcceptInvite');
-            if (acceptBtn) acceptBtn.addEventListener('click', () => {
-                this.audio.click();
-                this.acceptInvite();
-            });
-
-            const declineBtn = document.getElementById('btnDeclineInvite');
-            if (declineBtn) declineBtn.addEventListener('click', () => {
-                this.audio.click();
-                this.declineInvite();
-            });
-
-            document.querySelectorAll('.gift-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    this.audio.click();
-                    this.sendGift(btn.dataset.gift);
-                });
-            });
-        }
-
-        connectToPartner(code) {
-            const peer = this.coop.peer;
-            if (!peer) { this.toast('Co-op not available', 'error'); return; }
-            if (this.coop.connected) { this.toast('Already connected', 'warn'); return; }
-            if (peer.destroyed || peer.disconnected) {
-                this.toast('Not on the relay yet — trying to reconnect', 'warn');
-                this.scheduleReconnect(peer);
-                return;
-            }
-
-            this.toast('Connecting...', 'warn');
-            let conn = null;
-            try {
-                conn = peer.connect('ember_' + code, {
-                    metadata: { name: this.player.name, level: this.player.level, code: this.coop.code }
-                });
-            } catch (e) { /* handled below */ }
-            if (!conn) { this.toast('Could not start the connection', 'error'); return; }
-
-            clearTimeout(this._connectTimer);
-            this._connectTimer = setTimeout(() => {
-                if (!this.coop.connected) {
-                    this.toast('Connection timed out — is your partner online?', 'error');
-                    try { conn.close(); } catch (_) {}
-                }
-            }, 12000);
-
-            conn.on('open', () => {
-                clearTimeout(this._connectTimer);
-                this.setupConnection(conn);
-                conn.send({ type: 'hello', name: this.player.name, level: this.player.level });
-            });
-
-            conn.on('error', () => {
-                clearTimeout(this._connectTimer);
-                this.toast('Connection failed — check the code', 'error');
-            });
-        }
-
-        handleIncomingConnection(conn) {
-            if (this.coop.connected || this.coop.pendingInvite) {
-                // A data channel can't carry anything until it opens, so the old
-                // send-then-close here never actually told them we were busy
-                conn.on('open', () => {
-                    try { conn.send({ type: 'busy' }); } catch (_) {}
-                    setTimeout(() => { try { conn.close(); } catch (_) {} }, 300);
-                });
-                return;
-            }
-            // Metadata is whatever the other browser put there
-            const meta = (conn.metadata && typeof conn.metadata === 'object') ? conn.metadata : {};
-            const name = cleanStr(meta.name, 24, 'A player');
-            const level = cleanInt(meta.level, 1, 1, 999);
-            this.coop.pendingInvite = conn;
-
-            conn.on('open', () => {
-                if (this.coop.pendingInvite === conn) this.showInviteNotification(name, level);
-            });
-
-            // They gave up, or their tab closed, before we answered
-            const withdrawn = () => {
-                if (this.coop.pendingInvite !== conn) return;
-                this.coop.pendingInvite = null;
-                this.hideInviteNotification();
-                this.toast('Invite withdrawn', 'warn');
-            };
-            conn.on('close', withdrawn);
-            conn.on('error', withdrawn);
-
-            // Auto-decline after 30 seconds
-            setTimeout(() => {
-                if (this.coop.pendingInvite === conn && !this.coop.connected) {
-                    this.declineInvite();
-                }
-            }, 30000);
-        }
-
-        acceptInvite() {
-            if (!this.coop.pendingInvite) return;
-            const conn = this.coop.pendingInvite;
-            this.coop.pendingInvite = null;
-            this.hideInviteNotification();
-            this.setupConnection(conn);
-            conn.send({ type: 'hello', name: this.player.name, level: this.player.level });
-        }
-
-        declineInvite() {
-            if (!this.coop.pendingInvite) {
-                this.hideInviteNotification();
-                return;
-            }
-            try { this.coop.pendingInvite.send({ type: 'declined' }); } catch (_) {}
-            try { this.coop.pendingInvite.close(); } catch (_) {}
-            this.coop.pendingInvite = null;
-            this.hideInviteNotification();
-            this.toast('Invite declined', 'warn');
-        }
-
-        setupConnection(conn) {
-            this.coop.conn = conn;
-            this.coop.connected = true;
-            this.coop.partnerCode = (conn.peer || '').replace('ember_', '');
-
-            conn.on('data', (data) => this.handleCoopData(data));
-            conn.on('close', () => this.handleCoopDisconnect());
-            conn.on('error', () => this.handleCoopDisconnect());
-
-            // Sync state every 2 seconds
-            this.coop.syncInterval = setInterval(() => {
-                if (this.coop.connected && this.coop.conn && this.coop.conn.open) {
-                    try { this.coop.conn.send({ type: 'state', state: this.getCoopState() }); } catch (_) {}
-                }
-            }, 2000);
-
-            this.audio.levelup();
-            this.toast('Co-op connected!', 'success');
-            this.showAlert('⚔ ALLY JOINED ⚔', 2);
-            this.updateCoopUI();
-
-            // Send initial state immediately
-            try { conn.send({ type: 'state', state: this.getCoopState() }); } catch (_) {}
-
-            this.showTab('coop');
-        }
-
-        handleCoopDisconnect() {
-            const wasConnected = this.coop.connected;
-            this.coop.connected = false;
-            this.coop.conn = null;
-            this.coop.partnerState = null;
-            this.coop.partnerCode = '';
-            if (this.coop.syncInterval) {
-                clearInterval(this.coop.syncInterval);
-                this.coop.syncInterval = null;
-            }
-            if (wasConnected) {
-                this.toast('Partner disconnected', 'warn');
-                this.showAlert('ALLY LEFT', 2);
-            }
-            this.updateCoopUI();
-        }
-
-        disconnectCoop() {
-            if (this.coop.conn) {
-                try { this.coop.conn.send({ type: 'goodbye' }); } catch (_) {}
-                try { this.coop.conn.close(); } catch (_) {}
-            }
-            this.handleCoopDisconnect();
-        }
-
-        // Everything here arrived over a data channel from another browser.
-        // Only the shape we expect gets through, every number is clamped and
-        // every string is cut short, and it only ever lands via textContent.
-        handleCoopData(data) {
-            if (!data || typeof data !== 'object' || typeof data.type !== 'string') return;
-
-            switch (data.type) {
-                case 'hello':
-                    this.toast(`${cleanStr(data.name, 24, 'Partner')} (Lv ${cleanInt(data.level, 1, 1, 999)}) joined!`, 'success');
-                    break;
-                case 'declined':
-                    this.toast('Invite was declined', 'warn');
-                    this.handleCoopDisconnect();
-                    break;
-                case 'busy':
-                    this.toast('Player is already in a co-op session', 'warn');
-                    this.handleCoopDisconnect();
-                    break;
-                case 'goodbye':
-                    this.handleCoopDisconnect();
-                    break;
-                case 'state': {
-                    // The honest client sends one every 2s; don't let a flood redraw the panel
-                    const now = performance.now();
-                    if (now - this.coop.lastStateAt < 400) return;
-                    this.coop.lastStateAt = now;
-                    const s = this.sanitizePeerState(data.state);
-                    if (!s) return;
-                    this.coop.partnerState = s;
-                    this.updatePartnerPanel();
-                    break;
-                }
-                case 'gift':
-                    this.receiveGift(data.resource, data.amount, cleanStr(data.from, 24, 'Your partner'));
-                    break;
-            }
-        }
-
-        // Copy only the fields the partner panel draws, each checked, into a fresh object
-        sanitizePeerState(s) {
-            if (!s || typeof s !== 'object') return null;
-            const res = (s.res && typeof s.res === 'object') ? s.res : {};
-            const wave = (s.wave && typeof s.wave === 'object') ? s.wave : {};
-            const buildings = [];
-            if (Array.isArray(s.buildings)) {
-                // No more entries than the grid has tiles; anything past that is junk
-                for (const b of s.buildings.slice(0, CFG.gridW * CFG.gridH)) {
-                    if (!b || typeof b !== 'object' || typeof b.type !== 'string' || !Object.hasOwn(BLD, b.type)) continue;
-                    const def = BLD[b.type];
-                    const maxHp = cleanInt(b.maxHp, 1, 1, 1e9);
-                    buildings.push({
-                        type: b.type,
-                        tx: cleanInt(b.tx, 0, 0, CFG.gridW - 1),
-                        ty: cleanInt(b.ty, 0, 0, CFG.gridH - 1),
-                        level: cleanInt(b.level, 1, 1, def.maxLevel),
-                        hp: cleanInt(b.hp, maxHp, 0, maxHp),
-                        maxHp,
-                    });
-                }
-            }
-            return {
-                name: cleanStr(s.name, 24, 'Partner'),
-                level: cleanInt(s.level, 1, 1, 999),
-                res: {
-                    gold: safeNum(Number(res.gold), 0), elixir: safeNum(Number(res.elixir), 0),
-                    dark: safeNum(Number(res.dark), 0), gems: safeNum(Number(res.gems), 0),
-                },
-                buildings,
-                wave: { number: cleanInt(wave.number, 0, 0, 1e6), active: wave.active === true, timer: safeNum(Number(wave.timer), 0, 0, 1e6) },
-                enemies: cleanInt(s.enemies, 0, 0, 999),
-                dayCount: cleanInt(s.dayCount, 1, 1, 1e9),
-                boost: s.boost === true,
-                warCry: s.warCry === true,
-            };
-        }
-
-        getCoopState() {
-            return {
-                name: this.player.name,
-                level: this.player.level,
-                res: { gold: this.res.gold, elixir: this.res.elixir, dark: this.res.dark, gems: this.res.gems },
-                rates: { gold: this.rates.gold, elixir: this.rates.elixir, dark: this.rates.dark },
-                buildings: this.buildings.map(b => ({
-                    type: b.type, tx: b.tx, ty: b.ty, level: b.level,
-                    hp: b.hp, maxHp: b.maxHp,
-                })),
-                wave: { number: this.wave.number, active: this.wave.active, timer: this.wave.timer },
-                enemies: this.enemies.length,
-                dayTime: this.dayTime,
-                dayCount: this.dayCount,
-                stats: { built: this.stats.built, kills: this.stats.kills },
-                boost: this.boost.mult > 1,
-                warCry: this.warCry.active,
-            };
-        }
-
-        sendGift(resource) {
-            if (!this.coop.connected || !this.coop.conn || !this.coop.conn.open) {
-                this.toast('Not connected to a partner', 'warn');
-                return;
-            }
-            let amount;
-            if (resource === 'gems') {
-                amount = 1;
-                if (this.res.gems < 1) {
-                    this.toast('Not enough gems', 'warn');
-                    this.audio.error();
-                    return;
+                if (this.wave.spawnLeft <= 0 && this.enemies.length === 0) {
+                    this.wave.active = false;
+                    this.wave.timer = Math.max(CFG.waveMinSec, CFG.waveBaseSec - this.wave.number * 2);
+                    this.stats.wavesCleared++;
+                    const g = this.waveGems * (this.wave.number % 10 === 0 ? 3 : 1);
+                    this.res.gems += g;
+                    this.gainXp(25 + this.wave.number * 5);
+                    this.toast(`Wave ${this.wave.number} cleared  +${g} gems`, 'success');
+                    this.showAlert('WAVE CLEARED', 2);
+                    this.checkAchievements();
                 }
             } else {
-                amount = Math.floor((this.res[resource] || 0) * 0.1);
-                if (amount < 1) {
-                    this.toast(`Not enough ${resource} to send`, 'warn');
-                    this.audio.error();
-                    return;
+                this.wave.timer -= dt;
+                if (this.wave.timer <= 0) this.startWave();
+            }
+
+            this.defenseTick(dt);
+            this.enemyTick(dt);
+            this.projectileTick(dt);
+            this.goblinTick(dt);
+
+            if (this.particles.length > 420) this.particles.splice(0, this.particles.length - 420);
+            for (const p of this.particles) {
+                p.x += p.vx * dt; p.y += p.vy * dt;
+                if (p.kind === 'smoke') p.vy *= 0.985; else if (p.kind !== 'ring') p.vy += 300 * dt;
+                p.life -= dt;
+            }
+            compact(this.particles, alive);
+            for (const p of this.popups) { p.y -= 38 * dt; p.life -= dt; }
+            compact(this.popups, alive);
+
+            if (this.alertTimer > 0) { this.alertTimer -= dt; if (this.alertTimer <= 0) this.hideAlert(); }
+            if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 2);
+            if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 18);
+            if (this.selPulse > 0) this.selPulse = Math.max(0, this.selPulse - dt * 0.8);
+
+            if (this.autoCollect) { this._autoCollectAcc += dt; if (this._autoCollectAcc >= 5) { this._autoCollectAcc = 0; this.collectAll(true); } }
+            if (this.settings.autoUpgrade !== 'off') {
+                this._autoUpAcc += dt;
+                if (this._autoUpAcc >= 1.5) { this._autoUpAcc = 0; this.upgradeCheapest(this.settings.autoUpgrade, true); }
+            }
+
+            this._uiAcc = (this._uiAcc || 0) + dt;
+            if (this._uiAcc >= 0.1) { this._uiAcc = 0; this.updateUI(); }
+        }
+
+        // ---------- rendering ----------
+        render() {
+            const g = this.ctx;
+            const t = this.tnow;
+            g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+            g.fillStyle = '#2f5a28';
+            g.fillRect(0, 0, this.vw, this.vh);
+            this.ensureWorld();
+            const night = this.nightAmount();
+
+            g.save();
+            const sh = this.shake > 0 ? this.shake : 0;
+            g.translate(this.cam.x + (sh ? rand(-sh, sh) : 0), this.cam.y + (sh ? rand(-sh, sh) : 0));
+            g.scale(this.cam.zoom, this.cam.zoom);
+            const vx0 = -this.cam.x / this.cam.zoom - 20, vy0 = -this.cam.y / this.cam.zoom - 20;
+            const vx1 = (this.vw - this.cam.x) / this.cam.zoom + 20, vy1 = (this.vh - this.cam.y) / this.cam.zoom + 20;
+
+            A.world.drawMeadow(g, vx0, vy0, vx1, vy1);
+            A.world.drawIsland(g);
+            const carrying = this.buildMode || this.moveMode;
+            if (carrying) this.drawGrid(g);
+            if (this.buildMode && this.hoverTile) this.drawBuildGhost(g);
+            if (this.moveMode && this.hoverTile) this.drawMoveGhost(g);
+            if (this.spellMode && this.hoverTile) this.drawSpellGhost(g);
+            this.drawRange(g);
+
+            // everything that stands on the map, sorted back to front
+            const draws = this._draws; draws.length = 0;
+            for (const b of this.buildings) { b._depth = b.tx + b.ty + BLD[b.type].size; draws.push(b); }
+            for (const e of this.enemies) { e._depth = e.tx + e.ty + 0.4; draws.push(e); }
+            if (this.goblin) { this.goblin._depth = this.goblin.tx + this.goblin.ty + 0.4; draws.push(this.goblin); }
+            draws.sort((a, b) => a._depth - b._depth);
+            const scn = A.world.sceneryIn(vx0, vy0, vx1, vy1, this._scn);
+
+            // x-ray: buildings drawn in front of the one you're looking at turn see-through,
+            // but only where they really cover its picture
+            const focus = this.selected || this.hoverBuilding || (this.moveMode && this.moveMode);
+            let frect = null;
+            if (this.settings.xray && focus && this.buildings.includes(focus)) {
+                const sp = this.spriteOf(focus); A.maskOf(sp);
+                const c = this.centerOf(focus);
+                const bb = sp.bbox, pts = [];
+                for (let iy = 0; iy < 7; iy++) for (let ix = 0; ix < 7; ix++) {
+                    const px = bb.x0 + (ix + 0.5) / 7 * (bb.x1 - bb.x0), py = bb.y0 + (iy + 0.5) / 7 * (bb.y1 - bb.y0);
+                    if (A.hitSprite(sp, px, py, 0)) pts.push(c.x + px, c.y + py);
+                }
+                frect = { x0: c.x + bb.x0, y0: c.y + bb.y0, x1: c.x + bb.x1, y1: c.y + bb.y1, pts, depth: focus._depth ?? (focus.tx + focus.ty + BLD[focus.type].size) };
+            }
+            this._lightQ.length = 0;
+            let si = 0;
+            for (const d of draws) {
+                while (si < scn.length && scn[si].depth <= d._depth) A.world.drawSceneryItem(g, scn[si++], t);
+                if (d.kind) { A.drawEnemy(g, d, t); }
+                else if (d === this.goblin) A.drawTreasureGoblin(g, d, t);
+                else this.drawBuilding(g, d, t, frect);
+            }
+            while (si < scn.length) A.world.drawSceneryItem(g, scn[si++], t);
+            for (const e of this.enemies) A.drawEnemyBar(g, e);
+
+            this.drawBeams(g, t);
+            for (const p of this.projectiles) this.drawProjectile(g, p);
+            this.drawParticles(g);
+            this.drawBadges(g, t);
+            A.world.drawClouds(g, t, this.cam, this.vw, this.vh, 1 - night * 0.6);
+            this.drawAmbient(g, t, night);
+            this.drawPopups(g);
+            g.restore();
+
+            // time of day: multiply tint, then the glows on top of it
+            if (night > 0.01 || this.dayTime < 0.34 || this.dayTime > 0.7) this.drawDayTint(g, night);
+            if (night > 0.05 && this._lightQ.length) {
+                g.save();
+                g.translate(this.cam.x, this.cam.y); g.scale(this.cam.zoom, this.cam.zoom);
+                for (const q of this._lightQ) A.drawLights(g, q.sp, q.x, q.y, night);
+                g.restore();
+            }
+            // soft vignette
+            if (!this._vig || this._vigW !== this.vw || this._vigH !== this.vh) {
+                const gr = g.createRadialGradient(this.vw / 2, this.vh / 2, Math.min(this.vw, this.vh) * 0.45, this.vw / 2, this.vh / 2, Math.max(this.vw, this.vh) * 0.78);
+                gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(8,12,20,0.38)');
+                this._vig = gr; this._vigW = this.vw; this._vigH = this.vh;
+            }
+            g.fillStyle = this._vig; g.fillRect(0, 0, this.vw, this.vh);
+            if (this.flash > 0) { g.fillStyle = `rgba(255,255,255,${this.flash})`; g.fillRect(0, 0, this.vw, this.vh); }
+        }
+
+        drawDayTint(g, night) {
+            const t = this.dayTime;
+            // white by day, warm at dawn and dusk, a cool blue at night
+            const warm = Math.max(0, 1 - Math.abs(t - 0.25) / 0.09, 1 - Math.abs(t - 0.78) / 0.09);
+            const mixc = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+            let c = mixc([255, 255, 255], [255, 206, 165], warm);
+            c = mixc(c, [138, 152, 214], night);
+            g.save();
+            g.globalCompositeOperation = 'multiply';
+            g.fillStyle = `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
+            g.fillRect(0, 0, this.vw, this.vh);
+            g.restore();
+        }
+
+        drawGrid(g) {
+            const gw = CFG.gridW, gh = CFG.gridH;
+            g.save();
+            g.strokeStyle = 'rgba(255,255,255,0.22)'; g.lineWidth = 1 / this.cam.zoom;
+            g.beginPath();
+            for (let i = 0; i <= gw; i++) { const a = this.worldIso(i, 0), b = this.worldIso(i, gh); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
+            for (let j = 0; j <= gh; j++) { const a = this.worldIso(0, j), b = this.worldIso(gw, j); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
+            g.stroke();
+            g.restore();
+        }
+
+        tilePoly(g, tx, ty, size = 1) {
+            const a = this.worldIso(tx, ty), b = this.worldIso(tx + size, ty), c = this.worldIso(tx + size, ty + size), d = this.worldIso(tx, ty + size);
+            g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.closePath();
+        }
+
+        drawBuildGhost(g) {
+            const def = BLD[this.buildMode];
+            const { tx, ty } = this.hoverTile;
+            const placeable = this.canPlace(this.buildMode, tx, ty);
+            const ok = placeable && this.canAfford(def.baseCost);
+            const col = ok ? '107,255,149' : '255,93,93';
+            for (let dy = 0; dy < def.size; dy++) for (let dx = 0; dx < def.size; dx++) {
+                const free = !this.cell(tx + dx, ty + dy) && tx + dx < CFG.gridW && ty + dy < CFG.gridH && tx + dx >= 0 && ty + dy >= 0;
+                this.tilePoly(g, tx + dx, ty + dy);
+                g.fillStyle = free ? `rgba(${col},0.35)` : 'rgba(255,93,93,0.45)'; g.fill();
+                g.strokeStyle = free ? `rgba(${col},0.95)` : 'rgba(255,93,93,0.95)'; g.lineWidth = 2; g.stroke();
+            }
+            if (placeable) {
+                const sp = A.getSprite(this.buildMode, 1, this.buildMode === 'wall' ? 0 : 0);
+                const c = this.worldIso(tx + def.size / 2, ty + def.size / 2);
+                A.drawSprite(g, sp, c.x, c.y, ok ? 0.72 : 0.4, false);
+                const r = def.defense ? def.defense(1).range : 0;
+                if (r) this.rangeRing(g, c.x, c.y, r, ok ? 'rgba(255,224,130,0.9)' : 'rgba(255,120,120,0.8)');
+            }
+        }
+        drawMoveGhost(g) {
+            const m = this.moveMode, def = BLD[m.type];
+            const { tx, ty } = this.hoverTile;
+            const ok = this.canPlace(m.type, tx, ty, m);
+            const pulse = 0.5 + 0.5 * Math.sin(this.tnow * 6);
+            for (let dy = 0; dy < def.size; dy++) for (let dx = 0; dx < def.size; dx++) {
+                this.tilePoly(g, tx + dx, ty + dy);
+                g.fillStyle = ok ? `rgba(92,216,255,${0.25 + pulse * 0.2})` : 'rgba(255,93,93,0.45)'; g.fill();
+                g.strokeStyle = ok ? '#5cd8ff' : '#ff5d5d'; g.lineWidth = 2.5; g.stroke();
+            }
+            if (ok) {
+                const sp = this.spriteOf(m);
+                const c = this.worldIso(tx + def.size / 2, ty + def.size / 2);
+                A.drawSprite(g, sp, c.x, c.y, 0.8, false);
+                if (def.defense) this.rangeRing(g, c.x, c.y, def.defense(m.level).range, 'rgba(255,224,130,0.9)');
+            }
+        }
+        drawSpellGhost(g) {
+            const c = this.screenToTile(this.input.x, this.input.y);
+            const w = this.worldIso(c.tfx, c.tfy);
+            g.save(); g.strokeStyle = 'rgba(166,236,255,0.9)'; g.lineWidth = 2.5; g.setLineDash([8, 5]);
+            g.beginPath(); g.ellipse(w.x, w.y, CFG.spellRadius * CFG.tileW / 2, CFG.spellRadius * CFG.tileH / 2, 0, 0, TAU); g.stroke();
+            g.fillStyle = 'rgba(166,236,255,0.12)'; g.fill();
+            g.restore();
+        }
+        rangeRing(g, x, y, range, col) {
+            g.save();
+            g.fillStyle = col.replace(/[\d.]+\)$/, '0.08)');
+            g.strokeStyle = col; g.lineWidth = 2; g.setLineDash([7, 6]);
+            g.beginPath(); g.ellipse(x, y, range * CFG.tileW / 2, range * CFG.tileH / 2, 0, 0, TAU); g.fill(); g.stroke();
+            g.restore();
+        }
+        drawRange(g) {
+            const b = this.selected || this.hoverBuilding;
+            if (!b || this.buildMode || this.moveMode) return;
+            const def = BLD[b.type];
+            if (!def.defense) return;
+            const c = this.centerOf(b);
+            this.rangeRing(g, c.x, c.y, def.defense(b.level).range, 'rgba(255,224,130,0.85)');
+        }
+
+        drawBuilding(g, b, t, frect) {
+            const def = BLD[b.type];
+            const sp = this.spriteOf(b);
+            A.maskOf(sp);
+            const c = this.centerOf(b);
+            const carriedAway = this.input.dragMove && this.moveMode === b;
+            // x-ray fade toward 0.38 while something behind is the focus
+            let target = 1;
+            if (frect && b !== this.selected && b !== this.hoverBuilding && b._depth > frect.depth) {
+                const x0 = c.x + sp.bbox.x0, y0 = c.y + sp.bbox.y0, x1 = c.x + sp.bbox.x1, y1 = c.y + sp.bbox.y1;
+                if (x0 < frect.x1 && x1 > frect.x0 && y0 < frect.y1 && y1 > frect.y0) {
+                    let hits = 0;
+                    for (let i = 0; i < frect.pts.length && hits < 3; i += 2) if (A.hitSprite(sp, frect.pts[i] - c.x, frect.pts[i + 1] - c.y, 0)) hits++;
+                    if (hits >= 3) target = 0.38;
                 }
             }
-            this.res[resource] -= amount;
-            try {
-                this.coop.conn.send({
-                    type: 'gift',
-                    resource,
-                    amount,
-                    from: this.player.name,
-                });
-            } catch (_) {
-                // Refund on send failure
-                this.res[resource] += amount;
-                this.toast('Send failed', 'error');
-                return;
+            if (carriedAway) target = 0.15;
+            else if (this.input.dragMove) target = Math.min(target, 0.45);
+            b.fade = b.fade === undefined ? target : b.fade + (target - b.fade) * 0.25;
+            const alpha = b.fade;
+
+            const grow = b.build < 1 ? easeOutBack(Math.max(0, b.build)) : 1;
+            const popS = b.pop > 0 ? 1 + 0.07 * Math.sin(b.pop * Math.PI) : 1;
+            const upS = b.upg > 0 ? 1 + 0.09 * Math.sin(b.upg * Math.PI) : 1;
+            const sx = popS * upS, sy = grow * popS * upS;
+            const sel = this.selected === b, hov = this.hoverBuilding === b;
+
+            g.save();
+            g.translate(c.x, c.y);
+            if (sel || hov) {
+                const pulse = sel ? 0.65 + 0.35 * Math.sin(this.tnow * 5) : 0.8;
+                g.globalAlpha = pulse;
+                g.scale(sx, sy);
+                A.drawGlow(g, sp, 0, 0, sel ? '#ffd34a' : '#fff6c8', sel ? 2.4 : 2);
+                g.globalAlpha = 1;
+                g.scale(1 / sx, 1 / sy);
             }
-            this.audio.coin();
-            this.toast(`Sent ${fmt(amount)} ${this.resSymbol(resource)} to partner`, 'success');
-            this.pulseRes(resource);
-            this.updateUI();
+            g.scale(sx, sy);
+            if (b.hurt > 0) g.translate(rand(-1, 1), 0);
+            A.drawSprite(g, sp, 0, 0, alpha);
+            g.restore();
+
+            if (b.upg > 0) {       // upgrade flash
+                g.save(); g.globalAlpha = b.upg * 0.55 * alpha; g.globalCompositeOperation = 'lighter';
+                A.drawGlow(g, sp, c.x, c.y, '#ffe9a0', 0.5); g.restore();
+            }
+            g.save(); g.globalAlpha = alpha;
+            A.drawAnchors(g, sp, c.x, c.y, t, b.tx * 7 + b.ty * 3);
+            if (A.hasTurret(b.type) && sp.anchors.length) {
+                const m = sp.anchors.find(a => a.name === 'mount');
+                if (m) A.drawTurret(g, b.type, c.x + m.x, c.y + m.y, { ang: b.aim ?? 0.5, rec: b.rec || 0, fl: b.fl || 0, t, tier: tierOf(b.type, b.level), hasTarget: !!b.hasT });
+            }
+            g.restore();
+            if (sp.lights.length) this._lightQ.push({ sp, x: c.x, y: c.y });
+            if (b.type === 'storage' || b.type === 'goldmine') { /* reserved for fill-level art */ }
         }
 
-        receiveGift(resource, amount, from) {
-            // Gifts come straight off the wire from another browser, so don't
-            // trust them: only real resources, only sane positive amounts.
-            if (!['gold', 'elixir', 'dark', 'gems'].includes(resource)) return;
-            amount = Math.floor(Number(amount));
-            if (!Number.isFinite(amount) || amount < 1) return;
-            if (resource === 'gems') amount = 1; // the send button only ever gives 1
-            amount = this.addRes(resource, amount);
-            this.audio.levelup();
-            this.toast(`${String(from || 'Your partner').slice(0, 40)} sent you ${fmt(amount)} ${this.resSymbol(resource)}!`, 'success');
-            this.pulseRes(resource);
-            this.showAlert(`♦ GIFT: +${fmt(amount)} ${resource.toUpperCase()} ♦`, 2);
-            this.updateUI();
+        // level tags, hp bars and upgrade arrows, drawn above everything on the map
+        drawBadges(g, t) {
+            const zoom = this.cam.zoom;
+            const small = zoom < 0.9;
+            for (const b of this.buildings) {
+                const def = BLD[b.type];
+                const sp = this.spriteOf(b);
+                const c = this.centerOf(b);
+                const sel = this.selected === b, hov = this.hoverBuilding === b;
+                // HP bar
+                if (b.hp < b.maxHp && !def.decor) {
+                    const bw = def.size * 36, bx = c.x - bw / 2, by = c.y + sp.bbox.y0 - 22;
+                    g.fillStyle = 'rgba(8,6,6,0.85)'; g.fillRect(bx - 1.5, by - 1.5, bw + 3, 7);
+                    g.fillStyle = '#3a1010'; g.fillRect(bx, by, bw, 4);
+                    const f = Math.max(0, b.hp / b.maxHp);
+                    g.fillStyle = f > 0.5 ? '#7adf6a' : f > 0.25 ? '#ffc857' : '#ff5d5d';
+                    g.fillRect(bx, by, bw * f, 4);
+                    g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(bx, by, bw * f, 1.4);
+                }
+                // level tag
+                const calm = b.type === 'wall';      // long walls would drown the map in tags
+                if (!def.decor && def.maxLevel > 1 && (sel || hov || (!calm && this.settings.levelTags === 'always'))) {
+                    const fh = CFG.tileH * def.size / 2;
+                    const tx = c.x, ty = c.y + fh + 6;
+                    const max = b.level >= def.maxLevel;
+                    const label = max ? 'MAX' : String(b.level);
+                    g.font = '600 10px "Lilita One", "Nunito", sans-serif';
+                    const w = Math.max(18, g.measureText(label).width + 12);
+                    g.fillStyle = 'rgba(14,10,8,0.82)';
+                    this.pill(g, tx - w / 2, ty - 7, w, 14, 7); g.fill();
+                    g.strokeStyle = max ? '#ffd34a' : 'rgba(255,255,255,0.55)'; g.lineWidth = 1; g.stroke();
+                    g.fillStyle = max ? '#ffd34a' : '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+                    g.fillText(label, tx, ty + 0.5);
+                }
+                // upgrade arrow
+                if (this.settings.hints && this.upgradeReady(b) && !this.buildMode && !this.moveMode && (!calm || sel || hov)) {
+                    const r = this.arrowRect(b);
+                    const bob = Math.sin(t * 4 + b.tx) * 2.5;
+                    g.save(); g.translate(r.x, r.y + bob);
+                    g.fillStyle = 'rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(0, 12, 7, 2.4, 0, 0, TAU); g.fill();
+                    const gr = g.createLinearGradient(0, -r.r, 0, r.r); gr.addColorStop(0, '#8cf07a'); gr.addColorStop(1, '#2ea03a');
+                    g.fillStyle = gr; g.strokeStyle = '#0e3a14'; g.lineWidth = 1.6;
+                    g.beginPath(); g.arc(0, 0, r.r, 0, TAU); g.fill(); g.stroke();
+                    g.fillStyle = '#ffffff'; g.strokeStyle = '#0e3a14'; g.lineWidth = 0.9;
+                    g.beginPath(); g.moveTo(0, -6.4); g.lineTo(6, 0.4); g.lineTo(2.4, 0.4); g.lineTo(2.4, 6); g.lineTo(-2.4, 6); g.lineTo(-2.4, 0.4); g.lineTo(-6, 0.4); g.closePath(); g.fill(); g.stroke();
+                    g.restore();
+                }
+                // selection marker: a bouncing chevron when something is selected
+                if (sel && !this.moveMode) {
+                    const bob = Math.sin(t * 5) * 3;
+                    const y = c.y + sp.bbox.y0 - (this.upgradeReady(b) ? 44 : 20) + bob;
+                    g.fillStyle = '#ffd34a'; g.strokeStyle = '#4a2c00'; g.lineWidth = 1.4;
+                    g.beginPath(); g.moveTo(c.x, y + 7); g.lineTo(c.x - 7, y - 3); g.lineTo(c.x + 7, y - 3); g.closePath(); g.fill(); g.stroke();
+                }
+            }
+        }
+        pill(g, x, y, w, h, r) {
+            g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+            g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
         }
 
-        updateCoopUI() {
-            const connected = this.coop.connected;
-            const panel = document.getElementById('coopConnected');
-            const disconnected = document.getElementById('coopDisconnected');
-            if (panel) panel.hidden = !connected;
-            if (disconnected) disconnected.hidden = connected;
-
-            const codeEl = document.getElementById('gameCode');
-            if (codeEl && this.coop.code) codeEl.textContent = this.coop.code;
-
-            // While there's no partner the status line reports the relay instead
-            const statusEl = this.el.coopStatus;
-            if (statusEl) {
-                if (connected) {
-                    statusEl.textContent = 'Connected';
-                    statusEl.className = 'coop-status online';
+        drawBeams(g, t) {
+            for (const b of this.beams) {
+                const k = b.life / b.max;
+                g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+                if (b.type === 'inferno') {
+                    g.strokeStyle = `rgba(255,110,40,${k})`; g.lineWidth = 7; g.beginPath(); g.moveTo(b.x0, b.y0); g.lineTo(b.x1, b.y1); g.stroke();
+                    g.strokeStyle = `rgba(255,230,140,${k})`; g.lineWidth = 3; g.stroke();
+                    g.strokeStyle = `rgba(255,255,255,${k})`; g.lineWidth = 1.2; g.stroke();
                 } else {
-                    const cls = { connecting: 'pending', lost: 'pending', ready: 'offline', error: 'error', offline: 'error' }[this.coop.relay] || 'offline';
-                    statusEl.textContent = this.coop.relayText || 'Not Connected';
-                    statusEl.className = 'coop-status ' + cls;
-                }
-            }
-        }
-
-        updatePartnerPanel() {
-            const s = this.coop.partnerState;
-            if (!s) return;
-
-            const nameEl = document.getElementById('partnerName');
-            if (nameEl) nameEl.textContent = `${s.name} · Lv ${s.level}`;
-
-            // Partner state went through sanitizePeerState() on arrival; it still
-            // only ever lands via textContent
-            const resEl = document.getElementById('partnerRes');
-            if (resEl) {
-                const r = s.res || {};
-                resEl.replaceChildren(...[
-                    ['gold', '◈', r.gold], ['elixir', '❂', r.elixir], ['dark', '✦', r.dark], ['gem', '♦', r.gems],
-                ].map(([cls, sym, v]) => {
-                    const span = document.createElement('span');
-                    span.className = 'p-res ' + cls;
-                    span.textContent = `${sym} ${fmt(Number(v))}`;
-                    return span;
-                }));
-            }
-
-            const waveEl = document.getElementById('partnerWave');
-            if (waveEl && s.wave) {
-                if (s.wave.active) {
-                    waveEl.textContent = `Wave ${s.wave.number} · ${s.enemies} enemies · ${s.boost ? '⚡BOOSTED' : ''} ${s.warCry ? '🔥WAR CRY' : ''}`;
-                } else {
-                    waveEl.textContent = `Wave ${s.wave.number} · Next in ${fmtTime(s.wave.timer)} · Day ${s.dayCount}`;
-                }
-            }
-
-            this.renderPartnerMinimap(s);
-        }
-
-        renderPartnerMinimap(state) {
-            const canvas = document.getElementById('partnerMap');
-            if (!canvas) return;
-            const ctx = canvas.getContext('2d');
-            const w = canvas.width;
-            const h = canvas.height;
-            const cellW = w / CFG.gridW;
-            const cellH = h / CFG.gridH;
-            // Painted with the chrome colors so it matches the panel in both themes
-            const css = getComputedStyle(document.documentElement);
-            const tone = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
-
-            // Background
-            ctx.fillStyle = tone('--panel-2', '#0f1525');
-            ctx.fillRect(0, 0, w, h);
-
-            // Grid lines
-            ctx.strokeStyle = tone('--line', '#2e3854');
-            ctx.lineWidth = 0.5;
-            for (let x = 0; x <= CFG.gridW; x++) {
-                ctx.beginPath(); ctx.moveTo(x * cellW, 0); ctx.lineTo(x * cellW, h); ctx.stroke();
-            }
-            for (let y = 0; y <= CFG.gridH; y++) {
-                ctx.beginPath(); ctx.moveTo(0, y * cellH); ctx.lineTo(w, y * cellH); ctx.stroke();
-            }
-
-            // Buildings
-            if (Array.isArray(state.buildings)) {
-                for (const b of state.buildings) {
-                    if (!b || !Object.hasOwn(BLD, b.type)) continue;
-                    const def = BLD[b.type];
-                    const size = def.size || 1;
-                    const x = b.tx * cellW;
-                    const y = b.ty * cellH;
-                    const bw = size * cellW - 1;
-                    const bh = size * cellH - 1;
-
-                    // Level-based brightness
-                    const bright = Math.min(1, 0.5 + (b.level / (def.maxLevel || 20)) * 0.5);
-                    ctx.globalAlpha = bright;
-                    ctx.fillStyle = def.roof || def.color2 || '#888';
-                    ctx.fillRect(x + 0.5, y + 0.5, bw, bh);
-                    ctx.globalAlpha = 1;
-
-                    // HP bar if damaged
-                    if (b.hp < b.maxHp * 0.95) {
-                        const hpFrac = b.hp / b.maxHp;
-                        ctx.fillStyle = hpFrac > 0.5 ? '#6bff95' : '#ff5d5d';
-                        ctx.fillRect(x + 0.5, y + bh - 1, bw * hpFrac, 1.5);
+                    const segs = 7;
+                    const dx = b.x1 - b.x0, dy = b.y1 - b.y0, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+                    const pts = [[b.x0, b.y0]];
+                    for (let i = 1; i < segs; i++) {
+                        const f = i / segs, off = (Math.sin(b.seed * 13 + i * 7.3 + t * 60) * (b.type === 'bolt' ? 14 : 7));
+                        pts.push([b.x0 + dx * f + nx * off, b.y0 + dy * f + ny * off]);
                     }
+                    pts.push([b.x1, b.y1]);
+                    const col = b.type === 'bolt' ? '166,236,255' : '170,200,255';
+                    for (const [w, a] of [[b.type === 'bolt' ? 9 : 5, 0.35], [b.type === 'bolt' ? 4 : 2.2, 0.9]]) {
+                        g.strokeStyle = `rgba(${col},${a * k})`; g.lineWidth = w; g.beginPath();
+                        pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke();
+                    }
+                    g.strokeStyle = `rgba(255,255,255,${k})`; g.lineWidth = 1; g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke();
+                }
+                g.restore();
+            }
+        }
 
-                    // Town hall golden border
-                    if (b.type === 'townhall') {
-                        ctx.strokeStyle = tone('--panel-border', '#ffc857');
-                        ctx.lineWidth = 1.5;
-                        ctx.strokeRect(x + 0.5, y + 0.5, bw, bh);
+        drawProjectile(g, p) {
+            const ang = Math.atan2(p.ty - p.sy, p.tx - p.sx);
+            const x = p.x, y = p.y;
+            // ground shadow follows high arcs
+            if (p.arc > 30) { g.fillStyle = 'rgba(0,0,0,0.25)'; const k = Math.min(1, p.t); g.beginPath(); g.ellipse(p.sx + (p.tx - p.sx) * k, p.sy + (p.ty - p.sy) * k + 4, 5, 2, 0, 0, TAU); g.fill(); }
+            if (p.trail && p.trail.length > 3) {
+                const col = ({ airdef: '255,170,70', wizard: '110,210,255', frost: '190,240,255', mortar: '200,200,210', cannon: '200,200,210' })[p.type];
+                if (col) {
+                    for (let i = 0; i + 3 < p.trail.length; i += 2) {
+                        g.strokeStyle = `rgba(${col},${i / p.trail.length * 0.6})`; g.lineWidth = (i / p.trail.length) * 4 + 0.5; g.lineCap = 'round';
+                        g.beginPath(); g.moveTo(p.trail[i], p.trail[i + 1]); g.lineTo(p.trail[i + 2], p.trail[i + 3]); g.stroke();
                     }
                 }
             }
-
-            // Enemy count indicator
-            if (state.enemies > 0) {
-                ctx.fillStyle = tone('--danger', '#ff5d5d');
-                ctx.font = 'bold 12px Inter, sans-serif';
-                ctx.textAlign = 'right';
-                ctx.fillText(`⚔ ${state.enemies} enemies`, w - 6, 14);
-            }
-        }
-
-        showInviteNotification(name, level) {
-            const el = document.getElementById('inviteNotify');
-            if (!el) return;
-            const nameEl = document.getElementById('inviteName');
-            if (nameEl) nameEl.textContent = `${name} (Lv ${level}) wants to co-op`;
-            el.classList.add('show');
-            this.audio.wave();
-        }
-
-        hideInviteNotification() {
-            const el = document.getElementById('inviteNotify');
-            if (el) el.classList.remove('show');
-        }
-
-        // ---------- Save / Load ----------
-        // Save format versions (the localStorage key never changes, the version
-        // lives inside the data so old saves keep loading):
-        //   v3 — original format
-        //   v4 — adds settings (sound, auto-collect)
-        //   v5 — adds the number format (settings.notation)
-        snapshot() {
-            // Sanitize wave timer on write so the game-over sentinel never
-            // leaks into persisted state. If the value is wild (destroyed
-            // game over path), clamp it back to a normal range.
-            const sanitizedTimer = Math.max(
-                5,
-                Math.min(this.wave.timer || CFG.waveBaseSec, Math.max(CFG.waveBaseSec, 120))
-            );
-            return {
-                v: CFG.saveVersion,
-                res: this.res,
-                player: this.player,
-                buildings: this.buildings.map(b => ({ id: b.id, type: b.type, tx: b.tx, ty: b.ty, level: b.level, hp: b.hp, maxHp: b.maxHp })),
-                stats: this.stats,
-                achievements: this.achievements,
-                wave: { number: this.wave.number, timer: sanitizedTimer },
-                dayTime: this.dayTime,
-                dayCount: this.dayCount,
-                cam: { zoom: this.cam.zoom },
-                settings: { sound: !this.audio.muted, autoCollect: this.autoCollect, notation },
-                // While the tab is hidden the game is frozen, so the clock for
-                // offline earnings starts when it was hidden, not when we saved
-                savedAt: (document.hidden && this._hiddenAt) || Date.now(),
-            };
-        }
-
-        save() {
-            // Reset / import reload the page; the pagehide save must not undo them
-            if (this.saveLocked) return false;
-            try {
-                const raw = JSON.stringify(this.snapshot());
-                // Keep the save before this one in a second slot, so a write that
-                // lands broken (storage full mid-write, a crash) can be undone
-                const prev = localStorage.getItem(CFG.saveKey);
-                localStorage.setItem(CFG.saveKey, raw);
-                if (prev && prev !== raw) localStorage.setItem(CFG.saveKey + '.bak', prev);
-                this._saveWarned = false;
-                return true;
-            } catch (e) {
-                console.error('Save failed', e);
-                // Storage full or blocked (some private modes) — say so once, not every 15s
-                if (!this._saveWarned) {
-                    this._saveWarned = true;
-                    this.toast('Could not save — browser storage is full or blocked. Use Export to keep a copy.', 'error');
+            g.save(); g.translate(x, y);
+            switch (p.type) {
+                case 'cannon': case 'mortar': {
+                    const r = p.type === 'mortar' ? 5 : 3.6;
+                    const gr = g.createRadialGradient(-1, -1, 0.5, 0, 0, r); gr.addColorStop(0, '#8a8a96'); gr.addColorStop(1, '#14141a');
+                    g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill();
+                    break;
                 }
-                return false;
-            }
-        }
-
-        // Turn raw save text into a current-version save object.
-        // Throws if it isn't a Kingdom of Ember save at all.
-        parseSave(raw) {
-            const d = JSON.parse(raw);
-            if (!d || typeof d !== 'object' || !d.res || typeof d.res !== 'object' || !Array.isArray(d.buildings)) {
-                throw new Error('not a Kingdom of Ember save');
-            }
-            return this.migrateSave(d);
-        }
-
-        migrateSave(d) {
-            const v = Number(d.v) || 3;
-            if (v < 4) {
-                // v3 -> v4: settings didn't exist yet
-                d.settings = { sound: true, autoCollect: false };
-            }
-            if (v < 5) {
-                // v4 -> v5: number format
-                if (!d.settings || typeof d.settings !== 'object') d.settings = { sound: true, autoCollect: false };
-                d.settings.notation = 'short';
-            }
-            d.v = CFG.saveVersion;
-            return d;
-        }
-
-        loadSave() {
-            let raw = null, bak = null;
-            try {
-                raw = localStorage.getItem(CFG.saveKey);
-                bak = localStorage.getItem(CFG.saveKey + '.bak');
-            } catch (e) { /* storage blocked */ }
-            this.hadSave = !!(raw || bak);
-            if (!raw && !bak) {
-                this.placeInitial();
-                return;
-            }
-            if (raw && this.tryLoad(raw)) return;
-
-            // The main save is unreadable. Keep it instead of letting the next
-            // autosave overwrite it, then fall back to the slot from one save
-            // earlier before giving up and starting fresh.
-            if (raw) { try { localStorage.setItem(CFG.saveKey + '.corrupt', raw); } catch (_) { /* ignore */ } }
-            if (bak && this.tryLoad(bak)) {
-                this.save(); // the good copy goes back into the main slot
-                setTimeout(() => this.toast('Your save was damaged, so the backup from just before it was restored.', 'warn'), 800);
-                return;
-            }
-            this.placeInitial();
-            setTimeout(() => this.toast('Your save could not be read, so a new kingdom was started. The old data was kept as a backup.', 'error'), 800);
-        }
-
-        // Parse and apply one save blob. False, with the game back to a clean
-        // slate, if it can't be used.
-        tryLoad(raw) {
-            let d;
-            try {
-                d = this.parseSave(raw);
-            } catch (e) {
-                console.warn('Save could not be read', e);
-                return false;
-            }
-            try {
-                this.applySave(d);
-                return true;
-            } catch (e) {
-                // applySave checks everything, but never leave a half-loaded village
-                console.error('Load failed', e);
-                this.resetState();
-                return false;
-            }
-        }
-
-        // Back to the constructor's starting values (after a failed load)
-        resetState() {
-            this.res = { gold: 500, elixir: 150, dark: 0, gems: 5 };
-            this.player = { level: 1, xp: 0, name: 'Chief' };
-            this.buildings = [];
-            for (const k in this.stats) this.stats[k] = 0;
-            this.achievements = {};
-            this.wave.number = 0;
-            this.wave.timer = 90;
-            this.dayTime = 0.25;
-            this.dayCount = 1;
-            this.cam.zoom = 1;
-            this.audio.muted = false;
-            this.autoCollect = false;
-            notation = 'short';
-            this.recomputeRates();
-        }
-
-        // Copy a parsed save into the game, checking every value on the way in
-        // so a hand-edited or half-written save can't put NaN or junk in state.
-        applySave(d) {
-            const r = d.res;
-            for (const k of ['gold', 'elixir', 'dark', 'gems']) this.res[k] = safeNum(r[k], this.res[k]);
-            this.res.gems = Math.floor(this.res.gems);
-
-            const p = d.player || {};
-            this.player.level = Math.floor(safeNum(p.level, 1, 1, 999));
-            this.player.xp = safeNum(p.xp, 0);
-            if (typeof p.name === 'string') this.player.name = p.name.slice(0, 24);
-
-            const st = d.stats || {};
-            for (const k in this.stats) this.stats[k] = safeNum(st[k], 0);
-            const ach = d.achievements || {};
-            for (const a of ACHS) if (ach[a.id] === true) this.achievements[a.id] = true;
-
-            const w = d.wave || {};
-            this.wave.number = Math.floor(safeNum(w.number, 0, 0, 1e6));
-            // Clamp the wave timer — old saves could hold 999999 from the
-            // game-over sentinel ("next raid in 16656:53")
-            this.wave.timer = safeNum(w.timer, this.wave.timer, 5, Math.max(CFG.waveBaseSec, 120));
-            this.dayTime = safeNum(d.dayTime, this.dayTime, 0, 0.9999);
-            this.dayCount = Math.floor(safeNum(d.dayCount, 1, 1));
-            this.cam.zoom = safeNum(d.cam && d.cam.zoom, 1, CFG.zoomMin, CFG.zoomMax);
-
-            const settings = d.settings || {};
-            this.audio.muted = settings.sound === false;
-            this.autoCollect = settings.autoCollect === true;
-            notation = NOTATIONS.includes(settings.notation) ? settings.notation : 'short';
-
-            for (const s of d.buildings) {
-                if (!s || !Object.hasOwn(BLD, s.type)) continue; // unknown type (removed building)
-                const def = BLD[s.type];
-                if (!Number.isInteger(s.tx) || !Number.isInteger(s.ty)) continue;
-                // Off the grid, overlapping, or a second Town Hall: corrupt, skip it
-                if (!this.canPlace(s.type, s.tx, s.ty)) continue;
-                if (s.type === 'townhall' && this.buildings.some(b => b.type === 'townhall')) continue;
-                const level = Math.floor(safeNum(s.level, 1, 1, def.maxLevel));
-                const maxHp = this.hpFor(s.type, level);
-                const hp = safeNum(s.hp, maxHp, 0, maxHp);
-                this.buildings.push({
-                    id: typeof s.id === 'string' ? s.id.slice(0, 16) : Math.random().toString(36).slice(2, 9),
-                    type: s.type, tx: s.tx, ty: s.ty,
-                    level,
-                    hp: hp > 0 ? hp : maxHp, maxHp,
-                    lastShot: 0, animScale: 1,
-                });
-            }
-
-            this.recomputeRates();
-            this.applyOfflineEarnings((Date.now() - safeNum(d.savedAt, Date.now())) / 1000);
-
-            // Safety net: if the save somehow lost the Town Hall (destroyed
-            // mid-wave, user dismissed the modal, etc.), auto-show the
-            // Kingdom Fallen prompt so the player always has a way back in.
-            const hasTH = this.buildings.some(b => b.type === 'townhall');
-            if (!hasTH) {
-                // Defer until after init finishes so the confirm dialog
-                // and audio are both ready.
-                setTimeout(() => this.gameOver(), 400);
-            }
-        }
-
-        // Pay out production for time the game wasn't running: tab closed, or
-        // tab hidden (the sim pauses then so raids can't hit an unwatched base).
-        // Half rate, capped at 4 hours, and never past storage caps.
-        applyOfflineEarnings(sec) {
-            if (!(sec > 10)) return null; // also skips NaN and clocks that went backwards
-            const t = Math.min(sec, CFG.offlineMaxSec);
-            const got = {};
-            for (const k of ['gold', 'elixir', 'dark']) got[k] = this.addRes(k, this.rates[k] * t * CFG.offlineRate);
-            this.stats.goldEarned += got.gold;
-
-            const parts = [];
-            if (got.gold >= 1) parts.push(`${fmt(got.gold)} ◈`);
-            if (got.elixir >= 1) parts.push(`${fmt(got.elixir)} ❂`);
-            if (got.dark >= 1) parts.push(`${fmt(got.dark)} ✦`);
-            const away = fmtDuration(sec) + (sec > CFG.offlineMaxSec ? ' (earnings cap at 4h)' : '');
-            const anyRate = this.rates.gold + this.rates.elixir + this.rates.dark > 0;
-            if (sec >= CFG.offlineSummarySec && anyRate) {
-                // Long enough that a two-second toast would be missed
-                setTimeout(() => this.showOfflineSummary(sec, got, sec > CFG.offlineMaxSec), 800);
-            } else if (parts.length) {
-                setTimeout(() => this.toast(`Away ${away}: +${parts.join(' · ')}`, 'success'), 800);
-            } else if (anyRate) {
-                setTimeout(() => this.toast(`Away ${away} — storage was already full`, 'warn'), 800);
-            }
-            return got;
-        }
-
-        placeInitial() {
-            // Center the initial village using the larger grid
-            const cx = Math.floor(CFG.gridW / 2) - 1;
-            const cy = Math.floor(CFG.gridH / 2) - 1;
-            const push = (type, tx, ty) => {
-                const def = BLD[type];
-                this.buildings.push({
-                    id: Math.random().toString(36).slice(2,9),
-                    type, tx, ty, level: 1,
-                    hp: def.baseHP, maxHp: def.baseHP,
-                    lastShot: 0, animScale: 0,
-                });
-            };
-            push('townhall', cx, cy);
-            push('goldmine', cx - 3, cy);
-            push('goldmine', cx - 3, cy + 2);
-            push('elixirwell', cx + 3, cy);
-            push('cannon', cx + 3, cy + 3);
-            push('cannon', cx - 3, cy - 2);
-            this.recomputeRates();
-        }
-
-        exportSave() {
-            // Export what's in memory right now, not the last autosave
-            this.save();
-            const raw = JSON.stringify(this.snapshot());
-            const blob = new Blob([raw], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `kingdom-of-ember-${new Date().toISOString().slice(0, 10)}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-            this.toast('Save exported', 'success');
-        }
-
-        importSave(file) {
-            if (!file) return;
-            if (file.size > 1024 * 1024) {
-                this.audio.error();
-                this.toast('That file is too big to be a save', 'error');
-                return;
-            }
-            const reader = new FileReader();
-            reader.onload = () => {
-                let d;
-                try {
-                    d = this.parseSave(String(reader.result));
-                } catch (e) {
-                    this.audio.error();
-                    this.toast("That file isn't a Kingdom of Ember save", 'error');
-                    return;
+                case 'archer': case 'xbow': case 'clancastle': case 'bone': {
+                    const a = p.type === 'bone' ? ang : Math.atan2(p.ty - p.y, p.tx - p.x) || ang;
+                    g.rotate(a);
+                    g.strokeStyle = p.type === 'bone' ? '#efe6cc' : '#d8c8a0'; g.lineWidth = p.type === 'xbow' ? 2.2 : 1.6; g.lineCap = 'round';
+                    g.beginPath(); g.moveTo(-7, 0); g.lineTo(5, 0); g.stroke();
+                    if (p.type !== 'bone') { g.fillStyle = '#c8ccd8'; g.beginPath(); g.moveTo(8, 0); g.lineTo(4, -1.8); g.lineTo(4, 1.8); g.fill(); g.strokeStyle = '#c04a3a'; g.lineWidth = 1; g.beginPath(); g.moveTo(-7, 0); g.lineTo(-9, -2); g.moveTo(-7, 0); g.lineTo(-9, 2); g.stroke(); }
+                    break;
                 }
-                const lv = Math.floor(safeNum(d.player && d.player.level, 1, 1, 999));
-                const wave = Math.floor(safeNum(d.wave && d.wave.number, 0, 0, 1e6));
-                this.showConfirm({
-                    title: 'Import Save',
-                    icon: '⇪',
-                    body: `Load the kingdom from this file (level ${lv}, wave ${wave}, ${d.buildings.length} buildings)?<br><br><span class="warn-text">Your current kingdom will be replaced. Export it first if you want to keep it.</span>`,
-                    yesText: 'Import',
-                    noText: 'Cancel',
-                    danger: true,
-                    onYes: () => {
-                        this.saveLocked = true;
-                        try {
-                            // The kingdom being replaced moves to the backup slot
-                            const prev = localStorage.getItem(CFG.saveKey);
-                            localStorage.setItem(CFG.saveKey, JSON.stringify(d));
-                            if (prev) localStorage.setItem(CFG.saveKey + '.bak', prev);
-                        } catch (e) {
-                            this.saveLocked = false;
-                            this.toast('Could not write the save to browser storage', 'error');
-                            return;
-                        }
-                        location.reload();
-                    },
-                });
-            };
-            reader.onerror = () => this.toast('Could not read that file', 'error');
-            reader.readAsText(file);
+                case 'wizard': {
+                    const gr = g.createRadialGradient(0, 0, 0, 0, 0, 10); gr.addColorStop(0, '#fff'); gr.addColorStop(0.4, '#6ad8ff'); gr.addColorStop(1, 'rgba(92,216,255,0)');
+                    g.fillStyle = gr; g.beginPath(); g.arc(0, 0, 10, 0, TAU); g.fill();
+                    break;
+                }
+                case 'frost': {
+                    g.rotate(this.tnow * 8); g.fillStyle = '#d8f6ff'; g.strokeStyle = '#3c8cc8'; g.lineWidth = 1;
+                    g.beginPath(); g.moveTo(0, -6); g.lineTo(3, 0); g.lineTo(0, 6); g.lineTo(-3, 0); g.closePath(); g.fill(); g.stroke();
+                    break;
+                }
+                case 'airdef': {
+                    g.rotate(Math.atan2(p.ty - p.y, p.tx - p.x));
+                    g.fillStyle = '#e4e8f0'; g.strokeStyle = '#2a2c34'; g.lineWidth = 0.9;
+                    g.beginPath(); g.moveTo(8, 0); g.lineTo(2, -2.6); g.lineTo(-6, -2.6); g.lineTo(-6, 2.6); g.lineTo(2, 2.6); g.closePath(); g.fill(); g.stroke();
+                    g.fillStyle = '#e04a3a'; g.beginPath(); g.moveTo(8, 0); g.lineTo(3, -2.4); g.lineTo(3, 2.4); g.fill();
+                    g.fillStyle = '#ffcc66'; g.beginPath(); g.arc(-8, 0, 2.6 + Math.random(), 0, TAU); g.fill();
+                    break;
+                }
+                default: g.fillStyle = '#fff'; g.beginPath(); g.arc(0, 0, 2.5, 0, TAU); g.fill();
+            }
+            g.restore();
         }
 
-        // Start over. Used by Reset and by Rebuild after the Town Hall falls.
-        wipeSave() {
-            this.saveLocked = true;
-            try {
-                localStorage.removeItem(CFG.saveKey);
-                localStorage.removeItem(CFG.saveKey + '.bak');
-            } catch (_) { /* ignore */ }
-            location.reload();
+        drawParticles(g) {
+            for (const p of this.particles) {
+                const k = Math.max(0, p.life / p.max);
+                switch (p.kind) {
+                    case 'smoke':
+                        g.fillStyle = p.color + (k * 0.4).toFixed(3) + ')';
+                        g.beginPath(); g.arc(p.x, p.y, p.size * (2 - k), 0, TAU); g.fill(); break;
+                    case 'ring':
+                        g.strokeStyle = p.color; g.globalAlpha = k; g.lineWidth = 2 + k * 3;
+                        g.beginPath(); g.ellipse(p.x, p.y, p.size * (1.2 - k), p.size * (1.2 - k) * 0.55, 0, 0, TAU); g.stroke(); g.globalAlpha = 1; break;
+                    case 'coin':
+                        g.globalAlpha = Math.min(1, k * 2);
+                        g.fillStyle = p.color; g.strokeStyle = 'rgba(70,40,0,0.8)'; g.lineWidth = 0.9;
+                        g.beginPath(); g.ellipse(p.x, p.y, p.size * Math.abs(Math.cos(p.life * 12)) + 0.8, p.size, 0, 0, TAU); g.fill(); g.stroke(); g.globalAlpha = 1; break;
+                    case 'shard':
+                        g.globalAlpha = k; g.fillStyle = p.color; g.save(); g.translate(p.x, p.y); g.rotate(p.life * 9);
+                        g.beginPath(); g.moveTo(0, -p.size * 1.6); g.lineTo(p.size * 0.7, 0); g.lineTo(0, p.size * 1.6); g.lineTo(-p.size * 0.7, 0); g.closePath(); g.fill(); g.restore(); g.globalAlpha = 1; break;
+                    case 'dust':
+                        g.globalAlpha = k * 0.7; g.fillStyle = p.color; g.beginPath(); g.arc(p.x, p.y, p.size * (1.5 - k * 0.5), 0, TAU); g.fill(); g.globalAlpha = 1; break;
+                    default:
+                        g.globalAlpha = k; g.fillStyle = p.color; g.beginPath(); g.arc(p.x, p.y, Math.max(0.5, p.size * k), 0, TAU); g.fill(); g.globalAlpha = 1;
+                }
+            }
         }
+
+        drawPopups(g) {
+            g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+            for (const p of this.popups) {
+                const k = Math.min(1, p.life / p.max);
+                const grow = p.size >= 14 ? 1 + Math.max(0, (p.life / p.max - 0.8)) * 1.5 : 1;
+                g.globalAlpha = Math.min(1, k * 1.6);
+                g.font = `${(p.size || 14) * grow}px "Lilita One", "Nunito", sans-serif`;
+                g.strokeStyle = 'rgba(20,10,6,0.92)'; g.lineWidth = 4;
+                g.strokeText(p.text, p.x, p.y);
+                g.fillStyle = p.color; g.fillText(p.text, p.x, p.y);
+            }
+            g.globalAlpha = 1;
+        }
+
+        // fireflies at night, butterflies by day: deterministic, no state
+        drawAmbient(g, t, night) {
+            const c = this.worldIso(CFG.gridW / 2, CFG.gridH / 2);
+            if (night > 0.2) {
+                g.save(); g.globalCompositeOperation = 'lighter';
+                for (let i = 0; i < 26; i++) {
+                    const a = i * 2.399, r = 150 + (i * 37 % 520);
+                    const x = c.x + Math.cos(a) * r * 1.4 + Math.sin(t * 0.5 + i) * 26, y = c.y + Math.sin(a) * r * 0.7 + Math.cos(t * 0.6 + i * 1.3) * 18;
+                    const k = 0.5 + 0.5 * Math.sin(t * 2 + i * 1.7);
+                    const spr = A.glowSprite('#d8ff7a');
+                    g.globalAlpha = night * k * 0.9;
+                    g.drawImage(spr, x - 7, y - 7, 14, 14);
+                }
+                g.restore();
+            } else if (night < 0.05) {
+                for (let i = 0; i < 6; i++) {
+                    const a = i * 1.7 + t * 0.12, r = 120 + (i * 83 % 360);
+                    const x = c.x + Math.cos(a) * r * 1.3, y = c.y + Math.sin(a * 1.3) * r * 0.6 - 14 + Math.sin(t * 3 + i) * 5;
+                    const flap = Math.abs(Math.sin(t * 14 + i * 2));
+                    g.fillStyle = ['#ffd24a', '#ff8aa8', '#9ad0ff', '#ffffff', '#ffb04a', '#c89aff'][i];
+                    g.strokeStyle = 'rgba(30,20,20,0.6)'; g.lineWidth = 0.7;
+                    g.beginPath(); g.ellipse(x - 2 * flap, y, 2.6 * flap + 0.4, 2, 0, 0, TAU); g.ellipse(x + 2 * flap, y, 2.6 * flap + 0.4, 2, 0, 0, TAU); g.fill(); g.stroke();
+                }
+            }
+        }
+
+        floatText(text, x, y, color) { this.popups.push({ x, y, text, color, life: 1.3, max: 1.3, size: 16 }); }
     }
 
-    // ---------- Boot ----------
-    window.addEventListener('DOMContentLoaded', () => {
-        const game = new Game();
-        game.init();
-        window.game = game;
-    });
-})();
+    K.Game = Game;
+})(window.KOE = window.KOE || {});

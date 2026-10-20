@@ -17,7 +17,7 @@ ClashIdleGame@master       →  (GitHub Actions mirror)  →  j4den@main
 ```
 
 Two GitHub Actions workflows run per push:
-1. `ClashIdleGame/.github/workflows/deploy.yml` — copies `public/index.html`, `public/css/style.css`, `public/js/game.js` into the j4den repo and commits to `main`.
+1. `ClashIdleGame/.github/workflows/deploy.yml` — rsyncs `public/` (index.html, `css/`, `js/`; not the dev gallery) into the j4den repo and commits to `main`.
 2. `j4den/.github/workflows/deploy-frontend.yml` — picks up that commit, runs `cloudflare/pages-action`, Cloudflare Pages rebuilds, edge cache invalidates.
 
 Total time from `git push` → live on `j4den.com/clashidle`: about 60–90 seconds.
@@ -54,8 +54,6 @@ Because j4den.com/clashidle is a sub-path of an existing Cloudflare Pages projec
 You can always manually sync:
 ```bash
 cd ~/Library/Mobile\ Documents/com~apple~CloudDocs/Projects/j4den
-cp ../ClashIdleGame/public/index.html       frontend/public/clashidle/index.html
-cp ../ClashIdleGame/public/css/style.css    frontend/public/clashidle/css/style.css
-cp ../ClashIdleGame/public/js/game.js       frontend/public/clashidle/js/game.js
+rsync -a --delete --exclude gallery.html ../ClashIdleGame/public/ frontend/public/clashidle/
 git add frontend/public/clashidle && git commit -m "clashidle: manual sync" && git push
 ```

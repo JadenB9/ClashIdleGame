@@ -1,6 +1,6 @@
 name: Mirror to j4den → Cloudflare Pages
 
-# Every push to master mirrors public/* into the j4den repo at
+# Every push to master mirrors public/ into the j4den repo at
 # frontend/public/clashidle/. The j4den repo's own deploy-frontend.yml then
 # publishes to Cloudflare Pages (j4den-cybersec project), which serves
 # j4den.com/clashidle.
@@ -39,11 +39,10 @@ jobs:
         run: |
           set -euo pipefail
           DEST_DIR="dest/frontend/public/clashidle"
-          mkdir -p "$DEST_DIR/css" "$DEST_DIR/js"
-          # Only mirror the browser-facing files; server.js and node_modules stay out
-          cp -v src/public/index.html "$DEST_DIR/index.html"
-          cp -v src/public/css/style.css "$DEST_DIR/css/style.css"
-          cp -v src/public/js/game.js   "$DEST_DIR/js/game.js"
+          mkdir -p "$DEST_DIR"
+          # Mirror everything the browser loads (index.html, css/, js/); server.js and the
+          # dev-only gallery page stay out. --delete drops scripts that no longer exist.
+          rsync -a --delete --exclude 'gallery.html' src/public/ "$DEST_DIR/"
 
       - name: Commit and push to j4den (if changed)
         run: |
@@ -51,7 +50,7 @@ jobs:
           cd dest
           git config user.name  "clashidle-sync[bot]"
           git config user.email "clashidle-sync@users.noreply.github.com"
-          if git diff --quiet --exit-code frontend/public/clashidle/; then
+          if [ -z "$(git status --porcelain frontend/public/clashidle/)" ]; then
             echo "No changes in clashidle files — skipping push."
             exit 0
           fi
