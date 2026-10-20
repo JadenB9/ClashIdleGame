@@ -12,7 +12,7 @@
         gridH: 24,
         tileW: 64,
         tileH: 42,              // set by the view preset; see VIEWS
-        homeZoom: 1.3,          // where the camera sits on a fresh game and after 'reset view'
+        homeZoom: 1.5,          // where the camera sits on a fresh game and after 'reset view'
         zoomMin: 0.7,
         zoomMax: 2.2,
         saveKey: 'kingdomOfEmber.v3',   // key stays put so old saves still load; the format version lives in the data
@@ -26,15 +26,17 @@
         dayLengthSec: 180,
         waveBaseSec: 75,
         waveMinSec: 35,
-        xpToLevel: (lv) => Math.floor(100 * Math.pow(1.4, lv - 1)),
+        xpToLevel: (lv) => Math.floor(150 * Math.pow(1.45, lv - 1)),
         comboWindow: 1.3,
         spellCost: { gems: 1 },
         spellRadius: 3.2,
         spellBaseDmg: 260,
         prosperityCap: 0.15,         // decorations stop adding production past +15%
-        ascendMinWave: 10,           // waves survived before the kingdom can ascend
+        ascendMinWave: 15,           // waves survived before the kingdom can ascend
+        boostCost: 2,                // gems for a minute of double income
+        freezeCost: 2,               // gems to freeze every raider for four seconds
         bubbleSec: 7,                // a mine or well refills its tap-to-collect bubble this often
-        autoCollectRate: 0.6,        // auto-collect pays this share of a manual tap
+        autoCollectRate: 0.8,        // auto-collect pays this share of a manual tap
     };
 
     // Camera tilt presets. tileH/tileW is the sine of the camera elevation, so a
@@ -57,23 +59,23 @@
             provides: (lv) => ({ cap: 3000 + lv * 2500 }),
         },
         goldmine: {
-            name: 'Gold Mine', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 1,
+            name: 'Gold Mine', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 1, costScale: 1.3,
             baseCost: { gold: 300 }, baseHP: 500, tone: '#d9b34e',
             desc: 'Digs gold around the clock. Tap it for a bonus burst.',
-            upgradeCost: (lv) => ({ gold: 400 * Math.pow(1.55, lv - 1) }),
+            upgradeCost: (lv) => ({ gold: 400 * Math.pow(1.55, lv - 1), elixir: 25 * Math.pow(1.5, lv - 1) }),
             production: (lv) => ({ gold: 2 + lv * 1.8 }),
             clickBonus: (lv) => ({ gold: 15 + lv * 12 }),
         },
         elixirwell: {
-            name: 'Elixir Well', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 2,
+            name: 'Elixir Well', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 2, costScale: 1.3,
             baseCost: { gold: 650 }, baseHP: 500, tone: '#c471ed',
             desc: 'Pumps magical elixir from deep underground. Tap for a burst.',
             upgradeCost: (lv) => ({ gold: 600 * Math.pow(1.55, lv - 1), elixir: 80 * Math.pow(1.5, lv - 1) }),
-            production: (lv) => ({ elixir: 1 + lv * 1.2 }),
+            production: (lv) => ({ elixir: 0.8 + lv * 0.9 }),
             clickBonus: (lv) => ({ elixir: 10 + lv * 8 }),
         },
         darkdrill: {
-            name: 'Dark Drill', cat: 'economy', size: 1, maxLevel: 20, unlockLevel: 6,
+            name: 'Dark Drill', cat: 'economy', size: 1, maxLevel: 20, unlockLevel: 6, costScale: 1.35,
             baseCost: { gold: 4500, elixir: 1200 }, baseHP: 700, tone: '#6b2cc9',
             desc: 'Bores for rare dark elixir, the fuel of the strongest defenses.',
             upgradeCost: (lv) => ({ gold: 5000 * Math.pow(1.7, lv - 1), elixir: 1500 * Math.pow(1.6, lv - 1) }),
@@ -88,14 +90,14 @@
             production: (lv) => ({ gems: 0.003 + lv * 0.0008 }),
         },
         storage: {
-            name: 'Vault', cat: 'economy', size: 1, maxLevel: 20, unlockLevel: 2,
+            name: 'Vault', cat: 'economy', size: 1, maxLevel: 20, unlockLevel: 2, costScale: 1.25,
             baseCost: { gold: 800 }, baseHP: 900, tone: '#b08040',
             desc: 'Raises the storage cap for every resource.',
             upgradeCost: (lv) => ({ gold: 900 * Math.pow(1.6, lv - 1) }),
             provides: (lv) => ({ cap: 1500 * lv + 1500 }),
         },
         builderhut: {
-            name: 'Builder Hut', cat: 'economy', size: 1, maxLevel: 15, unlockLevel: 2,
+            name: 'Builder Hut', cat: 'economy', size: 1, maxLevel: 15, unlockLevel: 2, costScale: 1.4,
             baseCost: { gold: 1500 }, baseHP: 400, tone: '#a0703c',
             desc: 'Each hut adds +10% gold production per level.',
             upgradeCost: (lv) => ({ gold: 1800 * Math.pow(1.5, lv - 1) }),
@@ -112,7 +114,7 @@
             name: 'Cannon', cat: 'defense', size: 1, maxLevel: 22, unlockLevel: 1,
             baseCost: { gold: 450 }, baseHP: 450, tone: '#666a72',
             desc: 'Single-target artillery. The backbone of any early defense.',
-            upgradeCost: (lv) => ({ gold: 550 * Math.pow(1.5, lv - 1) }),
+            upgradeCost: (lv) => ({ gold: 550 * Math.pow(1.5, lv - 1), elixir: 30 * Math.pow(1.45, lv - 1) }),
             defense: (lv) => ({ range: 5, dmg: 25 + lv * 14, cd: 1.2, splash: 0 }),
         },
         archer: {
@@ -130,8 +132,8 @@
             defense: (lv) => ({ range: 7, dmg: 60 + lv * 25, cd: 3.2, splash: 1.8 }),
         },
         airdef: {
-            name: 'Air Defense', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 5,
-            baseCost: { gold: 2800, elixir: 600 }, baseHP: 500, tone: '#6ea04a',
+            name: 'Air Defense', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 3,
+            baseCost: { gold: 1800, elixir: 400 }, baseHP: 500, tone: '#6ea04a',
             desc: 'Slow rocket launcher with a huge punch.',
             upgradeCost: (lv) => ({ gold: 3000 * Math.pow(1.55, lv - 1), elixir: 650 * Math.pow(1.5, lv - 1) }),
             defense: (lv) => ({ range: 5.5, dmg: 95 + lv * 40, cd: 2.4, splash: 0 }),
@@ -237,7 +239,7 @@
         ogre:     { name: 'Ogre',     hp: 620,  dmg: 55, spd: 0.6, gold: 180, xp: 24, size: 18, prefers: 'defense' },
         golem:    { name: 'Stone Golem', hp: 4200, dmg: 90, spd: 0.45, gold: 900, xp: 120, size: 26, prefers: 'core', boss: true },
         bat:      { name: 'Bat',      hp: 30,   dmg: 6,  spd: 2.0, gold: 25,  xp: 5,  size: 8,  flying: true, prefers: 'economy' },
-        dragon:   { name: 'Dragon',   hp: 200,  dmg: 28, spd: 1.2, gold: 100, xp: 15, size: 16, flying: true, prefers: 'any' },
+        dragon:   { name: 'Dragon',   hp: 200,  dmg: 28, spd: 1.2, gold: 100, xp: 15, size: 20, flying: true, prefers: 'any' },
     };
 
     // What can show up on a given wave, with weights.
@@ -246,7 +248,7 @@
         if (n >= 3)  t.push({ kind: 'wolf', w: 3 });
         if (n >= 3)  t.push({ kind: 'orc', w: Math.min(8, 2 + n * 0.5) });
         if (n >= 5)  t.push({ kind: 'skeleton', w: 3 });
-        if (n >= 6)  t.push({ kind: 'bat', w: 3 });
+        if (n >= 7)  t.push({ kind: 'bat', w: n >= 10 ? 3 : 1.5 });
         if (n >= 8)  t.push({ kind: 'troll', w: Math.min(6, 1 + n * 0.3) });
         if (n >= 12) t.push({ kind: 'dragon', w: 2.5 });
         if (n >= 14) t.push({ kind: 'ogre', w: Math.min(5, n * 0.2) });
@@ -255,9 +257,9 @@
 
     // ---------- DIFFICULTY ----------
     const DIFFICULTY = {
-        easy:   { label: 'Relaxed', hp: 0.75, dmg: 0.7,  loot: 1.0, crowns: 0.8, desc: 'Weaker raiders. Good for idling.' },
+        easy:   { label: 'Relaxed', hp: 0.7, dmg: 0.6,  loot: 1.0, crowns: 0.8, desc: 'Weaker raiders. Good for idling.' },
         normal: { label: 'Normal',  hp: 1,    dmg: 1,    loot: 1.0, crowns: 1.0, desc: 'The intended challenge.' },
-        hard:   { label: 'Hard',    hp: 1.35, dmg: 1.3,  loot: 1.2, crowns: 1.3, desc: 'Tougher raiders, better loot and crowns.' },
+        hard:   { label: 'Hard',    hp: 1.6, dmg: 1.5,  loot: 1.2, crowns: 1.3, desc: 'Tougher raiders, better loot and crowns.' },
     };
 
     // ---------- WAVE BOONS ----------
@@ -291,7 +293,7 @@
     // stat: key in game.stats; each quest tracks the stat from the moment it was given.
     const QUEST_KINDS = [
         { id: 'kills',    stat: 'kills',      text: (n) => `Defeat ${n} raiders`,          base: 12, per: 4,  min: 10 },
-        { id: 'clicks',   stat: 'clicks',     text: (n) => `Collect from buildings ${n} times`, base: 20, per: 3, min: 15 },
+        { id: 'clicks',   stat: 'collects',     text: (n) => `Collect from buildings ${n} times`, base: 20, per: 3, min: 15 },
         { id: 'built',    stat: 'built',      text: (n) => `Build ${n} structures`,        base: 3,  per: 0.5, min: 3 },
         { id: 'upgrades', stat: 'upgrades',   text: (n) => `Upgrade buildings ${n} times`, base: 4,  per: 1,  min: 4 },
         { id: 'waves',    stat: 'wavesCleared', text: (n) => `Clear ${n} waves`,           base: 2,  per: 0.4, min: 2 },
@@ -381,8 +383,16 @@
         return clamp(1 + Math.floor(((level - 1) / max) * 4), 1, 4);
     };
 
+    // Mines, wells and the like cost more with every one you own, so a field of cheap mines is not the best plan
+    const scaledCost = (type, owned) => {
+        const def = BLD[type], f = def.costScale && owned > 2 ? Math.pow(def.costScale, owned - 2) : 1;
+        const out = {};
+        for (const k in def.baseCost) out[k] = Math.round(def.baseCost[k] * f);
+        return out;
+    };
+
     K.data = {
-        CFG, VIEWS, BLD, CATS, ENEMY, waveTable, PERKS, perkCost, QUEST_KINDS, ACHS, DIFFICULTY, BOONS,
+        CFG, VIEWS, BLD, CATS, ENEMY, waveTable, PERKS, perkCost, QUEST_KINDS, ACHS, DIFFICULTY, BOONS, scaledCost,
         NOTATIONS, state,
     };
     K.util = {

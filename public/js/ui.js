@@ -98,7 +98,7 @@
             click('actFreeze', () => this.castFreeze());
             click('btnHelp', () => this.showHelp());
             click('btnHowTo', () => this.showHelp());
-            document.querySelectorAll('#diffSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.settings.difficulty = b.dataset.diff; this.syncSettingsUI(); this.save(); this.toast(`Difficulty: ${DIFFICULTY[b.dataset.diff].label}. ${DIFFICULTY[b.dataset.diff].desc}`, 'success'); }));
+            document.querySelectorAll('#diffSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.settings.difficulty = b.dataset.diff; this.reignCrowns = Math.min(this.reignCrowns, DIFFICULTY[b.dataset.diff].crowns); this.syncSettingsUI(); this.save(); this.toast(`Difficulty: ${DIFFICULTY[b.dataset.diff].label}. ${DIFFICULTY[b.dataset.diff].desc}`, 'success'); }));
             this.el.goal.addEventListener('click', (e) => { const a = e.target.closest('[data-goal]'); if (!a) return; this.audio.click(); if (a.dataset.goal === 'skip') this.tutSkip(); else this.tutAdvance(); });
             click('actWarCry', () => this.activateWarCry());
             click('actCancel', () => this.cancelModes());
@@ -132,6 +132,8 @@
 
             // delegated clicks inside the generated panels
             $('upgradeList').addEventListener('click', (e) => {
+                const grp = e.target.closest('[data-upg]');
+                if (grp) { const [type, lv] = grp.dataset.upg.split('|'); this.upgradeGroup(type, +lv); return; }
                 const btn = e.target.closest('[data-up]'), row = e.target.closest('[data-focus]');
                 if (btn) { const b = this.buildings.find(x => x.id === btn.dataset.up); if (b) this.upgradeBuilding(b); return; }
                 if (row) { const b = this.buildings.find(x => x.id === row.dataset.focus); if (b) this.focusBuilding(b); }
@@ -154,10 +156,11 @@
                 } else {
                     const away = (Date.now() - (this._hiddenAt || Date.now())) / 1000;
                     this._hiddenAt = 0;
-                    if (!this._wasPausedBeforeHide && !this.gameOverShown) {
+                    if (!this._wasPausedBeforeHide && !this.gameOverShown && !this.boonOpen && !this.welcomeOpen) {
                         this.paused = false; this.lastTime = performance.now();
                         this.applyOfflineEarnings(away); this.updateUI();
                     }
+                    setTimeout(() => this.offerPendingBoon(), 600);
                 }
                 this.syncToggles();
             });
@@ -195,7 +198,7 @@
             document.querySelectorAll('.dock-btn').forEach(b => { const on = b.dataset.tab === name; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
             this.el.app.classList.add('drawer-open');
             this.forceRefresh = true;
-            if (name === 'build') this.buildMenu(true);
+            if (name === 'build') { const cs = this.tutCurrent(); if (cs && cs.id === 'build') this.buildCat = 'defense'; this.buildMenu(true); }
             this.updateUI();
             this.forceRefresh = false;
         }
@@ -291,7 +294,8 @@
                     return `<button type="button" class="build-card" data-type="${type}" title="${esc(def.desc)}">
                         <span class="thumb-wrap"><img class="thumb" alt="" width="48" height="48"></span>
                         <span class="build-name">${def.name}</span>
-                        ${locked ? `<span class="build-lock">${ico('lock')}Level ${def.unlockLevel}</span>` : `<span class="build-cost">${this.costChips(def.baseCost)}</span>`}
+                        <span class="build-blurb">${esc(def.desc.split('. ')[0].replace(/\.$/, ''))}</span>
+                        ${locked ? `<span class="build-lock">${ico('lock')}Level ${def.unlockLevel}</span>` : `<span class="build-cost">${this.costChips(this.buildCost(type))}</span>`}
                         ${have}
                     </button>`;
                 }).join('') || '<p class="hint">Nothing here yet.</p>';
@@ -300,7 +304,7 @@
                     card.addEventListener('click', () => {
                         if (this.player.level < def.unlockLevel) { this.audio.error(); this.toast(`${def.name} unlocks at level ${def.unlockLevel}`, 'warn'); return; }
                         if (this.maxedOut(type)) { this.audio.error(); this.toast(`You already have the maximum ${def.name}s`, 'warn'); return; }
-                        if (!this.canAfford(def.baseCost)) { this.audio.error(); this.toast('Not enough resources', 'warn'); return; }
+                        if (!this.canAfford(this.buildCost(type))) { this.audio.error(); this.toast('Not enough resources', 'warn'); return; }
                         this.audio.click();
                         this.setBuildMode(this.buildMode === type ? null : type);
                         if (this.buildMode && this.isNarrow()) this.closePanel();
@@ -312,13 +316,13 @@
             for (const card of menu.children) {
                 const type = card.dataset.type; if (!type) continue;
                 const def = BLD[type];
-                const locked = this.player.level < def.unlockLevel, afford = this.canAfford(def.baseCost);
+                const locked = this.player.level < def.unlockLevel, afford = this.canAfford(this.buildCost(type));
                 card.classList.toggle('locked', locked);
                 card.classList.toggle('cannot-afford', !afford && !locked);
                 card.classList.toggle('selected', this.buildMode === type);
                 card.setAttribute('aria-pressed', String(this.buildMode === type));
                 const cost = card.querySelector('.build-cost');
-                if (cost && !locked) setHtml(cost, this.costChips(def.baseCost));
+                if (cost && !locked) setHtml(cost, this.costChips(this.buildCost(type)));
                 const cnt = card.querySelector('.count');
                 if (cnt) setText(cnt, `${this.countOf(type)}/${def.maxCount}`);
             }
@@ -379,7 +383,7 @@
             setText(el.dayTime, `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`);
             setText(el.dayCount, this.isNight() ? `Day ${this.dayCount} · +25%` : `Day ${this.dayCount}`);
             el.dayPanel.classList.toggle('night', this.isNight());
-            setText(el.zoom, `${Math.round(this.cam.zoom * 100)}%`);
+            setText(el.zoom, `${Math.round(this.cam.zoom / CFG.homeZoom * 100)}%`);
 
             if (el.combo) {
                 if (this.combo.count >= 3) { setText(el.combo, `COMBO x${this.combo.mult}`); el.combo.classList.add('show'); } else el.combo.classList.remove('show');
@@ -392,7 +396,8 @@
             else { wc.classList.remove('active', 'cooling'); setText(el.warCryLabel, 'War Cry'); el.warCryCd.style.setProperty('--cd', '0'); }
             el.boost.classList.toggle('active', this.boost.timeLeft > 0);
             setText(el.boostLabel, this.boost.timeLeft > 0 ? `x2 ${Math.ceil(this.boost.timeLeft)}s` : 'Boost');
-            el.boost.classList.toggle('dim', this.res.gems < 1 && this.boost.timeLeft <= 0);
+            const rl = $('rallyLabel'); if (rl) { setText(rl, this.rallyCd > 0 ? `${Math.ceil(this.rallyCd)}s` : 'Rally'); $('actRally').classList.toggle('cooling', this.rallyCd > 0); }
+            el.boost.classList.toggle('dim', this.res.gems < CFG.boostCost && this.boost.timeLeft <= 0);
             el.spell.classList.toggle('dim', this.res.gems < 1);
             el.spell.classList.toggle('active', this.spellMode);
 
@@ -406,7 +411,7 @@
             const ready = this.readyCount();
             el.collect.classList.toggle('glow', ready > 0);
             if (el.collectDot._n !== ready) { el.collectDot._n = ready; el.collectDot.textContent = String(ready); el.collectDot.hidden = ready === 0; }
-            el.freeze.classList.toggle('dim', this.res.gems < 1 || this.enemies.length === 0);
+            el.freeze.classList.toggle('dim', this.res.gems < CFG.freezeCost || this.enemies.length === 0);
             this.renderGoal();
 
             this.updateSelectionLive();
@@ -474,10 +479,10 @@
                 <div class="sel-actions">
                     ${def.clickBonus ? `<button class="btn gold" type="button" data-act="collect">${ico('sack')}Collect</button>` : ''}
                     ${next ? `<button class="btn good upgrade" type="button" data-act="upgrade" id="selUp"><span class="up-label">${ico('up')}Upgrade</span><span class="up-cost" id="selUpCost">${this.costChips(next)}</span></button>
-                    <button class="btn small" type="button" data-act="max" title="Upgrade as far as you can afford">Max</button>` : ''}
-                    ${canMove ? `<button class="btn small" type="button" data-act="move" title="Move">${ico('move')}</button>` : ''}
-                    <button class="btn small" type="button" data-act="info" title="Details">${ico('info')}</button>
-                    ${canMove ? `<button class="btn small danger" type="button" data-act="sell" title="Sell">${ico('trash')}</button>` : ''}
+                    <button class="btn small" type="button" data-act="max" title="Keep upgrading until you run out of money">Max</button>` : ''}
+                    ${canMove ? `<button class="btn small" type="button" data-act="move" title="Move this building" aria-label="Move">${ico('move')}</button>` : ''}
+                    <button class="btn small" type="button" data-act="info" title="Details" aria-label="Details">${ico('info')}</button>
+                    ${canMove ? `<button class="btn small danger" type="button" data-act="sell" title="Sell (50% back)" aria-label="Sell">${ico('trash')}</button>` : ''}
                 </div>`;
             sel._key = key;
             this.updateSelectionLive(true);
@@ -502,7 +507,7 @@
                 if (col._lab !== lab) { col._lab = lab; col.innerHTML = `${ico('sack')}${lab}`; }
             }
             const up = $('selUp');
-            if (up) up.classList.toggle('tut-pulse', this.tutTarget().sel === 'upgrade');
+            if (up) up.classList.toggle('tut-pulse', !!this._tt && this._tt.sel === 'upgrade');
             if (up && b.level < def.maxLevel) {
                 const cost = def.upgradeCost(b.level), ok = this.canAfford(cost);
                 up.classList.toggle('cant', !ok);
@@ -537,21 +542,38 @@
         }
 
         // ---------- upgrade list ----------
+        // Many identical buildings (walls above all) collapse into one row
+        upgradeGroup(type, level) {
+            let n = 0;
+            for (const b of this.buildings.slice()) if (b.type === type && b.level === level && this.upgradeBuilding(b, true)) n++;
+            if (n) { this.toast(`${BLD[type].name}: ${n} upgraded`, 'success'); this.audio.upgrade(); } else this.toast('Not enough resources', 'warn');
+        }
         renderUpgrades() {
             const list = $('upgradeList');
-            const cands = this.buildings.filter(b => BLD[b.type].upgradeCost && b.level < BLD[b.type].maxLevel);
-            const rows = cands.map(b => ({ b, cost: BLD[b.type].upgradeCost(b.level), ok: this.canAfford(BLD[b.type].upgradeCost(b.level)), c$: this.upgradeCostScore(b) }))
-                .sort((a, z) => (z.ok - a.ok) || (a.c$ - z.c$));
+            const groups = new Map();
+            for (const b of this.buildings) {
+                const def = BLD[b.type];
+                if (!def.upgradeCost || b.level >= def.maxLevel) continue;
+                const key = b.type + '|' + b.level;
+                const g = groups.get(key) || { type: b.type, level: b.level, list: [] };
+                g.list.push(b); groups.set(key, g);
+            }
+            const rows = [...groups.values()].map(g => {
+                const b = g.list[0], cost = BLD[g.type].upgradeCost(g.level);
+                return { g, b, cost, n: g.list.length, ok: this.canAfford(cost), c$: this.upgradeCostScore(b) + (g.type === 'wall' ? 1e12 : 0) };
+            }).sort((a, z) => (z.ok - a.ok) || (a.c$ - z.c$));
             const maxed = this.buildings.filter(b => BLD[b.type].upgradeCost && b.level >= BLD[b.type].maxLevel).length;
-            const html = rows.map(({ b, cost, ok }) => {
+            const html = rows.map(({ g, b, cost, n, ok }) => {
                 const def = BLD[b.type];
                 const cur = this.levelStats(b.type, b.level), nxt = this.levelStats(b.type, b.level + 1);
-                const s = cur[0], n = s && nxt.find(x => x.id === s.id);
-                const gain = s && n ? `${s.label}: ${s.f(s.v)} → <b>${n.f(n.v)}</b>` : '';
-                return `<div class="up-row${ok ? ' ready' : ''}" data-focus="${b.id}">
+                const s0 = cur[0], n0 = s0 && nxt.find(x => x.id === s0.id);
+                const gain = s0 && n0 ? `${s0.label}: ${s0.f(s0.v)} → <b>${n0.f(n0.v)}</b>` : '';
+                const many = n > 1;
+                return `<div class="up-row${ok ? ' ready' : ''}${many ? ' group' : ''}" data-focus="${b.id}">
                     <img class="up-thumb" alt="" width="40" height="40" src="${this.thumbURL(b.type)}">
-                    <div class="up-info"><div class="up-name">${def.name}<small>Lv ${b.level} → ${b.level + 1}</small></div><div class="up-gain">${gain}</div><div class="up-cost">${this.costChips(cost)}</div></div>
-                    <button type="button" class="btn small ${ok ? 'good' : ''}" data-up="${b.id}" ${ok ? '' : 'disabled'}>Upgrade</button>
+                    <div class="up-info"><div class="up-name">${def.name}${many ? `<span class="up-count">x${n}</span>` : ''}<small>Lv ${b.level} → ${b.level + 1}</small></div><div class="up-gain">${gain}</div><div class="up-cost">${this.costChips(cost)}${many ? '<span class="chip free">each</span>' : ''}</div></div>
+                    ${many ? `<button type="button" class="btn small ${ok ? 'good' : ''}" data-upg="${g.type}|${g.level}" ${ok ? '' : 'disabled'}>Upgrade all</button>`
+                           : `<button type="button" class="btn small ${ok ? 'good' : ''}" data-up="${b.id}" ${ok ? '' : 'disabled'}>Upgrade</button>`}
                 </div>`;
             }).join('') + (maxed ? `<p class="hint">${maxed} building${maxed > 1 ? 's' : ''} fully upgraded.</p>` : '') + (!rows.length && !maxed ? '<p class="hint">Build something and it shows up here.</p>' : '');
             setHtml(list, html);
@@ -580,8 +602,8 @@
                     <button type="button" class="btn small ${!maxed && this.crowns >= cost ? 'gold' : ''}" data-perk="${k}" ${maxed || this.crowns < cost ? 'disabled' : ''}>${maxed ? 'Max' : `${cost} ${ico('crown')}`}</button></div>`;
             }).join('');
             const asc = `<div class="crown-row">${ico('crown', 'big')}<div><b>${this.crowns}</b> crown${this.crowns === 1 ? '' : 's'}<small>${this.ascensions} ascension${this.ascensions === 1 ? '' : 's'} · reign ${this.ascensions + 1}</small></div></div>
-                <p class="hint">Ascending starts a new reign: your buildings, level, wave and resources reset. Crowns, perks, achievements and statistics stay. ${can ? `Right now it would earn <b>${gain} crown${gain === 1 ? '' : 's'}</b>.` : `Survive wave ${CFG.ascendMinWave} to unlock it (you are on wave ${this.wave.number}).`}</p>
-                <button type="button" class="btn ${can ? 'gold' : ''}" data-ascend="1" ${can ? '' : 'disabled'}>${ico('crown')}Ascend for ${can ? gain : '?'} crown${gain === 1 ? '' : 's'}</button>
+                <p class="hint">Ascending starts a new reign: your buildings, level, wave and resources reset. Crowns, perks, gems, achievements and statistics stay. ${can ? `Right now it would earn <b>${gain} crown${gain === 1 ? '' : 's'}</b>.` : `Survive ${CFG.ascendMinWave} waves to unlock it (${this.wavesSurvived()} so far).`}</p>
+                <button type="button" class="btn ascend" data-ascend="1" ${can ? '' : 'disabled'}>${ico('crown')}Ascend for ${can ? gain : '?'} crown${gain === 1 ? '' : 's'}</button>
                 <div class="perks">${perks}</div>`;
             setHtml($('ascendBox'), asc);
 
@@ -605,7 +627,7 @@
             const gain = this.ascendGain();
             this.showConfirm({
                 title: 'Ascend?', icon: 'crown',
-                body: `Start a new reign and earn <b>${gain} crown${gain === 1 ? '' : 's'}</b>.<br><br>Your buildings, level, wave and resources reset. Crowns, perks, achievements and statistics stay.`,
+                body: `Start a new reign and earn <b>${gain} crown${gain === 1 ? '' : 's'}</b>.<br><br>Your buildings, level, wave and resources reset. Crowns, perks, gems, achievements and statistics stay.`,
                 yesText: `Ascend (+${gain})`, noText: 'Not yet', danger: false,
                 onYes: () => this.ascend(),
             });
@@ -652,7 +674,7 @@
             el.innerHTML = `${ico(icon)}<span></span>`;
             el.lastChild.textContent = msg;
             c.appendChild(el);
-            while (c.children.length > 4) c.firstElementChild.remove();
+            while (c.children.length > 3) c.firstElementChild.remove();
             setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, type === 'tip' ? 6500 : 2600);
         }
         showAlert(text, dur = 2, boss = false) {
@@ -678,7 +700,7 @@
             const p = this.el.pause;
             p.classList.toggle('on', this.paused); p.setAttribute('aria-pressed', String(this.paused));
             p.setAttribute('aria-label', this.paused ? 'Resume' : 'Pause');
-            this.el.veil.hidden = !(this.paused && !this.gameOverShown && !document.hidden);
+            this.el.veil.hidden = !(this.paused && !this.gameOverShown && !document.hidden && !this.welcomeOpen && !this.boonOpen);
             setText(this.el.speedTag, 'x' + this.speed);
             $('btnSpeed').classList.toggle('on', this.speed > 1);
             document.querySelectorAll('#notationSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.notation === K.data.state.notation)));
@@ -725,14 +747,15 @@
         renderGoal() {
             const el = this.el.goal;
             const s = this.tutCurrent();
-            if (!s) { el.hidden = true; this.setDockPulse(null); return; }
+            if (!s) { el.hidden = true; this._tt = null; this.setDockPulse(null); return; }
             el.hidden = false;
             const steps = this.tutSteps();
             const dots = steps.map((_, i) => `<i class="${i < this.tut.step ? 'done' : (i === this.tut.step ? 'now' : '')}"></i>`).join('');
             setHtml(el, `<div class="goal-top"><b>Goal ${this.tut.step + 1} of ${steps.length}</b><button type="button" data-goal="skip" title="Hide the goals">Skip</button></div>
                 <div class="goal-title">${s.title}</div><div class="goal-sub">${s.sub}</div>
                 <div class="goal-dots">${dots}</div>${s.manual ? '<button type="button" class="btn small good" data-goal="next">Got it</button>' : ''}`);
-            this.setDockPulse(this.tutTarget().dock || null);
+            this._tt = this.tutTarget();
+            this.setDockPulse(this._tt.dock || null);
         }
         setDockPulse(tab) {
             document.querySelectorAll('.dock-btn').forEach(b => b.classList.toggle('tut-pulse', !!tab && b.dataset.tab === tab && this.panel !== tab));
@@ -760,18 +783,17 @@
                     ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Walls and decorations can be painted by dragging.')}
                     ${row('sword', 'Defend', 'Raiders arrive when the timer on the left runs out. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
                     ${row('star', 'Boons', 'After every raid you pick one of three rewards. They stack and last until you ascend.')}
-                    ${row('gem', 'Gems', 'Spend them on <b>Boost</b> (double income), <b>Lightning</b> and <b>Freeze</b>. Earn them from waves, quests and goblins.')}
-                    ${row('crown', 'Ascend', 'From wave 10, Ascend in the Kingdom tab: the kingdom restarts and you keep crowns that buy permanent perks.')}
+                    ${row('gem', 'Gems', 'Spend them on <b>Boost</b> (double income, ${CFG.boostCost} gems), <b>Lightning</b> (1) and <b>Freeze</b> (${CFG.freezeCost}). Earn them from waves, quests and goblins.')}
+                    ${row('crown', 'Ascend', `From wave ${CFG.ascendMinWave}, Ascend in the Kingdom tab: the kingdom restarts and you keep crowns that buy permanent perks.`)}
                 </div>
-                <div class="modal-actions"><button class="btn small" id="helpKeys" type="button">Keyboard shortcuts</button><button class="btn small" id="helpGoals" type="button">Replay the goals</button></div>`);
+                <div class="modal-actions"><button class="btn small" id="helpKeys" type="button">Keyboard shortcuts</button></div>`);
             $('helpKeys').addEventListener('click', () => this.showShortcuts());
-            $('helpGoals').addEventListener('click', () => { this.tut = { step: 0, done: false }; this.opened = {}; this.closeModal(); this.updateUI(); this.toast('Goals restarted', 'success'); });
         }
 
         // ---------- wave boons ----------
         showBoons(picks) {
             if (this.boonOpen || this.gameOverShown) return;
-            const wasPaused = this.paused;
+            const wasPaused = document.hidden ? !!this._wasPausedBeforeHide : this.paused;
             this.boonOpen = true; this.modalBlocking = true;
             this.paused = true; this.syncToggles();
             this.audio.levelup();
@@ -841,6 +863,7 @@
         }
 
         showConfirm(opts = {}) {
+            if (this._confirmCleanup) this._confirmCleanup();
             let el = $('confirmDialog');
             if (!el) {
                 el = document.createElement('div');
@@ -865,6 +888,7 @@
             const back = el.querySelector('.confirm-backdrop');
             const returnFocus = document.activeElement;
             const close = () => {
+                this._confirmCleanup = null;
                 el.classList.remove('open');
                 if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
                 yes.removeEventListener('click', onYes); no.removeEventListener('click', onNo); back.removeEventListener('click', onNo);
@@ -878,6 +902,7 @@
             };
             yes.addEventListener('click', onYes); no.addEventListener('click', onNo); back.addEventListener('click', onNo);
             document.addEventListener('keydown', onKey);
+            this._confirmCleanup = () => { this._confirmCleanup = null; yes.removeEventListener('click', onYes); no.removeEventListener('click', onNo); back.removeEventListener('click', onNo); document.removeEventListener('keydown', onKey); el.classList.remove('open'); };
             void el.offsetWidth;
             el.classList.add('open');
             (opts.danger ? no : yes).focus();

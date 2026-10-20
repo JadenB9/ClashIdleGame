@@ -6,7 +6,7 @@
    ============================================================ */
 (function (K) {
     'use strict';
-    const { CFG, VIEWS, BLD, ENEMY, waveTable, PERKS, QUEST_KINDS, ACHS, DIFFICULTY, BOONS } = K.data;
+    const { CFG, VIEWS, BLD, ENEMY, waveTable, PERKS, QUEST_KINDS, ACHS, DIFFICULTY, BOONS, scaledCost } = K.data;
     const U = K.util;
     const { rand, randi, clamp, fmt, safeNum, compact, alive, tierOf, resColor } = U;
     const A = K.art;
@@ -137,7 +137,7 @@
             this.beams = [];
             this.particles = [];
             this.popups = [];
-            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0, goblins: 0, bosses: 0, boons: 0, freezes: 0 };
+            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0, goblins: 0, bosses: 0, boons: 0, freezes: 0, collects: 0 };
             this.achievements = {};
             this.dayTime = 0.25; this.dayCount = 1;
             this.wave = { number: 0, timer: 90, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
@@ -164,7 +164,7 @@
             this.boost = { mult: 1, timeLeft: 0 };
             this.combo = { count: 0, time: 0, mult: 1 };
             this.warCry = { active: false, timeLeft: 0, cooldown: 0 };
-            this.flash = 0; this.shake = 0;
+            this.flash = 0; this.shake = 0; this.rallyCd = 0; this.reignCrowns = 1; this.pendingBoon = false;
             this.goblin = null; this.goblinTimer = rand(70, 110);
 
             this.occ = new Array(CFG.gridW * CFG.gridH).fill(null);
@@ -213,8 +213,9 @@
 
             const welcome = document.getElementById('welcome');
             const start = document.getElementById('welcomeStart');
-            start.addEventListener('click', () => { welcome.classList.add('hidden'); this.audio.ensure(); this.audio.click(); });
-            if (this.hadSave) welcome.classList.add('hidden'); else start.focus();
+            start.addEventListener('click', () => { welcome.classList.add('hidden'); this.audio.ensure(); this.audio.click(); this.welcomeOpen = false; this.paused = false; this.lastTime = performance.now(); this.syncToggles(); });
+            if (this.hadSave) welcome.classList.add('hidden');
+            else { start.focus(); this.welcomeOpen = true; this.paused = true; }
             this.updateUI();
             this.refreshSelection();
         }
@@ -325,6 +326,7 @@
             }
             return true;
         }
+        buildCost(type) { return scaledCost(type, this.countOf(type)); }
         countOf(type) { let n = 0; for (const b of this.buildings) if (b.type === type) n++; return n; }
         decorCount() { let n = 0; for (const b of this.buildings) if (BLD[b.type].decor) n++; return n; }
         maxedOut(type) { const m = BLD[type].maxCount; return !!m && this.countOf(type) >= m; }
@@ -423,14 +425,16 @@
                 const L = this.input.lastPaint;
                 if (L && L.tx === t.tx && L.ty === t.ty) return;
                 this.input.lastPaint = { tx: t.tx, ty: t.ty };
-                if (this.buildMode && this.canPlace(this.buildMode, t.tx, t.ty)) this.placeBuilding(this.buildMode, t.tx, t.ty, true);
+                if (!this.buildMode || !this.canPlace(this.buildMode, t.tx, t.ty)) return;
+                if (!this.canAfford(this.buildCost(this.buildMode))) { if (!this.input.paintWarned) { this.input.paintWarned = true; this.audio.error(); this.toast('Not enough resources to keep painting', 'warn'); } return; }
+                this.placeBuilding(this.buildMode, t.tx, t.ty, true);
             };
 
             const onDown = (e, touch) => {
                 if (e.button !== undefined && e.button !== 0) return;
                 const p = getPos(e);
                 const I = this.input;
-                I.touch = !!touch;
+                I.touch = !!touch; I.paintWarned = false;
                 I.down = true; I.drag = false; I.dragMove = false; I.paint = false; I.lastPaint = null;
                 I.downX = I.lastX = I.x = p.x; I.downY = I.lastY = I.y = p.y;
                 I.shift = !!e.shiftKey;
@@ -533,6 +537,7 @@
             const dialogOpen = document.getElementById('modal').classList.contains('open') || document.querySelector('.confirm-dialog.open');
             if (dialogOpen && e.key !== 'Escape') return;
             const k = e.key;
+            if (e.repeat && 'frwulp x'.includes(k.toLowerCase()) && k !== 'Escape') return;
             if (k === 'Escape') {
                 if (this.buildMode || this.moveMode || this.spellMode) this.cancelModes();
                 else if (document.getElementById('modal').classList.contains('open')) this.closeModal();
@@ -591,6 +596,7 @@
             if (this.moveMode) { this.commitMove({ tx: t.tx, ty: t.ty }); return; }
 
             if (I.downTarget === 'goblin') { this.catchGoblin(); return; }
+            if (I.downBuilding && !this.buildings.includes(I.downBuilding)) { I.downBuilding = null; I.downTarget = null; }
             if (I.downTarget === 'bubble' && I.downBuilding) { this.collectFrom(I.downBuilding); return; }
             if (I.downTarget === 'arrow' && I.downBuilding) { this.upgradeBuilding(I.downBuilding); return; }
 
@@ -626,18 +632,20 @@
                 this.audio.error(); this.toast(`You can only have ${def.maxCount} ${def.name}${def.maxCount > 1 ? 's' : ''}`, 'warn');
                 this.setBuildMode(null); return false;
             }
-            if (!this.canAfford(def.baseCost)) { this.audio.error(); this.toast('Not enough resources', 'warn'); return false; }
-            this.spend(def.baseCost);
-            const b = { id: Math.random().toString(36).slice(2, 9), type, tx, ty, level: 1, hp: def.baseHP, maxHp: def.baseHP, lastShot: 0, build: 0 };
+            const cost = this.buildCost(type);
+            if (!this.canAfford(cost)) { this.audio.error(); this.toast('Not enough resources', 'warn'); return false; }
+            this.spend(cost);
+            const hp0 = this.hpFor(type, 1);
+            const b = { id: Math.random().toString(36).slice(2, 9), type, tx, ty, level: 1, hp: hp0, maxHp: hp0, lastShot: 0, build: 0 };
             this.buildings.push(b);
             this.touchGrid();
             this.stats.built++;
-            this.gainXp(def.decor ? 5 : 15);
+            this.gainXp(def.decor ? 4 : 10);
             if (!quiet) this.audio.build(); else if (this.audio.gate('buildq', 90)) this.audio.build();
             const p = this.centerOf(b);
             for (let i = 0; i < 12; i++) this.particles.push({ x: p.x + rand(-18, 18), y: p.y + rand(-4, 8), vx: rand(-30, 30), vy: rand(-45, -12), life: 0.8, max: 0.8, color: '#d8c8a8', size: rand(3, 6), kind: 'dust' });
             const singleton = !!def.maxCount && this.countOf(type) >= def.maxCount;
-            if (singleton || !this.canAfford(def.baseCost)) {
+            if (singleton || !this.canAfford(this.buildCost(type))) {
                 this.setBuildMode(null);
                 if (!singleton) this.toast(`${def.name} built. Not enough for another.`, 'success');
                 else this.toast(`${def.name} built!`, 'success');
@@ -660,7 +668,7 @@
             b.hp = b.maxHp;
             b.upg = 1;
             this.stats.upgrades++;
-            this.gainXp(25);
+            this.gainXp(12);
             if (!quiet) this.audio.upgrade(); else if (this.audio.gate('upq', 120)) this.audio.upgrade();
             const p = this.centerOf(b);
             for (let i = 0; i < 18; i++) {
@@ -686,6 +694,13 @@
             if (n) this.toast(`${BLD[b.type].name} upgraded ${n} level${n > 1 ? 's' : ''}`, 'success');
             else this.toast('Not enough resources', 'warn');
         }
+        // lower sorts first. Walls last; the Town Hall jumps the queue once storage is nearly full
+        upgradePriority(b) {
+            let v = this.upgradeCostScore(b);
+            if (b.type === 'wall') v += 1e12;
+            if (b.type === 'townhall' && this.res.gold >= this.cap() * 0.85) v *= 0.02;
+            return v;
+        }
         upgradeCostScore(b) { const c = BLD[b.type].upgradeCost(b.level); return (c.gold || 0) + (c.elixir || 0) * 1.3 + (c.dark || 0) * 60; }
         upgradeCandidates(cat = 'all') {
             return this.buildings.filter(b => {
@@ -695,7 +710,7 @@
                 if (cat === 'defense') return def.cat === 'defense';
                 return true;
             // walls are cheap and numerous: they only get upgraded once nothing else is affordable
-            }).sort((a, b) => (this.upgradeCostScore(a) + (a.type === 'wall' ? 1e12 : 0)) - (this.upgradeCostScore(b) + (b.type === 'wall' ? 1e12 : 0)));
+            }).sort((a, b) => this.upgradePriority(a) - this.upgradePriority(b));
         }
         upgradeCheapest(cat = 'all', quiet = false) {
             for (const b of this.upgradeCandidates(cat)) {
@@ -717,6 +732,7 @@
 
         sellBuilding(b) {
             const def = BLD[b.type];
+            if (def.cat === 'core') return {};
             const refund = {};
             for (const k in def.baseCost) refund[k] = Math.floor(def.baseCost[k] * 0.5);
             for (const k in refund) this.addRes(k, refund[k]);
@@ -730,6 +746,7 @@
             this.buildings = this.buildings.filter(x => x !== b);
             this.touchGrid();
             for (const e of this.enemies) if (e.target === b) e.target = null;
+            if (this.input.downBuilding === b) { this.input.downBuilding = null; this.input.downTarget = null; }
             if (this.hoverBuilding === b) { this.hoverBuilding = null; this.rebuildHoverTip(); }
             if (this.selected === b) { this.selected = null; this.refreshSelection(); }
             if (this.moveMode === b) { this.moveMode = null; this.updateCanvasCursor(); }
@@ -819,7 +836,7 @@
         // ---------- combat ----------
         buildQueue(n) {
             const table = waveTable(n);
-            const total = Math.min(4 + n * 2, 48);
+            const total = Math.min(4 + n * 2, 60);
             const sum = table.reduce((s, e) => s + e.w, 0);
             const q = [];
             for (let i = 0; i < total; i++) {
@@ -853,11 +870,13 @@
             else if (edge === 1) { tx = CFG.gridW + 1; ty = randi(0, CFG.gridH); }
             else if (edge === 2) { tx = randi(0, CFG.gridW); ty = CFG.gridH + 1; }
             else                 { tx = -2; ty = randi(0, CFG.gridH); }
-            const hpScale = 1 + this.wave.number * 0.12;
+            const wv = this.wave.number;
+            const hpScale = 1 + wv * 0.12 + wv * wv * 0.004;      // gentle early, steeper once defenses snowball
+            const dmgScale = 1 + wv * 0.03 + Math.max(0, wv - 10) * 0.02;
             const p = this.worldIso(tx + 0.5, ty + 0.5);
             this.enemies.push({
                 kind, flying: !!T.flying, boss: !!T.boss, size: T.size, tx: tx + 0.5, ty: ty + 0.5, x: p.x, y: p.y, air: 0,
-                hp: T.hp * hpScale * this.diff().hp, maxHp: T.hp * hpScale * this.diff().hp, dmg: T.dmg * (1 + this.wave.number * 0.03) * this.diff().dmg, spd: T.spd, reach: T.reach || (T.flying ? 0.9 : 0.75),
+                hp: T.hp * hpScale * this.diff().hp, maxHp: T.hp * hpScale * this.diff().hp, dmg: T.dmg * dmgScale * this.diff().dmg, spd: T.spd, reach: T.reach || (T.flying ? 0.9 : 0.75),
                 reward: { gold: T.gold, xp: T.xp }, target: null, attackCd: rand(0, 0.6), walk: rand(0, 6), wobble: rand(0, 6), dir: 1,
                 off: { x: rand(-0.28, 0.28), y: rand(-0.28, 0.28) }, slow: 0, slowAmt: 0, hit: 0, atkAnim: 0, retarget: 0,
             });
@@ -1168,7 +1187,7 @@
                 if (p.type === 'mortar') { this.shake = Math.max(this.shake, 2.4); this.audio.boom(); }
             } else if (tg && tg.hp > 0) {
                 this.hitEnemy(tg, p.dmg);
-                if (p.slow) { tg.slow = 1.8; tg.slowAmt = p.slow; }
+                if (p.slow) { tg.slowAmt = Math.max(tg.slow > 0 ? tg.slowAmt : 0, p.slow); tg.slow = Math.max(tg.slow, 1.8); }
             }
             const col = ({ wizard: '#7ad8ff', frost: '#bff0ff', airdef: '#ffb050', mortar: '#ffb050', cannon: '#ffcf70' })[p.type] || '#ffe3a1';
             for (let i = 0; i < (p.splash ? 10 : 5); i++) {
@@ -1193,7 +1212,7 @@
             const loot = Math.round(e.reward.gold * (1 + 0.25 * this.boon('loot')) * this.diff().loot);
             this.stats.goldEarned += this.addRes('gold', loot);
             this.gainXp(e.reward.xp);
-            if (Math.random() < 0.05) { this.res.gems += 1; this.floatText('+1 gem', e.x, e.y - 40, '#5cd8ff'); }
+            if (Math.random() < 0.03) { this.res.gems += 1; this.floatText('+1 gem', e.x, e.y - 40, '#5cd8ff'); }
             this.audio.die();
             for (let i = 0; i < (e.boss ? 40 : 12); i++) this.particles.push({ x: e.x, y: e.y - e.size, vx: rand(-130, 130), vy: rand(-170, -20), life: 0.8, max: 0.8, color: i % 2 ? '#ff7a35' : '#ffc857', size: rand(2.5, 5.5), kind: 'p' });
             this.particles.push({ x: e.x, y: e.y - e.size * 0.6, vx: 0, vy: -20, life: 0.9, max: 0.9, color: 'rgba(230,230,235,', size: e.size * 0.9, kind: 'smoke' });
@@ -1215,7 +1234,7 @@
             if (leveled) {
                 this.audio.levelup();
                 this.toast(`Level up! You are level ${this.player.level}`, 'success');
-                this.res.gems += 2;
+                this.res.gems += 1;
                 this.showAlert(`LEVEL ${this.player.level}`, 2.5);
                 const unlocked = Object.values(BLD).filter(d => d.unlockLevel === this.player.level).map(d => d.name);
                 if (unlocked.length) setTimeout(() => this.toast(`Unlocked: ${unlocked.join(', ')}`, 'success'), 700);
@@ -1266,11 +1285,11 @@
                 firstKey = firstKey || k; i++;
             }
             if (!opt.noCombo && this.combo.count >= 3) { this.floatText(`COMBO x${this.combo.mult}`, p.x, p.y - 76, '#ffc857'); this.audio.combo(); }
-            this.stats.clicks++;
+            if (!opt.noCombo) this.stats.clicks++;
+            this.stats.collects++;
             b.pop = 1;
             if (!opt.quiet) this.audio.coin();
-            this.pulseRes(firstKey);
-            if (!opt.quiet) { this.updateUI(); this.checkAchievements(); }
+            if (!opt.quiet) { this.pulseRes(firstKey); this.updateUI(); this.checkAchievements(); }
             return true;
         }
 
@@ -1317,6 +1336,8 @@
         }
 
         rally() {
+            if (this.rallyCd > 0) { this.audio.error(); this.toast(`Rally is recharging (${Math.ceil(this.rallyCd)}s)`, 'warn'); return; }
+            this.rallyCd = 25;
             let healed = 0;
             for (const b of this.buildings) {
                 if (BLD[b.type].decor) continue;
@@ -1329,8 +1350,8 @@
         }
 
         activateBoost() {
-            if (this.res.gems < 1) { this.audio.error(); this.toast('A boost costs 1 gem', 'warn'); return; }
-            this.res.gems -= 1;
+            if (this.res.gems < CFG.boostCost) { this.audio.error(); this.toast(`A boost costs ${CFG.boostCost} gems`, 'warn'); return; }
+            this.res.gems -= CFG.boostCost;
             this.boost.mult = 2; this.boost.timeLeft = 60;
             this.audio.levelup();
             this.toast('Production doubled for 60 seconds', 'success');
@@ -1340,6 +1361,7 @@
         activateWarCry() {
             if (this.warCry.active) { this.toast('War Cry is already ringing out', 'warn'); return; }
             if (this.warCry.cooldown > 0) { this.audio.error(); this.toast(`War Cry is recharging (${Math.ceil(this.warCry.cooldown)}s)`, 'warn'); return; }
+            if (!this.wave.active && !this.enemies.length) { this.audio.error(); this.toast('Save War Cry for a raid. It only lasts 15 seconds.', 'warn'); return; }
             this.warCry.active = true; this.warCry.timeLeft = 15; this.warCry.cooldown = 90;
             this.audio.spell();
             this.toast('War Cry! Towers hit 50% harder for 15s', 'success');
@@ -1440,11 +1462,13 @@
         }
 
         // ---------- ascension ----------
+        // waves you have actually beaten (the wave in progress does not count yet)
+        wavesSurvived() { return Math.max(0, this.wave.active ? this.wave.number - 1 : this.wave.number); }
         ascendGain() {
-            const w = Math.max(0, this.wave.number - 1);
-            return Math.max(0, Math.floor((w / 3 + this.player.level / 4 + this.stats.upgrades / 60) * this.diff().crowns));
+            const w = this.wavesSurvived();
+            return Math.max(0, Math.floor((w / 3 + this.player.level / 4 + this.stats.upgrades / 60) * Math.min(this.reignCrowns, this.diff().crowns)));
         }
-        canAscend() { return this.wave.number >= CFG.ascendMinWave; }
+        canAscend() { return this.wavesSurvived() >= CFG.ascendMinWave; }
         perkRank(k) { return this.perks[k] || 0; }
         buyPerk(k) {
             const P = PERKS[k], r = this.perkRank(k), cost = K.data.perkCost(r);
@@ -1454,11 +1478,17 @@
             this.audio.upgrade();
             this.recomputeRates(); this.updateUI(); this.save();
         }
-        ascend() {
-            const gain = this.ascendGain();
-            this.crowns += gain; this.crownsEver += gain; this.ascensions++;
+        // skipGain: a fallen kingdom below the ascension threshold starts a new reign with no crowns,
+        // but keeps everything permanent
+        ascend(skipGain = false) {
+            clearTimeout(this._boonTimer);
+            this.cancelModes();
+            this.combo = { count: 0, time: 0, mult: 1 };
+            const gain = skipGain ? 0 : this.ascendGain();
+            this.crowns += gain; this.crownsEver += gain; if (!skipGain) this.ascensions++;
             // a fresh reign: kingdom, wave and level restart; crowns, perks, achievements and lifetime stats stay
-            this.res = { gold: 500 + 500 * this.perks.headstart, elixir: 150, dark: 0, gems: 5 + this.ascensions };
+            this.res = { gold: 500 + 500 * this.perks.headstart, elixir: 150, dark: 0, gems: this.res.gems + 2 };
+            this.reignCrowns = this.diff().crowns; this.pendingBoon = false;
             this.player.level = 1; this.player.xp = 0;
             this.buildings = []; this.enemies = []; this.projectiles = []; this.beams = []; this.goblin = null;
             this.boons = {};
@@ -1473,7 +1503,7 @@
             this.buildMenu(true); this.refreshSelection(); this.updateUI();
             this.centerCamera();
             this.showAlert(`REIGN ${this.ascensions + 1} BEGINS`, 3.5);
-            this.toast(`Ascended! +${gain} crown${gain === 1 ? '' : 's'}`, 'success');
+            this.toast(skipGain ? 'A new reign begins. Crowns and perks are safe.' : `Ascended! +${gain} crown${gain === 1 ? '' : 's'}`, 'success');
             this.audio.levelup();
             this.closeModal(); this.closePanel();
             this.save();
@@ -1505,7 +1535,7 @@
                     title: 'Kingdom Fallen', icon: 'skull',
                     body: `Your Town Hall fell on <b>Day ${this.dayCount}</b>, <b>Wave ${this.wave.number}</b>.<br><br>${this.canAscend() ? `You can still <b>Ascend</b> from the menu to keep the ${this.ascendGain()} crowns you earned.<br><br>` : ''}Raise a new banner and rebuild?`,
                     yesText: 'Rebuild', noText: 'Not yet', danger: true,
-                    onYes: () => (this.canAscend() ? this.ascend() : this.wipeSave()),
+                    onYes: () => this.ascend(!this.canAscend()),
                     onNo: () => {
                         this.wave.timer = 60; this.gameOverShown = false; this.paused = false;
                         this.toast('60 seconds of peace. Rebuild your Town Hall.', 'warn');
@@ -1544,12 +1574,14 @@
             if (this.boost.timeLeft > 0) { this.boost.timeLeft -= dt; if (this.boost.timeLeft <= 0) { this.boost.mult = 1; this.toast('Boost ended', 'warn'); } }
             if (this.warCry.active) { this.warCry.timeLeft -= dt; if (this.warCry.timeLeft <= 0) { this.warCry.active = false; this.toast('War Cry ended', 'warn'); } }
             if (this.warCry.cooldown > 0) this.warCry.cooldown -= dt;
+            if (this.rallyCd > 0) this.rallyCd -= dt;
             if (this.combo.time > 0) { this.combo.time -= dt; if (this.combo.time <= 0) { this.combo.count = 0; this.combo.mult = 1; } }
 
             for (const b of this.buildings) {
                 if (b.build < 1) b.build = Math.min(1, (b.build ?? 1) + dt * 2.2);
                 if (b.upg > 0) b.upg = Math.max(0, b.upg - dt * 2.2);
                 if (b.pop > 0) b.pop = Math.max(0, b.pop - dt * 5);
+                if (b.hurt > 0) b.hurt -= dt;
                 if (BLD[b.type].clickBonus && b.build >= 1) b.charge = Math.min(this.bubbleSec(), (b.charge ?? rand(0, this.bubbleSec())) + dt * (this.boost.timeLeft > 0 ? 1.5 : 1));
             }
 
@@ -1558,7 +1590,16 @@
                     this.wave.spawnCd -= dt;
                     if (this.wave.spawnCd <= 0) { this.spawnEnemy(this.wave.queue[this.wave.total - this.wave.spawnLeft] || 'goblin'); this.wave.spawnLeft--; this.wave.spawnCd = rand(0.6, 1.2); }
                 }
+                // a raider stuck outside tower range must not hold the next wave hostage forever
+                if (this.wave.spawnLeft <= 0 && this.enemies.length > 0) {
+                    this.wave.stall = (this.wave.stall || 0) + dt;
+                    if (this.wave.stall > 100) {
+                        if (!this.wave.stallWarned) { this.wave.stallWarned = true; this.toast('The last raiders lose heart and flee', 'warn'); }
+                        for (const e of this.enemies) if (e.hp > 0) { e.hp -= e.maxHp * 0.03 * dt; if (e.hp <= 0) this.killEnemy(e); }
+                    }
+                } else this.wave.stall = 0;
                 if (this.wave.spawnLeft <= 0 && this.enemies.length === 0) {
+                    this.wave.stall = 0; this.wave.stallWarned = false;
                     this.wave.active = false;
                     this.wave.timer = Math.max(CFG.waveMinSec, CFG.waveBaseSec - this.wave.number * 2);
                     this.stats.wavesCleared++;
@@ -1568,7 +1609,9 @@
                     this.toast(`Wave ${this.wave.number} cleared  +${g} gems`, 'success');
                     this.showAlert('WAVE CLEARED', 2);
                     this.checkAchievements();
-                    setTimeout(() => { if (!this.gameOverShown && !this.wave.active) this.offerBoons(); }, 1100);
+                    this.pendingBoon = true;
+                    clearTimeout(this._boonTimer);
+                    this._boonTimer = setTimeout(() => this.offerPendingBoon(), 1100);
                 }
             } else {
                 this.wave.timer -= dt;
@@ -1730,7 +1773,7 @@
             const def = BLD[this.buildMode];
             const { tx, ty } = this.hoverTile;
             const placeable = this.canPlace(this.buildMode, tx, ty);
-            const ok = placeable && this.canAfford(def.baseCost);
+            const ok = placeable && this.canAfford(this.buildCost(this.buildMode));
             const col = ok ? '107,255,149' : '255,93,93';
             for (let dy = 0; dy < def.size; dy++) for (let dx = 0; dx < def.size; dx++) {
                 const free = !this.cell(tx + dx, ty + dy) && tx + dx < CFG.gridW && ty + dy < CFG.gridH && tx + dx >= 0 && ty + dy >= 0;
@@ -1847,16 +1890,23 @@
         // level tags, hp bars and upgrade arrows, drawn above everything on the map
         drawBadges(g, t) {
             const zoom = this.cam.zoom;
-            const tt = this.tutTarget();
+            const tt = this._tt || {};
+            // with lots of upgrades affordable, mark only the cheapest few so the map stays readable
+            const arrowSet = new Set();
+            if (this.settings.hints && zoom >= 0.8) {
+                const cands = this.buildings.filter(b => b.type !== 'wall' && this.upgradeReady(b)).sort((a, b) => this.upgradeCostScore(a) - this.upgradeCostScore(b));
+                for (let i = 0; i < Math.min(8, cands.length); i++) arrowSet.add(cands[i]);
+            }
+            const arrowOn = (b) => arrowSet.has(b) || ((b === this.selected || b === this.hoverBuilding) && this.settings.hints && this.upgradeReady(b));
             const small = zoom < 0.9;
             for (const b of this.buildings) {
                 const def = BLD[b.type];
                 const sp = this.spriteOf(b);
                 const c = this.centerOf(b);
                 const sel = this.selected === b, hov = this.hoverBuilding === b;
-                // HP bar
+                // HP bar (above the upgrade arrow when there is one)
                 if (b.hp < b.maxHp && !def.decor) {
-                    const bw = def.size * 36, bx = c.x - bw / 2, by = c.y + sp.bbox.y0 - 22;
+                    const bw = def.size * 36, bx = c.x - bw / 2, by = c.y + sp.bbox.y0 - (arrowOn(b) ? 40 : 22);
                     g.fillStyle = 'rgba(8,6,6,0.85)'; g.fillRect(bx - 1.5, by - 1.5, bw + 3, 7);
                     g.fillStyle = '#3a1010'; g.fillRect(bx, by, bw, 4);
                     const f = Math.max(0, b.hp / b.maxHp);
@@ -1866,7 +1916,7 @@
                 }
                 // level tag
                 const calm = b.type === 'wall';      // long walls would drown the map in tags
-                if (!def.decor && def.maxLevel > 1 && (sel || hov || (!calm && this.settings.levelTags === 'always'))) {
+                if (!def.decor && def.maxLevel > 1 && (sel || hov || (!calm && zoom >= 0.95 && this.settings.levelTags === 'always'))) {
                     const fh = CFG.tileH * def.size / 2;
                     const tx = c.x, ty = c.y + fh + 6;
                     const max = b.level >= def.maxLevel;
@@ -1880,7 +1930,7 @@
                     g.fillText(label, tx, ty + 0.5);
                 }
                 // upgrade arrow
-                if (this.settings.hints && this.upgradeReady(b) && !this.buildMode && !this.moveMode && (!calm || sel || hov)) {
+                if (arrowOn(b) && !this.buildMode && !this.moveMode) {
                     const r = this.arrowRect(b);
                     const bob = Math.sin(t * 4 + b.tx) * 2.5;
                     g.save(); g.translate(r.x, r.y + bob);
@@ -1928,9 +1978,11 @@
                     g.save();
                     g.strokeStyle = `rgba(255,236,120,${1 - pulse})`; g.lineWidth = 3;
                     g.beginPath(); g.ellipse(c.x, c.y + 6, 30 + pulse * 34, 15 + pulse * 17, 0, 0, TAU); g.stroke();
-                    const by = c.y + sp.bbox.y0 - 56 + Math.sin(t * 6) * 5;
+                    const tb = (this.tutCurrent() && this.tutCurrent().id === 'tap' && this.bubbleReady(b)) ? this.bubbleRect(b) : null;
+                    const by = (tb ? tb.y - 34 : c.y + sp.bbox.y0 - 56) + Math.sin(t * 6) * 5;
+                    const ax = tb ? tb.x : c.x;
                     g.fillStyle = '#fff6b0'; g.strokeStyle = '#6a4200'; g.lineWidth = 2;
-                    g.beginPath(); g.moveTo(c.x, by + 14); g.lineTo(c.x - 11, by - 4); g.lineTo(c.x - 4, by - 4); g.lineTo(c.x - 4, by - 16); g.lineTo(c.x + 4, by - 16); g.lineTo(c.x + 4, by - 4); g.lineTo(c.x + 11, by - 4); g.closePath(); g.fill(); g.stroke();
+                    g.beginPath(); g.moveTo(ax, by + 14); g.lineTo(ax - 11, by - 4); g.lineTo(ax - 4, by - 4); g.lineTo(ax - 4, by - 16); g.lineTo(ax + 4, by - 16); g.lineTo(ax + 4, by - 4); g.lineTo(ax + 11, by - 4); g.closePath(); g.fill(); g.stroke();
                     g.restore();
                 }
                 // selection marker: a bouncing chevron when something is selected

@@ -18,12 +18,12 @@
             return [
                 { id: 'tap', title: 'Tap a coin bubble', sub: 'Mines and wells fill a bubble every few seconds. Tap it for a bonus.', done: () => this.stats.clicks >= 1, target: () => ({ b: this.tutBuilding('goldmine', true) }) },
                 { id: 'upgrade', title: 'Upgrade a building', sub: 'Tap the Gold Mine, then press the green Upgrade button.', done: () => this.stats.upgrades >= 1, target: () => ({ b: this.tutBuilding('goldmine'), sel: 'upgrade' }) },
-                { id: 'build', title: 'Build a Cannon', sub: 'Open Build, pick Defense, tap Cannon, then tap the grass.', done: () => this.stats.built >= 1, target: () => ({ dock: 'build' }) },
+                { id: 'build', title: 'Build a Cannon', sub: 'Open Build, then tap Cannon (it opens on Defense) and tap the grass.', done: () => this.stats.built >= 1, target: () => ({ dock: 'build' }) },
                 { id: 'raid', title: 'Survive the first raid', sub: 'Towers fire on their own. Raiders arrive when the timer runs out.', done: () => this.stats.wavesCleared >= 1, target: () => ({}) },
                 { id: 'boon', title: 'Pick a reward', sub: 'After each raid you choose one of three boons. They last the whole reign.', done: () => this.stats.boons >= 1, target: () => ({}) },
                 { id: 'tab', title: 'Open the Upgrade tab', sub: 'It lists every upgrade and has a one-tap "upgrade all you can".', done: () => !!this.opened.upgrade, target: () => ({ dock: 'upgrade' }) },
                 { id: 'quests', title: 'Check your quests', sub: 'Open Kingdom. Quests pay gems, and gems power Boost and Lightning.', done: () => !!this.opened.kingdom, target: () => ({ dock: 'kingdom' }) },
-                { id: 'goal', title: 'Aim for wave 10', sub: 'Then Ascend (Kingdom tab) to restart with permanent crowns and perks.', done: () => this.wave.number >= 10, manual: true, target: () => ({}) },
+                { id: 'goal', title: `Aim for wave ${CFG.ascendMinWave}`, sub: 'Then Ascend (Kingdom tab) to restart with permanent crowns and perks.', done: () => this.wave.number >= CFG.ascendMinWave, manual: true, target: () => ({}) },
             ];
         }
         tutBuilding(type, preferReady) {
@@ -40,18 +40,33 @@
             const s = this.tutCurrent();
             return s ? (s.target() || {}) : {};
         }
+        // Goals complete themselves. If several are already true (a player who did things in a
+        // different order) they all tick off at once. Veterans never see the card.
         tutCheck() {
-            const s = this.tutCurrent();
-            if (!s || this.gameOverShown) return;
-            if (s.done()) this.tutAdvance();
-        }
-        tutAdvance() {
+            if (!this.tutCurrent() || this.gameOverShown) return;
+            if (this.player.level >= 8 || this.wave.number >= 6) { this.tut.done = true; this.updateUI(); return; }
             const steps = this.tutSteps();
+            let n = 0;
+            while (this.tut.step < steps.length && !steps[this.tut.step].manual && steps[this.tut.step].done() && n < steps.length) { this.tut.step++; n++; }
+            if (n) {
+                this.res.gems += n;
+                this.audio.levelup();
+                this.toast(n > 1 ? `${n} goals complete! +${n} gems` : 'Goal complete! +1 gem', 'success');
+                const cur = this.tutCurrent();
+                if (cur && cur.id === 'build') {                    // make sure the Cannon is actually affordable
+                    const need = this.buildCost('cannon').gold;
+                    if (this.res.gold < need) { this.addRes('gold', need - this.res.gold + 60); setTimeout(() => this.toast('Here is some gold so you can afford a Cannon', 'success'), 900); }
+                }
+                if (this.tut.step >= steps.length) this.tut.done = true;
+                this.updateUI();
+            }
+        }
+        // The "Got it" button on the last, informational goal
+        tutAdvance() {
             this.res.gems += 1;
             this.audio.levelup();
-            this.toast('Goal complete! +1 gem', 'success');
             this.tut.step++;
-            if (this.tut.step >= steps.length) { this.tut.done = true; this.toast('Tutorial finished. Have fun!', 'success'); }
+            if (this.tut.step >= this.tutSteps().length) { this.tut.done = true; this.toast('Tutorial finished. Have fun!', 'success'); }
             this.updateUI();
         }
         tutSkip() { this.tut.done = true; this.updateUI(); this.save(); }
@@ -73,10 +88,16 @@
             if (this.enemies.some(e => e.flying) && !this.buildings.some(b => ['airdef', 'archer', 'wizard', 'tesla', 'xbow', 'frost', 'inferno', 'clancastle'].includes(b.type))) this.tip('air', 'Flying raiders! Cannons and mortars cannot hit them. Build an Archer Tower or Air Defense.');
             if (this.enemies.some(e => e.boss)) this.tip('boss', 'A Stone Golem! It is slow but huge. Focus fire and use Lightning or War Cry.');
             if (!this.wave.active && this.buildings.some(b => !BLD[b.type].decor && b.hp < b.maxHp * 0.4)) this.tip('hurt', 'Buildings are damaged. Press Rally (R) to repair everything.');
-            if (this.res.gems >= 8 && this.stats.spells === 0 && this.boost.timeLeft <= 0) this.tip('gems', 'You have gems! Boost doubles income for a minute, Lightning and Freeze stop raiders.');
+            if (this.res.gems >= 8 && this.stats.spells === 0 && this.boost.timeLeft <= 0) this.tip('gems', 'You have gems! Boost doubles income for a minute. Lightning and Freeze stop raiders.');
         }
 
         // ---------- wave boons ----------
+        // A reward is owed after every cleared wave until it is picked (it also survives a reload)
+        offerPendingBoon() {
+            if (!this.pendingBoon || this.boonOpen || this.gameOverShown) return;
+            if (document.hidden || this.wave.active) return;       // shown when the player is back and calm
+            this.offerBoons();
+        }
         offerBoons() {
             const pool = BOONS.filter(b => b.instant || this.boon(b.id) < b.max);
             const picks = [];
@@ -94,6 +115,7 @@
             const b = BOONS.find(x => x.id === id);
             if (!b) return;
             this.stats.boons++;
+            this.pendingBoon = false;
             if (b.instant) {
                 if (id === 'chest') {
                     const gold = Math.max(500 * Math.max(1, this.wave.number), Math.floor(this.rates.gold * 90));
@@ -118,8 +140,8 @@
         // ---------- freeze ----------
         castFreeze() {
             if (!this.enemies.length) { this.toast('No raiders to freeze right now', 'warn'); this.audio.error(); return; }
-            if (this.res.gems < 1) { this.audio.error(); this.toast('Freeze costs 1 gem', 'warn'); return; }
-            this.res.gems -= 1;
+            if (this.res.gems < CFG.freezeCost) { this.audio.error(); this.toast(`Freeze costs ${CFG.freezeCost} gems`, 'warn'); return; }
+            this.res.gems -= CFG.freezeCost;
             this.stats.freezes++;
             for (const e of this.enemies) {
                 e.slow = 4; e.slowAmt = 0.92;

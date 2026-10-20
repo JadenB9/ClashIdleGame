@@ -260,6 +260,7 @@
 
         acceptInvite() {
             if (!this.coop.pendingInvite) return;
+            if (this.coop.connected) { this.declineInvite(); return; }
             const conn = this.coop.pendingInvite;
             this.coop.pendingInvite = null;
             this.hideInviteNotification();
@@ -280,6 +281,7 @@
         }
 
         setupConnection(conn) {
+            if (this.coop.syncInterval) { clearInterval(this.coop.syncInterval); this.coop.syncInterval = null; }
             this.coop.conn = conn;
             this.coop.connected = true;
             this.coop.partnerCode = (conn.peer || '').replace('ember_', '');
@@ -363,9 +365,13 @@
                     this.updatePartnerPanel();
                     break;
                 }
-                case 'gift':
+                case 'gift': {
+                    const nowG = performance.now();
+                    if (nowG - (this.coop.lastGiftAt || 0) < 800) return;
+                    this.coop.lastGiftAt = nowG;
                     this.receiveGift(data.resource, data.amount, cleanStr(data.from, 24, 'Your partner'));
                     break;
+                }
             }
         }
 
@@ -642,7 +648,8 @@
                 buildings: this.buildings.map(b => ({ id: b.id, type: b.type, tx: b.tx, ty: b.ty, level: b.level, hp: b.hp, maxHp: b.maxHp })),
                 stats: this.stats,
                 achievements: this.achievements,
-                wave: { number: this.wave.number, timer: sanitizedTimer },
+                // reloading mid-raid replays that wave soon instead of silently skipping it
+                wave: { number: this.wave.active ? Math.max(0, this.wave.number - 1) : this.wave.number, timer: this.wave.active ? 8 : sanitizedTimer },
                 dayTime: this.dayTime,
                 dayCount: this.dayCount,
                 cam: { zoom: this.cam.zoom },
@@ -651,7 +658,7 @@
                     view: this.settings.view, xray: this.settings.xray, autoUpgrade: this.settings.autoUpgrade,
                     levelTags: this.settings.levelTags, hints: this.settings.hints, difficulty: this.settings.difficulty,
                 },
-                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen },
+                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen, pending: this.pendingBoon, reignCrowns: this.reignCrowns },
                 quests: this.quests.map(q => ({ kind: q.kind, target: q.target, start: q.start, gems: q.gems, done: !!q.done })),
                 // While the tab is hidden the game is frozen, so the clock for
                 // offline earnings starts when it was hidden, not when we saved
@@ -748,7 +755,9 @@
             this.buildings = [];
             for (const k in this.stats) this.stats[k] = 0;
             this.achievements = {};
-            this.crowns = 0; this.crownsEver = 0; this.perks = {}; this.ascensions = 0;
+            this.crowns = 0; this.crownsEver = 0; this.perks = {}; for (const k in PERKS) this.perks[k] = 0; this.ascensions = 0;
+            this.reignCrowns = 1; this.pendingBoon = false;
+            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, difficulty: 'normal' };
             this.boons = {}; this.tut = { step: 0, done: false }; this.tipsSeen = {};
             this.quests = [];
             this.wave.number = 0; this.wave.timer = 90; this.wave.active = false;
@@ -802,6 +811,9 @@
             this.boons = {};
             for (const bd of K.data.BOONS) if (!bd.instant) this.boons[bd.id] = Math.floor(safeNum(m.boons && m.boons[bd.id], 0, 0, bd.max));
             this.tut = { step: Math.floor(safeNum(m.tut && m.tut.step, 0, 0, 20)), done: !!(m.tut && m.tut.done) };
+            this.pendingBoon = m.pending === true;
+            this.reignCrowns = safeNum(m.reignCrowns, 1, 0.5, 2);
+            if (this.pendingBoon) setTimeout(() => this.offerPendingBoon(), 1500);
             this.tipsSeen = {};
             if (m.tips && typeof m.tips === 'object') for (const k of Object.keys(m.tips).slice(0, 40)) if (m.tips[k] === true) this.tipsSeen[String(k).slice(0, 24)] = true;
 
@@ -829,8 +841,9 @@
                 const level = Math.floor(safeNum(sb.level, 1, 1, def.maxLevel));
                 const maxHp = this.hpFor(sb.type, level);
                 const hp = safeNum(sb.hp, maxHp, 0, maxHp);
+                const okId = typeof sb.id === 'string' && /^[a-z0-9]{1,16}$/.test(sb.id) && !this.buildings.some(x => x.id === sb.id);
                 this.buildings.push({
-                    id: typeof sb.id === 'string' ? sb.id.slice(0, 16) : Math.random().toString(36).slice(2, 9),
+                    id: okId ? sb.id : Math.random().toString(36).slice(2, 9),
                     type: sb.type, tx: sb.tx, ty: sb.ty, level,
                     hp: hp > 0 ? hp : maxHp, maxHp, lastShot: 0, build: 1,
                 });

@@ -600,6 +600,7 @@
     // Build a sprite from a paint function. o.key makes it cacheable.
     const buildSprite = (paint, size, extra = {}) => {
         const geo = geoFor(size);
+        geo.tier = extra.tier || 1;
         geo.lights = [];
         geo.anchors = [];
         geo.shadows = [];
@@ -689,7 +690,7 @@
         if (sp) return sp;
         const painter = painters[type];
         const size = K.data.BLD[type].size;
-        sp = buildSprite((g, geo) => painter(g, geo, tier, variant), size, { up: painters[type].up });
+        sp = buildSprite((g, geo) => painter(g, geo, tier, variant), size, { up: painters[type].up, tier });
         sp.type = type; sp.tier = tier;
         sprites.set(key, sp);
         return sp;

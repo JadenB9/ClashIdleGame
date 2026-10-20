@@ -251,14 +251,12 @@
             g.beginPath(); g.ellipse(0, 1, e.size * 0.95, e.size * 0.32, 0, 0, TAU); g.fill();
         }
         g.scale(dir, 1);
-        if (e.slow > 0) { g.shadowColor = '#7ad8ff'; g.shadowBlur = 8; }
         const atk = e.atkAnim || 0;
         if (e.kind === 'wolf') wolf(g, e, ph, atk);
         else if (e.kind === 'golem') golem(g, e, ph, atk);
         else if (e.kind === 'bat') bat(g, e, ph);
         else if (e.kind === 'dragon') dragon(g, e, ph, atk);
         else humanoid(g, KINDS[e.kind], ph, atk);
-        g.shadowBlur = 0;
         if (e.slow > 0) {         // frost tint
             g.fillStyle = 'rgba(150,220,255,0.28)';
             g.beginPath(); g.ellipse(0, -e.size * 1.1, e.size * 0.8, e.size * 1.2, 0, 0, TAU); g.fill();
@@ -306,21 +304,27 @@
     // ======================================================
     const dyn = {};
     dyn.cannon = (g, st) => {
-        const a = st.ang;
+        const a = st.ang, twin = st.tier >= 3;
         g.save();
+        g.scale(1.2, 1.2);
         // wheels
         for (const d of [-1, 1]) { g.fillStyle = '#4a3220'; g.strokeStyle = '#1c1008'; g.lineWidth = 1; g.beginPath(); g.ellipse(d * 7, 2, 3.4, 5, 0, 0, TAU); g.fill(); g.stroke(); g.fillStyle = '#8a6a44'; g.beginPath(); g.ellipse(d * 7, 2, 1.2, 2, 0, 0, TAU); g.fill(); }
         g.rotate(a);
         const back = -st.rec * 5;
-        // barrel
-        const gr = g.createLinearGradient(0, -5, 0, 5);
-        gr.addColorStop(0, '#6a6a76'); gr.addColorStop(0.5, '#34343e'); gr.addColorStop(1, '#16161c');
-        g.fillStyle = gr; g.strokeStyle = '#08080c'; g.lineWidth = 1.2;
-        g.beginPath(); g.moveTo(-6 + back, -5.4); g.lineTo(15 + back, -4); g.lineTo(15 + back, 4); g.lineTo(-6 + back, 5.4); g.closePath(); g.fill(); g.stroke();
-        g.fillStyle = st.tier >= 4 ? '#e8c35a' : '#7a7a86';
-        g.fillRect(2 + back, -5, 1.8, 10); g.fillRect(9 + back, -4.4, 1.6, 8.8);
-        g.fillStyle = '#0a0a0e'; g.beginPath(); g.ellipse(15 + back, 0, 1.8, 4, 0, 0, TAU); g.fill();
-        g.fillStyle = '#2a2a32'; g.beginPath(); g.arc(-6 + back, 0, 4.4, 0, TAU); g.fill(); g.stroke();
+        const barrel = (off, sc) => {
+            g.save(); g.translate(0, off); g.scale(1, sc);
+            const gr = g.createLinearGradient(0, -5, 0, 5);
+            gr.addColorStop(0, '#7a7a86'); gr.addColorStop(0.5, '#34343e'); gr.addColorStop(1, '#16161c');
+            g.fillStyle = gr; g.strokeStyle = '#08080c'; g.lineWidth = 1.2;
+            g.beginPath(); g.moveTo(-6 + back, -5.4); g.lineTo(15 + back, -4); g.lineTo(15 + back, 4); g.lineTo(-6 + back, 5.4); g.closePath(); g.fill(); g.stroke();
+            g.fillStyle = 'rgba(255,255,255,0.28)'; g.fillRect(-4 + back, -4.4, 18, 1.4);
+            g.fillStyle = st.tier >= 4 ? '#e8c35a' : '#8a8a96';
+            g.fillRect(2 + back, -5, 1.8, 10); g.fillRect(9 + back, -4.4, 1.6, 8.8);
+            g.fillStyle = '#0a0a0e'; g.beginPath(); g.ellipse(15 + back, 0, 1.8, 4, 0, 0, TAU); g.fill();
+            g.fillStyle = '#2a2a32'; g.beginPath(); g.arc(-6 + back, 0, 4.4, 0, TAU); g.fill(); g.stroke();
+            g.restore();
+        };
+        if (twin) { barrel(-3.6, 0.7); barrel(3.6, 0.7); } else barrel(0, 1);
         if (st.fl > 0) {
             const f = st.fl;
             g.fillStyle = `rgba(255,200,90,${f})`; g.beginPath();

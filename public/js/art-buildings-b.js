@@ -35,15 +35,15 @@
         geo.shadowAt(6, 4, fw * 1.3, fh * 1.3, 0.9);
         plate(g, geo, 0.96, '#867e6e', 3);
         const col = stoneCol(t);
-        cyl(g, { x: 0, y: 0, rx: fw * 0.6, ry: fh * 0.6, h: H(15), lift: H(3), color: col, courses: 3, topColor: shade(col, 0.72) });
+        cyl(g, { x: 0, y: 0, rx: fw * 0.62, ry: fh * 0.62, h: H(21), lift: H(3), color: col, courses: 4, topColor: shade(col, 0.72) });
         if (t >= 1) { // iron hoop
-            g.strokeStyle = t === 3 ? '#e8c35a' : '#34343c'; g.lineWidth = 2.4;
-            g.beginPath(); g.ellipse(0, -H(11), fw * 0.605, fh * 0.605, 0, 0, Math.PI); g.stroke();
+            g.strokeStyle = t === 3 ? '#e8c35a' : '#34343c'; g.lineWidth = 2.6;
+            g.beginPath(); g.ellipse(0, -H(14), fw * 0.625, fh * 0.625, 0, 0, Math.PI); g.stroke();
         }
         // merlon teeth around the rim
         for (let i = 0; i < 7; i++) {
             const a = Math.PI * (0.05 + 0.9 * i / 6) ;
-            const x = -Math.cos(a) * fw * 0.54, y = -H(18) + Math.sin(a) * fh * 0.54;
+            const x = -Math.cos(a) * fw * 0.56, y = -H(24) + Math.sin(a) * fh * 0.56;
             box(g, { x, y: y + H(0), fw: 3.4, fh: 2.2, h: H(4), L: shade(col, 1.0), R: shade(col, 0.66), top: shade(col, 1.15) });
         }
         // ball stack
@@ -52,7 +52,7 @@
             gr.addColorStop(0, '#8a8a96'); gr.addColorStop(1, '#1c1c24');
             g.fillStyle = gr; g.beginPath(); g.arc(bx, by - 2, 3.4, 0, 7); g.fill();
         }
-        geo.anchor('mount', 0, -H(20), {});
+        geo.anchor('mount', 0, -H(27), {});
     };
 
     // =========================================================
@@ -109,17 +109,18 @@
         geo.shadowAt(6, 4, fw * 1.4, fh * 1.4, 0.9);
         plate(g, geo, 0.96, '#7c7468', 3);
         const col = ['#6a6c80', '#5e6a82', '#5a4e78', '#8a84a0'][t];
-        cyl(g, { x: 0, y: 0, rx: fw * 0.66, ry: fh * 0.66, h: H(14), lift: H(3), color: col, courses: 3, topColor: shade(col, 0.7) });
+        cyl(g, { x: 0, y: 0, rx: fw * 0.68, ry: fh * 0.68, h: H(21), lift: H(3), color: col, courses: 4, topColor: shade(col, 0.7) });
         // iron ring
-        g.strokeStyle = t === 3 ? '#e8c35a' : '#2a2a32'; g.lineWidth = 2.6;
-        g.beginPath(); g.ellipse(0, -H(8), fw * 0.665, fh * 0.665, 0, 0, Math.PI); g.stroke();
+        g.strokeStyle = t === 3 ? '#e8c35a' : '#2a2a32'; g.lineWidth = 2.8;
+        g.beginPath(); g.ellipse(0, -H(12), fw * 0.685, fh * 0.685, 0, 0, Math.PI); g.stroke();
         // inner pit
-        g.beginPath(); g.ellipse(0, -H(17), fw * 0.42, fh * 0.42, 0, 0, 7); g.fillStyle = '#16141c'; g.fill();
+        g.beginPath(); g.ellipse(0, -H(24), fw * 0.44, fh * 0.44, 0, 0, 7); g.fillStyle = '#16141c'; g.fill();
+        g.strokeStyle = 'rgba(255,255,255,0.18)'; g.lineWidth = 1.2; g.beginPath(); g.ellipse(0, -H(24), fw * 0.44, fh * 0.44, 0, Math.PI * 0.1, Math.PI * 0.9); g.stroke();
         sandbags(g, geo, 7, 0.78);
         // shell crate
         box(g, { x: fw * 0.6, y: fh * 0.2, fw: 5, fh: 3.4, h: H(6), L: '#8a5a34', R: '#5a3a1c', top: '#a0703c' });
         g.fillStyle = '#34343c'; g.beginPath(); g.arc(fw * 0.6, fh * 0.2 - H(7), 2.6, 0, 7); g.fill();
-        geo.anchor('mount', 0, -H(16), {});
+        geo.anchor('mount', 0, -H(23), {});
     };
 
     // =========================================================
@@ -209,6 +210,9 @@
         spire(-fw * 0.34, 5.5, 20, '#8ad8ff', '#d8f6ff', '#4aa0d8', -2);
         spire(fw * 0.32, 5, 16, '#8ad8ff', '#d8f6ff', '#4aa0d8', 2);
         spire(-fw * 0.12, 6, 14, '#8ad8ff', '#d8f6ff', '#4aa0d8', 0);
+        if (t >= 1) spire(fw * 0.12, 5, 22, '#8ad8ff', '#d8f6ff', '#4aa0d8', 1);
+        if (t >= 2) { spire(-fw * 0.5, 4, 14, '#8ad8ff', '#d8f6ff', '#4aa0d8', -2); spire(fw * 0.5, 4, 17, '#8ad8ff', '#d8f6ff', '#4aa0d8', 2); }
+        if (t >= 3) { spire(-fw * 0.22, 4, 30, '#9ae6ff', '#e8fbff', '#58aee0', -3); spire(fw * 0.22, 4, 28, '#9ae6ff', '#e8fbff', '#58aee0', 3); }
         const tip = spire(0, 9, 56 + t * 4, '#7acaf4', '#d0f4ff', '#3c8cc8', 0);
         geo.light(0, base - H(30), 24, '#80d8ff');
         geo.anchor('mount', tip.x, tip.y, {});
@@ -225,25 +229,32 @@
         plate(g, geo, 0.96, '#6a6a78', 3);
         const metal = ['#4a5068', '#44506c', '#3c3e68', '#2a2e4c'][t];
         box(g, { x: 0, y: 0, fw: fw * 0.58, fh: fh * 0.58, h: H(12), lift: H(3), L: T.iron(60, 40, metal, 5), R: T.iron(60, 40, metal, 6), top: shade(metal, 0.8) });
-        // copper coil: stacked rings on a tapering core
-        const cx = 0, y0 = -H(15);
-        g.fillStyle = '#2c3048';
-        g.beginPath(); g.moveTo(-6, y0); g.lineTo(-3.4, y0 - H(46)); g.lineTo(3.4, y0 - H(46)); g.lineTo(6, y0); g.closePath(); g.fill();
-        g.strokeStyle = A.EDGE; g.lineWidth = 0.9; g.stroke();
-        for (let i = 0; i < 6; i++) {
-            const y = y0 - H(4 + i * 7.4), r = 8.6 - i * 0.9;
-            const gr = g.createLinearGradient(cx - r, 0, cx + r, 0);
-            gr.addColorStop(0, '#f0b070'); gr.addColorStop(0.5, '#c87838'); gr.addColorStop(1, '#6a3414');
-            g.fillStyle = gr;
-            g.beginPath(); g.ellipse(cx, y, r, r * 0.42, 0, 0, 7); g.fill(); g.strokeStyle = '#3a1a08'; g.lineWidth = 0.9; g.stroke();
-        }
-        // sphere on top
-        const sy = y0 - H(53);
-        const sg = g.createRadialGradient(-2, sy - 2, 1, 0, sy, 7.5);
-        sg.addColorStop(0, '#ffffff'); sg.addColorStop(0.5, '#a8c8ff'); sg.addColorStop(1, '#4a6ac8');
-        g.fillStyle = sg; g.beginPath(); g.arc(0, sy, 7, 0, 7); g.fill(); g.strokeStyle = '#1a2a68'; g.lineWidth = 1; g.stroke();
-        geo.light(0, sy, 18, '#90b8ff');
-        geo.anchor('mount', 0, sy, {});
+        // copper coils: stacked rings on a tapering core. More coils as it levels.
+        const y0 = -H(15);
+        let mainY = y0;
+        const coil = (cx, sc, main) => {
+            const hh = 46 * sc;
+            g.fillStyle = '#2c3048';
+            g.beginPath(); g.moveTo(cx - 6 * sc, y0); g.lineTo(cx - 3.4 * sc, y0 - H(hh)); g.lineTo(cx + 3.4 * sc, y0 - H(hh)); g.lineTo(cx + 6 * sc, y0); g.closePath(); g.fill();
+            g.strokeStyle = A.EDGE; g.lineWidth = 0.9; g.stroke();
+            for (let i = 0; i < 6; i++) {
+                const y = y0 - H((4 + i * 7.4) * sc), r = (8.6 - i * 0.9) * sc;
+                const gr = g.createLinearGradient(cx - r, 0, cx + r, 0);
+                gr.addColorStop(0, '#f0b070'); gr.addColorStop(0.5, '#c87838'); gr.addColorStop(1, '#6a3414');
+                g.fillStyle = gr;
+                g.beginPath(); g.ellipse(cx, y, r, r * 0.42, 0, 0, 7); g.fill(); g.strokeStyle = '#3a1a08'; g.lineWidth = 0.9; g.stroke();
+            }
+            const sy = y0 - H(53 * sc), sr = 7 * sc;
+            const sg = g.createRadialGradient(cx - 2, sy - 2, 1, cx, sy, sr + 0.5);
+            sg.addColorStop(0, '#ffffff'); sg.addColorStop(0.5, '#a8c8ff'); sg.addColorStop(1, '#4a6ac8');
+            g.fillStyle = sg; g.beginPath(); g.arc(cx, sy, sr, 0, 7); g.fill(); g.strokeStyle = '#1a2a68'; g.lineWidth = 1; g.stroke();
+            geo.light(cx, sy, 18 * sc, '#90b8ff');
+            if (main) mainY = sy;
+        };
+        if (t >= 2) { coil(-fw * 0.34, 0.62, false); coil(fw * 0.34, 0.62, false); }
+        if (t >= 1 && t < 2) coil(fw * 0.32, 0.55, false);
+        coil(0, 1, true);
+        geo.anchor('mount', 0, mainY, {});
         // cable running off the pedestal
         g.strokeStyle = '#16161c'; g.lineWidth = 2.4;
         g.beginPath(); g.moveTo(fw * 0.45, -H(8)); g.quadraticCurveTo(fw * 0.8, -H(2), fw * 0.6, fh * 0.5); g.stroke();

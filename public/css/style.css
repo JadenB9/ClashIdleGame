@@ -290,7 +290,7 @@ svg { display: block; }
 /* ---------- selection card ---------- */
 .sel-card {
     position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
-    width: min(560px, calc(100% - 640px)); min-width: 360px;
+    width: min(560px, calc(100% - 780px)); min-width: 360px;
     padding: 10px 12px 12px;
     background: linear-gradient(180deg, var(--panel-3), var(--panel));
     border: 3px solid var(--edge); border-radius: 18px;
@@ -402,6 +402,8 @@ svg { display: block; }
 .build-name { font: 15px var(--font-display); line-height: 1.1; }
 .build-cost { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .build-lock { display: inline-flex; align-items: center; gap: 4px; font: 13px var(--font-display); color: var(--text-dim); }
+.build-blurb { font-size: 11.5px; font-weight: 700; line-height: 1.3; color: var(--text-dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.6em; }
+.build-card { min-height: 148px; justify-content: flex-start; }
 .build-card.locked { filter: grayscale(0.8) brightness(0.8); }
 .build-card.cannot-afford .thumb { filter: saturate(0.6); }
 .build-card .count { position: absolute; top: 5px; right: 6px; font: 12px var(--font-display); background: #0a1022; color: #fff; border-radius: 8px; padding: 0 6px; }
@@ -537,6 +539,9 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
 .welcome-tips svg { width: 28px; height: 28px; flex: none; }
 
 /* ---------- smaller screens ---------- */
+@media (max-width: 1440px) {
+    .sel-card { width: min(560px, calc(100% - 24px)); bottom: 90px; }
+}
 @media (max-width: 1100px) {
     .sel-card { width: min(560px, calc(100% - 24px)); bottom: 82px; }
     .abilities .ab-name { display: none; }
@@ -642,4 +647,34 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
 @media (max-width: 560px) {
     .mode-hint { top: 112px; font-size: 13px; }
     .toasts { top: 150px; }
+}
+
+/* light theme: keep the goal card and warnings readable on cream */
+:root[data-theme="light"] .goal-card { border-color: #c98a10; }
+:root[data-theme="light"] .goal-top { color: #8a5200; }
+:root[data-theme="light"] .goal-dots i { background: rgba(60, 40, 10, 0.16); }
+:root[data-theme="light"] .goal-dots i.done { background: #2e9a2a; }
+:root[data-theme="light"] .goal-dots i.now { background: #d98a10; }
+:root[data-theme="light"] .wave-timer.danger { color: #c4381a; animation: none; }
+:root[data-theme="light"] .pv b, :root[data-theme="light"] .rb-tag { color: #fff; }
+
+/* a docked panel leaves less room: keep the resource pills on one row */
+@media (max-width: 1500px) {
+    #app.drawer-open .res-rate { display: none; }
+    #app.drawer-open .res { min-width: 0; padding-right: 10px; }
+}
+
+.up-row.group .up-name small { color: var(--text-dim); }
+.up-row .up-count { font: 13px var(--font-display); color: #fff; background: #0a1022; border-radius: 9px; padding: 0 7px; margin-left: 6px; }
+.btn.ascend { --a: var(--btn-a); --b: var(--btn-b); --e: var(--btn-edge); }
+
+/* narrow screens: abilities become a row above the dock so nothing overlaps */
+@media (max-width: 560px) {
+    .abilities { right: 6px; left: 6px; bottom: 74px; flex-direction: row; justify-content: center; align-items: flex-end; gap: 5px; }
+    .ability { width: 44px; height: 44px; border-radius: 13px; }
+    .ability svg { width: 22px; height: 22px; }
+    .zoom-controls { display: none; }
+    .sel-card { bottom: 128px; width: calc(100% - 16px); left: 8px; transform: none; }
+    .toasts { top: auto; bottom: 186px; }
+    .goal-card { max-width: 170px; }
 }

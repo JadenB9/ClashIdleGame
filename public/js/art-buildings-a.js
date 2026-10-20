@@ -151,6 +151,23 @@
             R: T.stone(96, 20, shade(color, 0.85), { rows: 2, seed: 3 }),
             top: T.stone(128, 128, shade(color, 0.92), { rows: 9, aspect: 1.1, seed: 5 }),
         });
+        // the plinth earns a metal rim as the building levels: silver, then gold, then gold with gems
+        const tier = geo.tier || 1;
+        if (tier >= 2) {
+            const rim = tier === 2 ? '#d4d8e4' : '#f0c040', top = -h * hk, X = fw * scale, Y = fh * scale;
+            g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
+            g.strokeStyle = 'rgba(40,24,6,0.8)'; g.lineWidth = 3.4;
+            g.beginPath(); g.moveTo(-X, top); g.lineTo(0, Y + top); g.lineTo(X, top); g.stroke();
+            g.strokeStyle = rim; g.lineWidth = 1.9; g.stroke();
+            if (tier === 4) {
+                for (const [gx, gy, col] of [[-X, top, '#ff5a5a'], [0, Y + top, '#5cd8ff'], [X, top, '#7adf6a']]) {
+                    g.fillStyle = col; g.strokeStyle = 'rgba(20,10,10,0.9)'; g.lineWidth = 1;
+                    g.beginPath(); g.arc(gx, gy, 2.8, 0, 7); g.fill(); g.stroke();
+                    g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.arc(gx - 0.8, gy - 0.9, 0.9, 0, 7); g.fill();
+                }
+            }
+            g.restore();
+        }
     };
     // General prism along the tile axes (walls, fences). a,b = half extents in tiles.
     const prism = (g, o) => {
