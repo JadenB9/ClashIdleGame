@@ -205,6 +205,7 @@
             this._loadedSides = null;
 
             this.lastTime = performance.now();
+            this._started = true;
             requestAnimationFrame((t) => this.loop(t));
             setInterval(() => this.save(), CFG.autoSaveMs);
             window.addEventListener('pagehide', () => {
@@ -225,13 +226,18 @@
         // ---------- view / canvas ----------
         resize() {
             const r = this.canvas.parentElement.getBoundingClientRect();
-            this.canvas.width = Math.floor(r.width * this.dpr);
-            this.canvas.height = Math.floor(r.height * this.dpr);
+            const w = Math.floor(r.width * this.dpr), h = Math.floor(r.height * this.dpr);
+            // assigning width/height wipes the canvas, so only do it when the size really changed
+            if (w === this.canvas.width && h === this.canvas.height && r.width === this.vw && r.height === this.vh) return;
+            this.canvas.width = w;
+            this.canvas.height = h;
             this.canvas.style.width = r.width + 'px';
             this.canvas.style.height = r.height + 'px';
             this.vw = r.width; this.vh = r.height;
             // until the player moves the map themselves, keep the village centred as the window settles
             if (!this._camMoved && this.bounds) this.centerCamera(); else this.clampCamera();
+            // a resize observer fires after the frame's draw and before it is shown: repaint now so the wiped canvas is never on screen
+            if (this.bounds && this._started) this.render();
         }
 
         ensureWorld() {
