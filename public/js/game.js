@@ -6,7 +6,7 @@
    ============================================================ */
 (function (K) {
     'use strict';
-    const { CFG, VIEWS, BLD, ENEMY, waveTable, PERKS, QUEST_KINDS, ACHS, DIFFICULTY, BOONS, scaledCost } = K.data;
+    const { CFG, VIEWS, BLD, ENEMY, waveTable, PERKS, QUEST_KINDS, ACHS, DIFFICULTY, BOONS, scaledCost, levelCap, countCap, thForCount, thForLevel } = K.data;
     const U = K.util;
     const { rand, randi, clamp, fmt, safeNum, compact, alive, tierOf, resColor } = U;
     const A = K.art;
@@ -325,21 +325,63 @@
         cell(x, y) { return (x >= 0 && y >= 0 && x < CFG.gridW && y < CFG.gridH) ? this.occ[y * CFG.gridW + x] : null; }
         touchGrid() { this.occDirty = true; this.rebuildOcc(); }
         buildingAt(tx, ty) { if (this.occDirty) this.rebuildOcc(); return this.cell(tx, ty); }
-        canPlace(type, tx, ty, ignore = null) {
+        canPlace(type, tx, ty, ignore = null, ignore2 = null) {
             const size = BLD[type].size;
             if (this.occDirty) this.rebuildOcc();
             for (let dy = 0; dy < size; dy++) for (let dx = 0; dx < size; dx++) {
                 const x = tx + dx, y = ty + dy;
                 if (x < 0 || y < 0 || x >= CFG.gridW || y >= CFG.gridH) return false;
                 const o = this.cell(x, y);
-                if (o && o !== ignore) return false;
+                if (o && o !== ignore && o !== ignore2) return false;
+            }
+            return true;
+        }
+        // the one other building a footprint would land on, if there is exactly one (the swap partner)
+        swapPartner(mb, tx, ty) {
+            if (this.occDirty) this.rebuildOcc();
+            let other = null;
+            const size = BLD[mb.type].size;
+            for (let dy = 0; dy < size; dy++) for (let dx = 0; dx < size; dx++) {
+                const o = this.cell(tx + dx, ty + dy);
+                if (o && o !== mb) { if (other && other !== o) return null; other = o; }
+            }
+            if (!other || BLD[other.type].cat === 'core') return null;
+            return other;
+        }
+        // can a and b trade places? each goes to the other's corner, and both new footprints must fit and not overlap
+        canSwap(a, b) {
+            const sa = BLD[a.type].size, sb = BLD[b.type].size;
+            if (!this.canPlace(a.type, b.tx, b.ty, a, b) || !this.canPlace(b.type, a.tx, a.ty, a, b)) return false;
+            return b.tx + sa <= a.tx || a.tx + sb <= b.tx || b.ty + sa <= a.ty || a.ty + sb <= b.ty;
+        }
+        swapBuildings(a, b) {
+            if (!this.canSwap(a, b)) return false;
+            [a.tx, b.tx] = [b.tx, a.tx]; [a.ty, b.ty] = [b.ty, a.ty];
+            this.touchGrid();
+            this.audio.build();
+            for (const x of [a, b]) {
+                const p = this.centerOf(x);
+                for (let i = 0; i < 8; i++) this.particles.push({ x: p.x + rand(-10, 10), y: p.y + rand(-4, 6), vx: rand(-30, 30), vy: rand(-50, -15), life: 0.5, max: 0.5, color: '#d8c8a0', size: rand(2, 4), kind: 'dust' });
             }
             return true;
         }
         buildCost(type) { return scaledCost(type, this.countOf(type)); }
         countOf(type) { let n = 0; for (const b of this.buildings) if (b.type === type) n++; return n; }
         decorCount() { let n = 0; for (const b of this.buildings) if (BLD[b.type].decor) n++; return n; }
-        maxedOut(type) { const m = BLD[type].maxCount; return !!m && this.countOf(type) >= m; }
+        // ---- Town Hall limits ----
+        thLevel() { const th = this.buildings.find(b => b.type === 'townhall'); return th ? th.level : 1; }
+        levelCapOf(type) { return levelCap(type, this.thLevel()); }
+        countCapOf(type) { return countCap(type, this.thLevel()); }
+        maxedOut(type) { return this.countOf(type) >= this.countCapOf(type); }
+        // why another one is not allowed, in words
+        limitText(type) {
+            const def = BLD[type], cap = this.countCapOf(type), next = thForCount(type, cap + 1);
+            if (!next) return cap === 1 ? `You can only have one ${def.name}` : `You already have the most ${def.name}s allowed (${cap})`;
+            return `Town Hall ${this.thLevel()} allows ${cap} ${def.name}${cap > 1 ? 's' : ''}. Upgrade the Town Hall to level ${next} for more.`;
+        }
+        // is this building held back by the Town Hall (not by its own max level)?
+        thCapped(b) { return b.type !== 'townhall' && b.level < BLD[b.type].maxLevel && b.level >= this.levelCapOf(b.type); }
+        capText(b) { const n = thForLevel(b.type, b.level + 1); return n ? `Upgrade the Town Hall to level ${n} to go higher` : 'Already max level'; }
 
         // ---------- hit testing ----------
         spriteOf(b) {
@@ -400,12 +442,12 @@
         bubbleRect(b) {
             const sp = this.spriteOf(b); A.maskOf(sp);
             const c = this.centerOf(b);
-            return { x: c.x - 20, y: c.y + sp.bbox.y0 - 4, r: 13 };
+            return { x: c.x - 18, y: c.y + sp.bbox.y0 - 2, r: 9 };
         }
         bubbleAtScreen(sx, sy) {
             const w = this.screenToWorld(sx, sy);
             for (const b of this.buildings) {
-                if (!this.bubbleReady(b)) continue;
+                if (!this.bubbleShown(b)) continue;
                 const r = this.bubbleRect(b);
                 if (Math.hypot(w.x - r.x, w.y - r.y) <= r.r + (this.input.touch ? 9 : 4) / this.cam.zoom) return b;
             }
@@ -413,7 +455,7 @@
         }
         upgradeReady(b) {
             const def = BLD[b.type];
-            return b.level < def.maxLevel && !!def.upgradeCost && this.canAfford(def.upgradeCost(b.level));
+            return b.level < def.maxLevel && !this.thCapped(b) && !!def.upgradeCost && this.canAfford(this.upgradeCostOf(b));
         }
 
         // ---------- input ----------
@@ -645,7 +687,7 @@
         placeBuilding(type, tx, ty, quiet = false) {
             const def = BLD[type];
             if (this.maxedOut(type)) {
-                this.audio.error(); this.toast(`You can only have ${def.maxCount} ${def.name}${def.maxCount > 1 ? 's' : ''}`, 'warn');
+                this.audio.error(); this.toast(this.limitText(type), 'warn');
                 this.setBuildMode(null); return false;
             }
             const cost = this.buildCost(type);
@@ -660,11 +702,11 @@
             if (!quiet) this.audio.build(); else if (this.audio.gate('buildq', 90)) this.audio.build();
             const p = this.centerOf(b);
             for (let i = 0; i < 12; i++) this.particles.push({ x: p.x + rand(-18, 18), y: p.y + rand(-4, 8), vx: rand(-30, 30), vy: rand(-45, -12), life: 0.8, max: 0.8, color: '#d8c8a8', size: rand(3, 6), kind: 'dust' });
-            const singleton = !!def.maxCount && this.countOf(type) >= def.maxCount;
+            const singleton = this.maxedOut(type);
             if (singleton || !this.canAfford(this.buildCost(type))) {
                 this.setBuildMode(null);
                 if (!singleton) this.toast(`${def.name} built. Not enough for another.`, 'success');
-                else this.toast(`${def.name} built!`, 'success');
+                else this.toast(`${def.name} built! That is the most the Town Hall allows for now.`, 'success');
             } else {
                 if (!quiet) this.toast(`${def.name} built!`, 'success');
                 this.buildMenu();
@@ -676,7 +718,8 @@
         upgradeBuilding(b, quiet = false) {
             const def = BLD[b.type];
             if (!def.upgradeCost || b.level >= def.maxLevel) { if (!quiet) this.toast('Already max level', 'warn'); return false; }
-            const cost = def.upgradeCost(b.level);
+            if (this.thCapped(b)) { if (!quiet) { this.audio.error(); this.toast(this.capText(b), 'warn'); } return false; }
+            const cost = this.upgradeCostOf(b);
             if (!this.canAfford(cost)) { this.audio.error(); if (!quiet) this.toast('Not enough resources', 'warn'); return false; }
             this.spend(cost);
             b.level++;
@@ -699,12 +742,14 @@
                 this.floatText('NEW LOOK', p.x, p.y - 74, '#9af0ff');
             }
             this.recomputeRates(); this.updateUI(); this.checkAchievements();
-            if (b === this.selected) this.refreshSelection();
+            if (b === this.selected || b.type === 'townhall') this.refreshSelection();
+            if (b.type === 'townhall') { this.toast(`Town Hall ${b.level}: more buildings and higher levels unlocked`, 'success'); this.buildMenu(true); }
             if (this.modalBuilding === b) this.openBuildingModal(b);
             return true;
         }
         // Keep upgrading one building until it runs out of money or levels
         upgradeMax(b) {
+            if (this.thCapped(b)) { this.audio.error(); this.toast(this.capText(b), 'warn'); return; }
             let n = 0;
             while (n < 60 && this.upgradeBuilding(b, true)) n++;
             if (n) this.toast(`${BLD[b.type].name} upgraded ${n} level${n > 1 ? 's' : ''}`, 'success');
@@ -717,11 +762,17 @@
             if (b.type === 'townhall' && this.res.gold >= this.cap() * 0.85) v *= 0.02;
             return v;
         }
+        // what an upgrade will really cost: gold first, or the alternative (walls: elixir) when only that is affordable
+        upgradeCostOf(b) {
+            const def = BLD[b.type], c = def.upgradeCost(b.level);
+            if (def.upgradeAlt && !this.canAfford(c)) { const a = def.upgradeAlt(b.level); if (this.canAfford(a)) return a; }
+            return c;
+        }
         upgradeCostScore(b) { const c = BLD[b.type].upgradeCost(b.level); return (c.gold || 0) + (c.elixir || 0) * 1.3 + (c.dark || 0) * 60; }
         upgradeCandidates(cat = 'all') {
             return this.buildings.filter(b => {
                 const def = BLD[b.type];
-                if (!def.upgradeCost || b.level >= def.maxLevel) return false;
+                if (!def.upgradeCost || b.level >= def.maxLevel || this.thCapped(b)) return false;
                 if (cat === 'economy') return def.cat === 'economy' || def.cat === 'core';
                 if (cat === 'defense') return def.cat === 'defense';
                 return true;
@@ -730,7 +781,7 @@
         }
         upgradeCheapest(cat = 'all', quiet = false) {
             for (const b of this.upgradeCandidates(cat)) {
-                if (this.canAfford(BLD[b.type].upgradeCost(b.level))) { return this.upgradeBuilding(b, quiet); }
+                if (this.canAfford(this.upgradeCostOf(b))) { return this.upgradeBuilding(b, quiet); }
             }
             if (!quiet) this.toast('Nothing affordable to upgrade yet', 'warn');
             return false;
@@ -788,7 +839,11 @@
                 const p = this.centerOf(mb);
                 for (let i = 0; i < 8; i++) this.particles.push({ x: p.x + rand(-10, 10), y: p.y + rand(-4, 6), vx: rand(-30, 30), vy: rand(-50, -15), life: 0.5, max: 0.5, color: '#d8c8a0', size: rand(2, 4), kind: 'dust' });
                 this.refreshSelection();
-            } else { this.audio.error(); this.toast('Cannot place it there', 'warn'); }
+            } else {
+                const other = this.swapPartner(mb, t.tx, t.ty);
+                if (other && this.swapBuildings(mb, other)) { this.toast(`${BLD[mb.type].name} and ${BLD[other.type].name} swapped places`, 'success'); this.refreshSelection(); }
+                else { this.audio.error(); this.toast(other ? 'No room to swap those two' : 'Cannot place it there', 'warn'); }
+            }
             this.updateCanvasCursor();
         }
 
@@ -1270,6 +1325,9 @@
         // lazy version (no combo) and Auto-collect pays a bit less again.
         bubbleSec() { return CFG.bubbleSec / (1 + 0.2 * this.boon('bubble')); }
         bubbleReady(b) { return BLD[b.type].clickBonus && (b.charge ?? 0) >= this.bubbleSec(); }
+        // A ready bubble only floats there for a few seconds, then hides. The coins stay waiting:
+        // Collect, a tap on the building, or Auto-collect still pick them up. With Auto on you never see one.
+        bubbleShown(b) { return this.bubbleReady(b) && !this.autoCollect && (b.shown ?? 1) > 0; }
         readyCount() { let n = 0; for (const b of this.buildings) if (this.bubbleReady(b)) n++; return n; }
 
         collectFrom(b, opt = {}) {
@@ -1283,7 +1341,7 @@
                 }
                 return false;
             }
-            b.charge = 0;
+            b.charge = 0; b.shown = undefined;
             const mult = opt.mult ?? 1;
             if (!opt.noCombo) {
                 if (this.combo.time > 0) this.combo.count++; else this.combo.count = 1;
@@ -1604,7 +1662,15 @@
                 if (b.upg > 0) b.upg = Math.max(0, b.upg - dt * 2.2);
                 if (b.pop > 0) b.pop = Math.max(0, b.pop - dt * 5);
                 if (b.hurt > 0) b.hurt -= dt;
-                if (BLD[b.type].clickBonus && b.build >= 1) b.charge = Math.min(this.bubbleSec(), (b.charge ?? rand(0, this.bubbleSec())) + dt * (this.boost.timeLeft > 0 ? 1.5 : 1));
+                if (BLD[b.type].clickBonus && b.build >= 1) {
+                    const sec = this.bubbleSec();
+                    b.charge = Math.min(sec, (b.charge ?? rand(0, sec)) + dt * (this.boost.timeLeft > 0 ? 1.5 : 1));
+                    if (b.charge >= sec) {
+                        // the first goal needs the bubble to stay put until it has been tapped
+                        const hold = this.tutCurrent && this.tutCurrent() && this.tutCurrent().id === 'tap';
+                        if (b.shown === undefined) b.shown = CFG.bubbleShowSec; else if (b.shown > 0 && !hold) b.shown -= dt;
+                    } else b.shown = undefined;
+                }
             }
 
             if (this.wave.active) {
@@ -1815,14 +1881,27 @@
         drawMoveGhost(g) {
             const m = this.moveMode, def = BLD[m.type];
             const { tx, ty } = this.hoverTile;
-            const ok = this.canPlace(m.type, tx, ty, m);
+            const free = this.canPlace(m.type, tx, ty, m);
+            const other = free ? null : this.swapPartner(m, tx, ty);
+            const swap = !!other && this.canSwap(m, other);
+            const ok = free || swap;
             const pulse = 0.5 + 0.5 * Math.sin(this.tnow * 6);
+            const fill = swap ? `rgba(255,208,80,${0.25 + pulse * 0.2})` : ok ? `rgba(92,216,255,${0.25 + pulse * 0.2})` : 'rgba(255,93,93,0.45)';
+            const edge = swap ? '#ffd050' : ok ? '#5cd8ff' : '#ff5d5d';
             for (let dy = 0; dy < def.size; dy++) for (let dx = 0; dx < def.size; dx++) {
                 this.tilePoly(g, tx + dx, ty + dy);
-                g.fillStyle = ok ? `rgba(92,216,255,${0.25 + pulse * 0.2})` : 'rgba(255,93,93,0.45)'; g.fill();
-                g.strokeStyle = ok ? '#5cd8ff' : '#ff5d5d'; g.lineWidth = 2.5; g.stroke();
+                g.fillStyle = fill; g.fill();
+                g.strokeStyle = edge; g.lineWidth = 2.5; g.stroke();
             }
-            if (ok) {
+            if (swap) {
+                // outline where the other building will end up
+                const od = BLD[other.type];
+                for (let dy = 0; dy < od.size; dy++) for (let dx = 0; dx < od.size; dx++) {
+                    this.tilePoly(g, m.tx + dx, m.ty + dy);
+                    g.strokeStyle = '#ffd050'; g.lineWidth = 2; g.setLineDash([5, 4]); g.stroke(); g.setLineDash([]);
+                }
+            }
+            if (free) {
                 const sp = this.spriteOf(m);
                 const c = this.worldIso(tx + def.size / 2, ty + def.size / 2);
                 A.drawSprite(g, sp, c.x, c.y, 0.8, false);
@@ -1969,29 +2048,34 @@
                 if (def.clickBonus && b.build >= 1) {
                     const r = this.bubbleRect(b);
                     const ready = this.bubbleReady(b);
-                    if (ready) {
-                        const bob = Math.sin(t * 3.4 + b.tx * 1.7) * 2.6, pulse = 1 + 0.06 * Math.sin(t * 6 + b.ty);
+                    if (this.autoCollect) { /* auto-collect: nothing to look at */ }
+                    else if (ready) {
+                      if (this.bubbleShown(b)) {
+                        const fade = Math.min(1, b.shown ?? 1, (CFG.bubbleShowSec - (b.shown ?? CFG.bubbleShowSec)) * 4 + 0.15);
+                        const bob = Math.sin(t * 3.4 + b.tx * 1.7) * 1.8, pulse = (1 + 0.05 * Math.sin(t * 6 + b.ty)) * (0.7 + 0.3 * fade);
+                        g.save(); g.globalAlpha = Math.max(0, fade);
                         const key = Object.keys(def.clickBonus(1))[0], col = this.resColor(key);
-                        g.save(); g.translate(r.x, r.y + bob); g.scale(pulse, pulse);
-                        g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(0, 17, 7, 2.4, 0, 0, TAU); g.fill();
+                        g.translate(r.x, r.y + bob); g.scale(pulse, pulse);
+                        g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(0, 12, 5, 1.8, 0, 0, TAU); g.fill();
                         const gr = g.createRadialGradient(-4, -5, 1, 0, 0, r.r);
                         gr.addColorStop(0, 'rgba(255,255,255,0.95)'); gr.addColorStop(1, 'rgba(210,225,255,0.82)');
-                        g.fillStyle = gr; g.strokeStyle = '#1a2240'; g.lineWidth = 1.8;
+                        g.fillStyle = gr; g.strokeStyle = '#1a2240'; g.lineWidth = 1.5;
                         g.beginPath(); g.arc(0, 0, r.r, 0, TAU); g.fill(); g.stroke();
                         g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); g.arc(0, 0, r.r - 2.6, 0, TAU); g.stroke();
                         if (key === 'gold') {
-                            g.fillStyle = '#ffd34a'; g.strokeStyle = '#7a4a00'; g.lineWidth = 1.2; g.beginPath(); g.arc(0, 0, 6.2, 0, TAU); g.fill(); g.stroke();
-                            g.fillStyle = '#9a5c00'; g.font = '700 9px "Lilita One", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('$', 0, 0.5);
+                            g.fillStyle = '#ffd34a'; g.strokeStyle = '#7a4a00'; g.lineWidth = 1.2; g.beginPath(); g.arc(0, 0, 4.4, 0, TAU); g.fill(); g.stroke();
+                            g.fillStyle = '#9a5c00'; g.font = '700 7px "Lilita One", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('$', 0, 0.5);
                         } else {
                             g.fillStyle = col; g.strokeStyle = '#2a0a50'; g.lineWidth = 1.2;
-                            g.beginPath(); g.moveTo(0, -7); g.quadraticCurveTo(7, 1, 0, 7); g.quadraticCurveTo(-7, 1, 0, -7); g.fill(); g.stroke();
+                            g.beginPath(); g.moveTo(0, -5); g.quadraticCurveTo(5, 0.7, 0, 5); g.quadraticCurveTo(-5, 0.7, 0, -5); g.fill(); g.stroke();
                         }
                         g.restore();
+                      }
                     } else if (b.charge !== undefined) {
                         const f = Math.min(1, b.charge / this.bubbleSec());
                         g.save(); g.translate(r.x, r.y);
-                        g.strokeStyle = 'rgba(0,0,0,0.45)'; g.lineWidth = 3.4; g.beginPath(); g.arc(0, 0, 6, 0, TAU); g.stroke();
-                        g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 2.2; g.beginPath(); g.arc(0, 0, 6, -Math.PI / 2, -Math.PI / 2 + TAU * f); g.stroke();
+                        g.strokeStyle = 'rgba(0,0,0,0.4)'; g.lineWidth = 2.8; g.beginPath(); g.arc(0, 0, 4.5, 0, TAU); g.stroke();
+                        g.strokeStyle = 'rgba(255,255,255,0.7)'; g.lineWidth = 1.7; g.beginPath(); g.arc(0, 0, 4.5, -Math.PI / 2, -Math.PI / 2 + TAU * f); g.stroke();
                         g.restore();
                     }
                 }

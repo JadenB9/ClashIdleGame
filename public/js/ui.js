@@ -8,7 +8,7 @@
    ============================================================ */
 (function (K) {
     'use strict';
-    const { CFG, VIEWS, BLD, CATS, ENEMY, PERKS, perkCost, QUEST_KINDS, ACHS, NOTATIONS, DIFFICULTY, BOONS } = K.data;
+    const { CFG, VIEWS, BLD, CATS, ENEMY, PERKS, perkCost, QUEST_KINDS, ACHS, NOTATIONS, DIFFICULTY, BOONS, thForLevel } = K.data;
     const U = K.util;
     const { fmt, fmtRate, fmtTime, fmtDuration, tierOf } = U;
     const A = K.art;
@@ -235,7 +235,7 @@
         // ---------- build menu ----------
         setBuildMode(type) {
             if (type && this.maxedOut(type)) {
-                this.audio.error(); this.toast(`You already have the maximum ${BLD[type].name}s`, 'warn'); type = null;
+                this.audio.error(); this.toast(this.limitText(type), 'warn'); type = null;
             }
             this.buildMode = type;
             this.moveMode = null; this.spellMode = false;
@@ -276,6 +276,13 @@
             return (A.enemyThumbs[kind] = cv.toDataURL());
         }
 
+        // cost chips for an upgrade; walls show both ways to pay ("180 gold or 90 elixir")
+        upgradeChips(b) {
+            const def = BLD[b.type], c = this.upgradeCostOf(b);
+            if (!def.upgradeAlt) return this.costChips(c);
+            const p = def.upgradeCost(b.level), a = def.upgradeAlt(b.level);
+            return `${this.costChips(p)}<span class="chip free">or</span>${this.costChips(a)}`;
+        }
         costChips(cost, haveFn = true) {
             return Object.entries(cost).map(([k, v]) => {
                 const ok = !haveFn || (this.res[k] || 0) >= v;
@@ -297,12 +304,12 @@
             if (!entries.length && this.buildCat === 'core') { this.buildCat = 'economy'; return this.buildMenu(true); }
             // hide the Core tab once the Town Hall exists
             seg.querySelectorAll('[data-cat="core"]').forEach(b => { b.hidden = hasTH; });
-            const key = this.buildCat + '|' + entries.map(([t, d]) => t + (this.player.level < d.unlockLevel ? 'L' : '') + (this.maxedOut(t) ? 'M' : '')).join('|');
+            const key = this.buildCat + '|' + entries.map(([t, d]) => t + (this.player.level < d.unlockLevel ? 'L' : '') + (this.maxedOut(t) ? 'M' : '') + this.countCapOf(t)).join('|');
             if (force || menu._key !== key) {
                 menu._key = key;
                 menu.innerHTML = entries.map(([type, def]) => {
                     const locked = this.player.level < def.unlockLevel;
-                    const have = def.maxCount ? `<span class="count">${this.countOf(type)}/${def.maxCount}</span>` : '';
+                    const cc = this.countCapOf(type), have = cc < 1e6 ? `<span class="count">${this.countOf(type)}/${cc}</span>` : '';
                     return `<button type="button" class="build-card" data-type="${type}" title="${esc(def.desc)}">
                         <span class="thumb-wrap"><img class="thumb" alt="" width="48" height="48"></span>
                         <span class="build-name">${def.name}</span>
@@ -315,7 +322,7 @@
                     const type = card.dataset.type, def = BLD[type];
                     card.addEventListener('click', () => {
                         if (this.player.level < def.unlockLevel) { this.audio.error(); this.toast(`${def.name} unlocks at level ${def.unlockLevel}`, 'warn'); return; }
-                        if (this.maxedOut(type)) { this.audio.error(); this.toast(`You already have the maximum ${def.name}s`, 'warn'); return; }
+                        if (this.maxedOut(type)) { this.audio.error(); this.toast(this.limitText(type), 'warn'); return; }
                         if (!this.canAfford(this.buildCost(type))) { this.audio.error(); this.toast('Not enough resources', 'warn'); return; }
                         this.audio.click();
                         this.setBuildMode(this.buildMode === type ? null : type);
@@ -336,7 +343,8 @@
                 const cost = card.querySelector('.build-cost');
                 if (cost && !locked) setHtml(cost, this.costChips(this.buildCost(type)));
                 const cnt = card.querySelector('.count');
-                if (cnt) setText(cnt, `${this.countOf(type)}/${def.maxCount}`);
+                if (cnt) setText(cnt, `${this.countOf(type)}/${this.countCapOf(type)}`);
+                card.classList.toggle('full', this.maxedOut(type) && !locked);
             }
         }
         // building pictures are painted a few at a time so opening the panel never stalls
@@ -466,18 +474,19 @@
             const b = this.selected, sel = this.el.sel;
             if (!b || !this.buildings.includes(b)) { sel.hidden = true; sel._key = null; this.el.app.classList.remove('has-sel'); this.updateCanvasCursor(); return; }
             const def = BLD[b.type];
-            const key = [b.id, b.level].join('|');
+            const capped = this.thCapped(b);
+            const key = [b.id, b.level, this.thLevel()].join('|');
             sel.hidden = false;
             this.el.app.classList.add('has-sel');
             const max = b.level >= def.maxLevel;
-            const cur = this.levelStats(b.type, b.level), nxt = max ? [] : this.levelStats(b.type, b.level + 1);
+            const cur = this.levelStats(b.type, b.level), nxt = (max || capped) ? [] : this.levelStats(b.type, b.level + 1);
             const stats = cur.slice(0, 3).map((s, i) => {
                 const n = nxt.find(x => x.id === s.id);
                 const same = n && Math.abs(n.v - s.v) < 1e-9;
                 return `<div class="sel-stat"><label>${s.label}</label><span><b>${s.f(s.v)}</b>${n && !same ? `<i>${ico('chevron')}</i><b class="up">${n.f(n.v)}</b>` : ''}</span></div>`;
             }).join('');
             const canMove = def.cat !== 'core';
-            const next = !max && def.upgradeCost ? def.upgradeCost(b.level) : null;
+            const next = !max && def.upgradeCost ? this.upgradeCostOf(b) : null;
             sel.innerHTML = `
                 <div class="sel-head">
                     <img class="sel-thumb" alt="" src="${this.thumbURL(b.type)}" width="56" height="56">
@@ -490,7 +499,8 @@
                 ${stats ? `<div class="sel-stats">${stats}</div>` : `<p class="sel-desc">${def.desc}</p>`}
                 <div class="sel-actions">
                     ${def.clickBonus ? `<button class="btn gold" type="button" data-act="collect">${ico('sack')}Collect</button>` : ''}
-                    ${next ? `<button class="btn good upgrade" type="button" data-act="upgrade" id="selUp"><span class="up-label">${ico('up')}Upgrade</span><span class="up-cost" id="selUpCost">${this.costChips(next)}</span></button>
+                    ${next && capped ? `<button class="btn upgrade th-locked" type="button" data-act="upgrade" id="selUpLock">${ico('lock')}Needs Town Hall ${thForLevel(b.type, b.level + 1)}</button>` : ''}
+                    ${next && !capped ? `<button class="btn good upgrade" type="button" data-act="upgrade" id="selUp"><span class="up-label">${ico('up')}Upgrade</span><span class="up-cost" id="selUpCost">${this.upgradeChips(b)}</span></button>
                     <button class="btn small" type="button" data-act="max" title="Keep upgrading until you run out of money">Max</button>` : ''}
                     ${canMove ? `<button class="btn small" type="button" data-act="move" title="Move this building" aria-label="Move">${ico('move')}</button>` : ''}
                     <button class="btn small" type="button" data-act="info" title="Details" aria-label="Details">${ico('info')}</button>
@@ -521,9 +531,9 @@
             const up = $('selUp');
             if (up) up.classList.toggle('tut-pulse', !!this._tt && this._tt.sel === 'upgrade');
             if (up && b.level < def.maxLevel) {
-                const cost = def.upgradeCost(b.level), ok = this.canAfford(cost);
+                const cost = this.upgradeCostOf(b), ok = this.canAfford(cost);
                 up.classList.toggle('cant', !ok);
-                const cc = $('selUpCost'); if (cc) setHtml(cc, this.costChips(cost));
+                const cc = $('selUpCost'); if (cc) setHtml(cc, this.upgradeChips(b));
             }
         }
         onSelClick(e) {
@@ -567,28 +577,48 @@
                 const def = BLD[b.type];
                 if (!def.upgradeCost || b.level >= def.maxLevel) continue;
                 const key = b.type + '|' + b.level;
-                const g = groups.get(key) || { type: b.type, level: b.level, list: [] };
+                const g = groups.get(key) || { type: b.type, level: b.level, list: [], locked: this.thCapped(b) };
                 g.list.push(b); groups.set(key, g);
             }
             const rows = [...groups.values()].map(g => {
-                const b = g.list[0], cost = BLD[g.type].upgradeCost(g.level);
-                return { g, b, cost, n: g.list.length, ok: this.canAfford(cost), c$: this.upgradeCostScore(b) + (g.type === 'wall' ? 1e12 : 0) };
-            }).sort((a, z) => (z.ok - a.ok) || (a.c$ - z.c$));
+                const b = g.list[0], cost = this.upgradeCostOf(b);
+                return { g, b, cost, n: g.list.length, locked: g.locked, ok: !g.locked && this.canAfford(cost), c$: this.upgradeCostScore(b) + (g.type === 'wall' ? 1e12 : 0) };
+            }).sort((a, z) => (a.locked - z.locked) || (z.ok - a.ok) || (a.c$ - z.c$));
             const maxed = this.buildings.filter(b => BLD[b.type].upgradeCost && b.level >= BLD[b.type].maxLevel).length;
-            const html = rows.map(({ g, b, cost, n, ok }) => {
+            const html = rows.map(({ g, b, cost, n, ok, locked }) => {
                 const def = BLD[b.type];
                 const cur = this.levelStats(b.type, b.level), nxt = this.levelStats(b.type, b.level + 1);
                 const s0 = cur[0], n0 = s0 && nxt.find(x => x.id === s0.id);
                 const gain = s0 && n0 ? `${s0.label}: ${s0.f(s0.v)} → <b>${n0.f(n0.v)}</b>` : '';
                 const many = n > 1;
-                return `<div class="up-row${ok ? ' ready' : ''}${many ? ' group' : ''}" data-focus="${b.id}">
+                const act = locked ? `<span class="th-need">${ico('lock')}Town Hall ${thForLevel(b.type, b.level + 1)}</span>`
+                    : many ? `<button type="button" class="btn small ${ok ? 'good' : ''}" data-upg="${g.type}|${g.level}" ${ok ? '' : 'disabled'}>Upgrade all</button>`
+                           : `<button type="button" class="btn small ${ok ? 'good' : ''}" data-up="${b.id}" ${ok ? '' : 'disabled'}>Upgrade</button>`;
+                return `<div class="up-row${ok ? ' ready' : ''}${many ? ' group' : ''}${locked ? ' locked' : ''}" data-focus="${b.id}">
                     <img class="up-thumb" alt="" width="40" height="40" src="${this.thumbURL(b.type)}">
-                    <div class="up-info"><div class="up-name">${def.name}${many ? `<span class="up-count">x${n}</span>` : ''}<small>Lv ${b.level} → ${b.level + 1}</small></div><div class="up-gain">${gain}</div><div class="up-cost">${this.costChips(cost)}${many ? '<span class="chip free">each</span>' : ''}</div></div>
-                    ${many ? `<button type="button" class="btn small ${ok ? 'good' : ''}" data-upg="${g.type}|${g.level}" ${ok ? '' : 'disabled'}>Upgrade all</button>`
-                           : `<button type="button" class="btn small ${ok ? 'good' : ''}" data-up="${b.id}" ${ok ? '' : 'disabled'}>Upgrade</button>`}
+                    <div class="up-info"><div class="up-name">${def.name}${many ? `<span class="up-count">x${n}</span>` : ''}<small>Lv ${b.level} → ${b.level + 1}</small></div><div class="up-gain">${gain}</div><div class="up-cost">${this.upgradeChips(b)}${many ? '<span class="chip free">each</span>' : ''}</div></div>
+                    ${act}
                 </div>`;
             }).join('') + (maxed ? `<p class="hint">${maxed} building${maxed > 1 ? 's' : ''} fully upgraded.</p>` : '') + (!rows.length && !maxed ? '<p class="hint">Build something and it shows up here.</p>' : '');
             setHtml(list, html);
+            this.updateUpButtons(rows);
+        }
+        // The two big buttons say plainly whether they can do anything right now
+        updateUpButtons(rows) {
+            const ready = rows.filter(r => r.ok).reduce((n, r) => n + r.n, 0);
+            const locked = rows.some(r => r.locked), open = rows.filter(r => !r.locked);
+            const all = $('btnUpAll'), cheap = $('btnUpCheap'), note = $('upNote');
+            if (!all || !cheap) return;
+            all.disabled = cheap.disabled = ready === 0;
+            const label = ready ? 'Upgrade all you can' : 'Nothing affordable yet';
+            if (all._lab !== label) { all._lab = label; setHtml(all, `${ico('up')}${label}`); }
+            let text = '';
+            if (!ready) {
+                const next = open.slice().sort((a, z) => a.c$ - z.c$)[0];
+                if (next) text = `Cheapest next: ${BLD[next.b.type].name} for ${Object.entries(next.cost).map(([k, v]) => `${fmt(v)} ${U.resSymbol(k).toLowerCase()}`).join(' + ')}.`;
+                else if (locked) text = 'Everything is waiting on the Town Hall. Upgrade it to unlock more levels.';
+            } else text = `${ready} upgrade${ready > 1 ? 's' : ''} ready now.${locked ? ' Greyed rows need a higher Town Hall level.' : ''}`;
+            if (note._t !== text) { note._t = text; note.textContent = text; note.hidden = !text; }
         }
 
         // ---------- kingdom panel ----------
@@ -778,7 +808,7 @@
             const h = this.el.hint;
             let text = '';
             if (this.buildMode) { const d = BLD[this.buildMode]; text = `Tap the grass to place the ${d.name}.${d.drag ? ' Drag to paint a line.' : ''} Esc cancels.`; }
-            else if (this.moveMode) text = `Tap an empty tile to move the ${BLD[this.moveMode.type].name}. Esc cancels.`;
+            else if (this.moveMode) text = `Drop the ${BLD[this.moveMode.type].name} on an empty tile to move it, or on another building to swap places. Esc cancels.`;
             else if (this.spellMode) text = 'Tap the map to call down lightning. Esc cancels.';
             h.hidden = !text;
             if (text) setText(h, text);
@@ -792,7 +822,8 @@
             setHtml(host, `
                 ${row('sack', 'Collect', 'Mines and wells fill a coin bubble every few seconds. Tap it for a bonus. Tap several quickly for a combo. The <b>Collect</b> button (or Space) grabs every ready bubble.')}
                 ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
-                ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Walls and decorations can be painted by dragging.')}
+                ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Walls and decorations can be painted by dragging. The <b>Town Hall</b> level limits how many of each you can have and how high they upgrade.')}
+                ${row('move', 'Move and swap', 'Select a building, then drag it. Drop it on empty grass to move it, or on another building to swap places.')}
                 ${row('sword', 'Defend', 'Raiders arrive when the raid timer (top left) runs out. Red arrows show which side they come from. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
                 ${row('star', 'Boons', 'After every raid you pick one of three rewards. They stack and last until you ascend.')}
                 ${row('gem', 'Gems', `Spend them on <b>Boost</b> (double income, ${CFG.boostCost} gems), <b>Lightning</b> (1) and <b>Freeze</b> (${CFG.freezeCost}). Earn them from waves, quests and goblins.`)}

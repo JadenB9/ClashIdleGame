@@ -35,7 +35,7 @@
         ascendMinWave: 18,           // waves survived before the kingdom can ascend
         boostCost: 3,                // gems for a minute of double income
         freezeCost: 2,               // gems to freeze every raider for four seconds
-        bubbleSec: 7,                // a mine or well refills its tap-to-collect bubble this often
+        bubbleSec: 7, bubbleShowSec: 5,                // a mine or well refills its tap-to-collect bubble this often
         autoCollectRate: 0.8,        // auto-collect pays this share of a manual tap
     };
 
@@ -55,7 +55,7 @@
             name: 'Town Hall', cat: 'core', size: 2, maxLevel: 20, unlockLevel: 1, maxCount: 1,
             baseCost: { gold: 0 }, baseHP: 2500, tone: '#c8553a',
             desc: 'The heart of your kingdom. Upgrading raises storage and unlocks the late game.',
-            upgradeCost: (lv) => ({ gold: 1500 * Math.pow(2, lv - 1), elixir: 400 * Math.pow(1.8, lv - 1) }),
+            upgradeCost: (lv) => ({ gold: Math.min(1500 * Math.pow(1.85, lv - 1), Math.round(0.8 * (3000 + lv * 2500))), elixir: Math.min(400 * Math.pow(1.8, lv - 1), Math.round(0.15 * (3000 + lv * 2500))) }),
             provides: (lv) => ({ cap: 3000 + lv * 2500 }),
         },
         goldmine: {
@@ -193,6 +193,7 @@
             baseCost: { gold: 180 }, baseHP: 1800, tone: '#8a8a94', drag: true,
             desc: 'Stone rampart. Raiders must chew through it or walk around. Drag to build a line.',
             upgradeCost: (lv) => ({ gold: 220 * Math.pow(1.55, lv - 1) }),
+            upgradeAlt: (lv) => ({ elixir: 110 * Math.pow(1.55, lv - 1) }),   // walls can be paid in gold or in elixir
         },
         // Decorations: no stats, but each adds a little production ("prosperity")
         oak: {
@@ -259,7 +260,7 @@
     const DIFFICULTY = {
         easy:   { label: 'Relaxed', hp: 0.7, dmg: 0.6,  loot: 1.0, crowns: 0.8, desc: 'Weaker raiders. Good for idling.' },
         normal: { label: 'Normal',  hp: 1.12, dmg: 1,    loot: 1.0, crowns: 1.0, desc: 'The intended challenge.' },
-        hard:   { label: 'Hard',    hp: 2.0, dmg: 1.8,  loot: 1.2, crowns: 1.4, desc: 'Tougher raiders, better loot and crowns.' },
+        hard:   { label: 'Hard',    hp: 2.5, dmg: 2.1,  loot: 1.2, crowns: 1.4, desc: 'Tougher raiders, better loot and crowns.' },
     };
 
     // ---------- WAVE BOONS ----------
@@ -383,6 +384,29 @@
         return clamp(1 + Math.floor(((level - 1) / max) * 4), 1, 4);
     };
 
+    // ---- Town Hall limits ----
+    // The Town Hall level decides how high a building can be upgraded and how many of each you may own.
+    const TH_MAX = BLD.townhall.maxLevel;
+    const levelCap = (type, th) => {
+        const m = BLD[type].maxLevel;
+        return type === 'townhall' ? m : clamp(Math.ceil(m * (th + 2) / (TH_MAX + 2)), 1, m);
+    };
+    // [owned at Town Hall 1, a new one every N Town Hall levels, most you can ever have]
+    const COUNT_RULES = {
+        goldmine: [3, 2, 6], elixirwell: [2, 3, 4], darkdrill: [1, 5, 3], gemquarry: [1, 8, 2], storage: [2, 3, 6], builderhut: [1, 3, 4],
+        cannon: [4, 2, 8], archer: [1, 2, 7], mortar: [1, 3, 5], airdef: [1, 3, 4], wizard: [1, 3, 5], frost: [1, 4, 4],
+        tesla: [1, 4, 4], xbow: [1, 5, 3], inferno: [1, 6, 3], armycamp: [1, 6, 3], lab: [1, 99, 1],
+    };
+    const countCap = (type, th) => {
+        if (type === 'wall') return 25 + 15 * (th - 1);
+        const r = COUNT_RULES[type];
+        if (!r) return BLD[type].maxCount || Infinity;
+        return Math.min(r[2], r[0] + Math.floor((th - 1) / r[1]));
+    };
+    // the first Town Hall level that allows a given count or building level (null when none does)
+    const thForCount = (type, n) => { for (let t = 1; t <= TH_MAX; t++) if (countCap(type, t) >= n) return t; return null; };
+    const thForLevel = (type, lv) => { for (let t = 1; t <= TH_MAX; t++) if (levelCap(type, t) >= lv) return t; return null; };
+
     // Mines, wells and the like cost more with every one you own, so a field of cheap mines is not the best plan
     const scaledCost = (type, owned) => {
         const def = BLD[type], f = def.costScale && owned > 2 ? Math.pow(def.costScale, owned - 2) : 1;
@@ -392,7 +416,7 @@
     };
 
     K.data = {
-        CFG, VIEWS, BLD, CATS, ENEMY, waveTable, PERKS, perkCost, QUEST_KINDS, ACHS, DIFFICULTY, BOONS, scaledCost,
+        CFG, VIEWS, BLD, CATS, ENEMY, waveTable, PERKS, perkCost, QUEST_KINDS, ACHS, DIFFICULTY, BOONS, scaledCost, levelCap, countCap, thForCount, thForLevel,
         NOTATIONS, state,
     };
     K.util = {
