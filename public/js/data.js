@@ -378,11 +378,15 @@
     const resColor = (k) => ({ gold: '#ffc857', elixir: '#e3a8ff', dark: '#a06bff', gems: '#5cd8ff' })[k] || '#fff';
 
     // Visual tier of a building (1-4), used by the sprite painters
-    const tierOf = (type, level) => {
-        const max = BLD[type].maxLevel;
-        if (max <= 1) return 1;
-        return clamp(1 + Math.floor(((level - 1) / max) * 4), 1, 4);
+    // The levels at which a building steps up to look 2, 3 and 4. They come early, so every few upgrades visibly change the building.
+    const tierLevelCache = {};
+    const tierLevels = (type) => {
+        if (tierLevelCache[type]) return tierLevelCache[type];
+        const m = BLD[type].maxLevel, out = [];
+        if (m > 1) { let prev = 1; for (const f of [0.12, 0.3, 0.55]) { const l = Math.max(prev + 1, Math.ceil(f * m)); out.push(l); prev = l; } }
+        return (tierLevelCache[type] = out);
     };
+    const tierOf = (type, level) => 1 + tierLevels(type).filter(l => level >= l).length;
 
     // ---- Town Hall limits ----
     // The Town Hall level decides how high a building can be upgraded and how many of each you may own.
@@ -421,6 +425,6 @@
     };
     K.util = {
         rand, randi, clamp, fmt, fmtRate, safeNum, cleanStr, cleanInt, compact, alive,
-        fmtDuration, fmtTime, hexToRgb, rgbToHex, mixColor, shade, resSymbol, resColor, tierOf,
+        fmtDuration, fmtTime, hexToRgb, rgbToHex, mixColor, shade, resSymbol, resColor, tierOf, tierLevels,
     };
 })(window.KOE = window.KOE || {});

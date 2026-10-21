@@ -152,7 +152,7 @@
             this.tipsSeen = {};
             this.opened = {};                         // panels the player has looked at (tutorial)
             this.weather = { rain: 0, target: 0, timer: rand(150, 300) };
-            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, difficulty: 'normal' };
+            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, spacing: true, difficulty: 'normal' };
             this.speed = 1;
 
             this.cam = { x: 0, y: 0, zoom: 1 };
@@ -336,6 +336,18 @@
             }
             return true;
         }
+        // "Breathing room": a new building keeps one empty tile away from other buildings (walls and decorations do not count)
+        spacedOK(type, tx, ty, ignore = null, ignore2 = null) {
+            if (!this.settings.spacing) return true;
+            const def = BLD[type];
+            if (def.decor || type === 'wall') return true;
+            for (let y = ty - 1; y <= ty + def.size; y++) for (let x = tx - 1; x <= tx + def.size; x++) {
+                const o = this.cell(x, y);
+                if (o && o !== ignore && o !== ignore2 && o.type !== 'wall' && !BLD[o.type].decor) return false;
+            }
+            return true;
+        }
+        canBuildHere(type, tx, ty, ignore = null, ignore2 = null) { return this.canPlace(type, tx, ty, ignore, ignore2) && this.spacedOK(type, tx, ty, ignore, ignore2); }
         // the one other building a footprint would land on, if there is exactly one (the swap partner)
         swapPartner(mb, tx, ty) {
             if (this.occDirty) this.rebuildOcc();
@@ -477,7 +489,7 @@
                 const L = this.input.lastPaint;
                 if (L && L.tx === t.tx && L.ty === t.ty) return;
                 this.input.lastPaint = { tx: t.tx, ty: t.ty };
-                if (!this.buildMode || !this.canPlace(this.buildMode, t.tx, t.ty)) return;
+                if (!this.buildMode || !this.canBuildHere(this.buildMode, t.tx, t.ty)) return;
                 if (!this.canAfford(this.buildCost(this.buildMode))) { if (!this.input.paintWarned) { this.input.paintWarned = true; this.audio.error(); this.toast('Not enough resources to keep painting', 'warn'); } return; }
                 this.placeBuilding(this.buildMode, t.tx, t.ty, true);
             };
@@ -642,8 +654,8 @@
                 return;
             }
             if (this.buildMode) {
-                if (this.canPlace(this.buildMode, t.tx, t.ty)) this.placeBuilding(this.buildMode, t.tx, t.ty);
-                else { this.audio.error(); this.toast('Something is in the way', 'warn'); }
+                if (this.canBuildHere(this.buildMode, t.tx, t.ty)) this.placeBuilding(this.buildMode, t.tx, t.ty);
+                else { this.audio.error(); this.toast(this.canPlace(this.buildMode, t.tx, t.ty) ? 'Leave one empty tile between buildings (you can turn this off in Menu)' : 'Something is in the way', 'warn'); }
                 return;
             }
             if (this.moveMode) { this.commitMove({ tx: t.tx, ty: t.ty }); return; }
@@ -832,7 +844,7 @@
             if (!mb) { this.updateCanvasCursor(); return; }
             this.moveMode = null;
             if (!t || t.tx < 0 || t.ty < 0 || t.tx >= CFG.gridW || t.ty >= CFG.gridH) { this.toast('Drop it on the grass', 'warn'); this.updateCanvasCursor(); return; }
-            if (this.canPlace(mb.type, t.tx, t.ty, mb)) {
+            if (this.canBuildHere(mb.type, t.tx, t.ty, mb)) {
                 mb.tx = t.tx; mb.ty = t.ty;
                 this.touchGrid();
                 this.audio.build();
@@ -840,8 +852,9 @@
                 for (let i = 0; i < 8; i++) this.particles.push({ x: p.x + rand(-10, 10), y: p.y + rand(-4, 6), vx: rand(-30, 30), vy: rand(-50, -15), life: 0.5, max: 0.5, color: '#d8c8a0', size: rand(2, 4), kind: 'dust' });
                 this.refreshSelection();
             } else {
-                const other = this.swapPartner(mb, t.tx, t.ty);
-                if (other && this.swapBuildings(mb, other)) { this.toast(`${BLD[mb.type].name} and ${BLD[other.type].name} swapped places`, 'success'); this.refreshSelection(); }
+                const other = this.canPlace(mb.type, t.tx, t.ty, mb) ? null : this.swapPartner(mb, t.tx, t.ty);
+                if (!other && this.canPlace(mb.type, t.tx, t.ty, mb)) { this.audio.error(); this.toast('Leave one empty tile between buildings (you can turn this off in Menu)', 'warn'); }
+                else if (other && this.swapBuildings(mb, other)) { this.toast(`${BLD[mb.type].name} and ${BLD[other.type].name} swapped places`, 'success'); this.refreshSelection(); }
                 else { this.audio.error(); this.toast(other ? 'No room to swap those two' : 'Cannot place it there', 'warn'); }
             }
             this.updateCanvasCursor();
@@ -1861,7 +1874,7 @@
         drawBuildGhost(g) {
             const def = BLD[this.buildMode];
             const { tx, ty } = this.hoverTile;
-            const placeable = this.canPlace(this.buildMode, tx, ty);
+            const placeable = this.canBuildHere(this.buildMode, tx, ty);
             const ok = placeable && this.canAfford(this.buildCost(this.buildMode));
             const col = ok ? '107,255,149' : '255,93,93';
             for (let dy = 0; dy < def.size; dy++) for (let dx = 0; dx < def.size; dx++) {
@@ -1881,8 +1894,8 @@
         drawMoveGhost(g) {
             const m = this.moveMode, def = BLD[m.type];
             const { tx, ty } = this.hoverTile;
-            const free = this.canPlace(m.type, tx, ty, m);
-            const other = free ? null : this.swapPartner(m, tx, ty);
+            const free = this.canBuildHere(m.type, tx, ty, m);
+            const other = this.canPlace(m.type, tx, ty, m) ? null : this.swapPartner(m, tx, ty);
             const swap = !!other && this.canSwap(m, other);
             const ok = free || swap;
             const pulse = 0.5 + 0.5 * Math.sin(this.tnow * 6);
@@ -2022,13 +2035,15 @@
                     const fh = CFG.tileH * def.size / 2;
                     const tx = c.x, ty = c.y + fh + 6;
                     const max = b.level >= def.maxLevel;
+                    // the badge takes the colour of the building's look: bronze, silver, gold, ruby
+                    const tcol = ['#c98a52', '#d5dde6', '#ffd34a', '#ff6fb1'][tierOf(b.type, b.level) - 1];
                     const label = max ? 'MAX' : String(b.level);
-                    g.font = '600 10px "Lilita One", "Nunito", sans-serif';
-                    const w = Math.max(18, g.measureText(label).width + 12);
-                    g.fillStyle = 'rgba(14,10,8,0.82)';
-                    this.pill(g, tx - w / 2, ty - 7, w, 14, 7); g.fill();
-                    g.strokeStyle = max ? '#ffd34a' : 'rgba(255,255,255,0.55)'; g.lineWidth = 1; g.stroke();
-                    g.fillStyle = max ? '#ffd34a' : '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+                    g.font = '700 11px "Lilita One", "Nunito", sans-serif';
+                    const w = Math.max(22, g.measureText(label).width + 14);
+                    g.fillStyle = 'rgba(14,10,8,0.88)';
+                    this.pill(g, tx - w / 2, ty - 8, w, 16, 8); g.fill();
+                    g.strokeStyle = tcol; g.lineWidth = 1.8; g.stroke();
+                    g.fillStyle = tcol; g.textAlign = 'center'; g.textBaseline = 'middle';
                     g.fillText(label, tx, ty + 0.5);
                 }
                 // upgrade arrow

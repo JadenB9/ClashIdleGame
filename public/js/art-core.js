@@ -13,7 +13,8 @@
     const U = K.util;
     const { shade, mixColor, clamp } = U;
 
-    const SS = 3;                 // sprite supersampling
+    // sprite supersampling: sharper on high-density screens, where zoomed-in sprites would otherwise go soft
+    const SS = (window.devicePixelRatio || 1) >= 1.5 ? 4 : 3;
     const view = { name: 'balanced', hk: VIEWS.balanced.hk };
 
     // ---------- tiny utilities ----------
@@ -684,13 +685,34 @@
         }
     };
 
+    // Upgraded buildings get pennant posts at their side corners, so the tier reads from across the map:
+    // silver and blue, then gold and purple, then gold with ruby caps and bigger red pennants.
+    const flourish = (g, geo, tier, size) => {
+        if (tier < 2) return;
+        const X = geo.fw * 0.98, y = 2, H = size >= 2 ? 31 : 23;
+        const pole = tier === 2 ? '#d9dee8' : '#f0c040';
+        const flag = tier === 2 ? '#3a78d8' : tier === 3 ? '#8a45c8' : '#e8403c';
+        const len = tier === 4 ? 15 : 10.5, drop = tier === 4 ? 9 : 6.5;
+        g.save(); g.lineJoin = 'round'; g.lineCap = 'round';
+        for (const s of [-1, 1]) {
+            const x = s * X;
+            g.strokeStyle = 'rgba(40,24,6,0.85)'; g.lineWidth = 3.2; g.beginPath(); g.moveTo(x, y); g.lineTo(x, y - H); g.stroke();
+            g.strokeStyle = pole; g.lineWidth = 1.7; g.stroke();
+            g.fillStyle = flag; g.strokeStyle = 'rgba(30,16,12,0.9)'; g.lineWidth = 1;
+            g.beginPath(); g.moveTo(x, y - H); g.lineTo(x + s * len, y - H + drop * 0.5); g.lineTo(x, y - H + drop); g.closePath(); g.fill(); g.stroke();
+            g.fillStyle = tier === 4 ? '#ff5a5a' : pole; g.beginPath(); g.arc(x, y - H, tier === 4 ? 3 : 2.3, 0, 7); g.fill(); g.stroke();
+        }
+        g.restore();
+    };
+
     const getSprite = (type, tier, variant = 0) => {
         const key = `${view.name}|${type}|${tier}|${variant}`;
         let sp = sprites.get(key);
         if (sp) return sp;
         const painter = painters[type];
         const size = K.data.BLD[type].size;
-        sp = buildSprite((g, geo) => painter(g, geo, tier, variant), size, { up: painters[type].up, tier });
+        const D = K.data.BLD[type];
+        sp = buildSprite((g, geo) => { painter(g, geo, tier, variant); if (type !== 'townhall' && type !== 'wall' && !D.decor) flourish(g, geo, tier, size); }, size, { up: painters[type].up, tier });
         sp.type = type; sp.tier = tier;
         sprites.set(key, sp);
         return sp;

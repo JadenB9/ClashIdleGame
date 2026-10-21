@@ -656,7 +656,7 @@
                 settings: {
                     sound: !this.audio.muted, autoCollect: this.autoCollect, notation: K.data.state.notation,
                     view: this.settings.view, xray: this.settings.xray, autoUpgrade: this.settings.autoUpgrade,
-                    levelTags: this.settings.levelTags, hints: this.settings.hints, difficulty: this.settings.difficulty,
+                    levelTags: this.settings.levelTags, hints: this.settings.hints, spacing: this.settings.spacing, difficulty: this.settings.difficulty,
                 },
                 meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen, pending: this.pendingBoon, reignCrowns: this.reignCrowns, sides: this.wave.active ? this.wave.sides : this.wave.nextSides },
                 quests: this.quests.map(q => ({ kind: q.kind, target: q.target, start: q.start, gems: q.gems, done: !!q.done })),
@@ -757,7 +757,7 @@
             this.achievements = {};
             this.crowns = 0; this.crownsEver = 0; this.perks = {}; for (const k in PERKS) this.perks[k] = 0; this.ascensions = 0;
             this.reignCrowns = 1; this.pendingBoon = false;
-            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, difficulty: 'normal' };
+            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, spacing: true, difficulty: 'normal' };
             this.boons = {}; this.tut = { step: 0, done: false }; this.tipsSeen = {};
             this.quests = [];
             this.wave.number = 0; this.wave.timer = 120; this.wave.active = false;
@@ -800,6 +800,7 @@
             this.settings.autoUpgrade = ['off', 'economy', 'defense', 'all'].includes(s.autoUpgrade) ? s.autoUpgrade : 'off';
             this.settings.levelTags = s.levelTags === 'hover' ? 'hover' : 'always';
             this.settings.hints = s.hints !== false;
+            this.settings.spacing = s.spacing !== false;
             this.settings.difficulty = Object.hasOwn(K.data.DIFFICULTY, s.difficulty) ? s.difficulty : 'normal';
 
             const m = d.meta || {};

@@ -113,6 +113,7 @@
             click('btnShortcuts', () => this.showShortcuts());
             click('btnXray', () => { this.settings.xray = !this.settings.xray; this.syncSettingsUI(); this.save(); });
             click('btnHints', () => { this.settings.hints = !this.settings.hints; this.syncSettingsUI(); this.save(); });
+            click('btnSpacing', () => { this.settings.spacing = !this.settings.spacing; this.syncSettingsUI(); this.save(); this.toast(this.settings.spacing ? 'New buildings keep one empty tile between them' : 'Buildings can be placed side by side', 'success'); });
             document.querySelectorAll('#notationSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.setNotation(b.dataset.notation); }));
             document.querySelectorAll('#viewSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.changeView(b.dataset.view); }));
             document.querySelectorAll('#tagsSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.settings.levelTags = b.dataset.tags; this.syncSettingsUI(); this.save(); }));
@@ -752,7 +753,7 @@
             document.querySelectorAll('#tagsSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tags === S.levelTags)));
             document.querySelectorAll('#autoUpSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.autoup === S.autoUpgrade)));
             const set = (id, on) => { const e = $(id); if (e) { e.textContent = on ? 'On' : 'Off'; e.setAttribute('aria-pressed', String(on)); } };
-            set('btnXray', S.xray); set('btnHints', S.hints);
+            set('btnXray', S.xray); set('btnHints', S.hints); set('btnSpacing', S.spacing);
             document.querySelectorAll('#diffSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.diff === S.difficulty)));
         }
         toggleAutoCollect() { this.autoCollect = !this.autoCollect; this.syncToggles(); this.toast(this.autoCollect ? 'Auto-collect on' : 'Auto-collect off', 'success'); }
@@ -901,7 +902,7 @@
             this.openPlainModal(`<h2 id="modalTitle">${def.name}</h2><div class="subtitle">${def.desc}</div>
                 <div class="modal-pic"><img alt="" src="${this.thumbURL(b.type)}" width="96" height="96"></div>
                 <div class="stat-grid">${stats.map(([l, v]) => `<div class="stat-box"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('')}</div>
-                ${def.maxLevel > 1 ? `<div class="modal-hint">Appearance changes at levels ${[1, 2, 3, 4].map(t => Math.ceil((t - 1) * def.maxLevel / 4) + 1).join(', ')} (now look ${tier} of 4).</div>` : ''}`);
+                ${def.maxLevel > 1 ? `<div class="modal-hint">Appearance changes at levels ${[1, ...U.tierLevels(b.type)].join(', ')} (now look ${tier} of 4).</div>` : ''}`);
             this.modalBuilding = b;
         }
 
