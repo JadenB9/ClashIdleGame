@@ -104,6 +104,8 @@
             click('actWarCry', () => this.activateWarCry());
             click('actCancel', () => this.cancelModes());
             click('btnSpeed', () => this.cycleSpeed());
+            click('btnStartRaid', () => this.callRaid());
+            click('btnRaidMode', () => this.toggleRaidMode());
             click('zoomIn', () => this.zoomBy(1.2, this.vw / 2, this.vh / 2));
             click('zoomOut', () => this.zoomBy(1 / 1.2, this.vw / 2, this.vh / 2));
             click('zoomReset', () => { this.cam.zoom = this.homeZoom(); this.centerCamera(); });
@@ -390,9 +392,17 @@
                 setText(el.waveTimer, `${left} left`); el.waveTimer.classList.add('danger');
                 setText(el.waveInfo, `Wave ${this.wave.number} · ${this.sideNames(this.wave.sides)}`);
             } else {
-                setText(el.waveTimer, fmtTime(this.wave.timer));
-                el.waveTimer.classList.toggle('danger', this.wave.timer < 10);
+                const manual = this.settings.raidStart === 'manual';
+                setText(el.waveTimer, manual ? 'Ready' : fmtTime(this.wave.timer));
+                el.waveTimer.classList.toggle('danger', !manual && this.wave.timer < 10);
                 setText(el.waveInfo, `Next ${this.wave.number + 1} · ${this.sideNames(this.wave.nextSides)}`);
+            }
+            const ra = $('waveActions');
+            if (ra) {
+                ra.hidden = this.wave.active;
+                const manual = this.settings.raidStart === 'manual';
+                const rm = $('btnRaidMode'); setText(rm, manual ? 'Manual' : 'Auto'); rm.classList.toggle('on', manual); rm.setAttribute('aria-pressed', String(manual));
+                setText($('btnStartRaid'), manual ? 'Start raid' : 'Start now');
             }
             const counts = {};
             const src = this.wave.active ? this.enemies.map(e => e.kind).concat(this.wave.queue.slice(this.wave.total - this.wave.spawnLeft)) : this.wave.next;
@@ -825,7 +835,7 @@
                 ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
                 ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Walls and decorations can be painted by dragging. The <b>Town Hall</b> level limits how many of each you can have and how high they upgrade.')}
                 ${row('move', 'Move and swap', 'Select a building, then drag it. Drop it on empty grass to move it, or on another building to swap places.')}
-                ${row('sword', 'Defend', 'Raiders arrive when the raid timer (top left) runs out. Red arrows show which side they come from. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
+                ${row('sword', 'Defend', 'Raiders arrive when the raid timer (top left) runs out. Press <b>Start now</b> to call them early, or switch the timer to <b>Manual</b> so they wait for you. Red arrows show which side they come from. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
                 ${row('star', 'Boons', 'After every raid you pick one of three rewards. They stack and last until you ascend.')}
                 ${row('gem', 'Gems', `Spend them on <b>Boost</b> (double income, ${CFG.boostCost} gems), <b>Lightning</b> (1) and <b>Freeze</b> (${CFG.freezeCost}). Earn them from waves, quests and goblins.`)}
                 ${row('crown', 'Ascend', `From wave ${CFG.ascendMinWave}, Ascend in the Kingdom tab: the kingdom restarts and you keep crowns that buy permanent perks.`)}`);
@@ -869,7 +879,7 @@
             this.pauseForModal();
             const rows = [
                 [['Space'], 'Collect every ready coin bubble'], [['F'], 'Freeze all raiders'], [['U'], 'Upgrade the selected building (or the cheapest one)'],
-                [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
+                [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3 / x5'], [['N'], 'Start the next raid now'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
                 [['A'], 'Auto-collect on / off'], [['R'], 'Rally defenses'], [['M'], 'Sound on / off'], [['T'], 'Light / dark theme'],
                 [['V'], 'Cycle the camera angle'], [['1', '2', '3', '4', '5'], 'Build · Upgrade · Kingdom · Co-op · Menu'],
                 [['+', '−'], 'Zoom'], [['0'], 'Back to the Town Hall'], [['Esc'], 'Cancel, deselect, close'],

@@ -728,3 +728,11 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
 .btn.th-locked { flex: 1 1 100%; justify-content: center; opacity: 0.8; filter: grayscale(0.4); }
 .build-card.full:not(.locked) .thumb { filter: grayscale(0.5); }
 .build-card.full .count { background: #5a2a2a; }
+
+/* raid start: call it now, or switch between automatic and manual */
+.wave-actions { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.wave-actions .btn.small { padding: 4px 10px; font-size: 13px; }
+.chip-btn { font: 12px var(--font-display); letter-spacing: 0.4px; padding: 4px 9px; border-radius: 10px; color: var(--hud-text); background: rgba(0,0,0,0.28); border: 1.5px solid rgba(255,255,255,0.2); }
+.chip-btn.on { color: #4a2800; background: linear-gradient(180deg, var(--gold-a), var(--gold-b)); border-color: var(--gold-edge); }
+.chip-btn:hover { filter: brightness(1.15); }
+@media (max-width: 560px) { .wave-actions .btn.small { padding: 3px 7px; font-size: 12px; } .chip-btn { padding: 3px 7px; font-size: 11px; } }

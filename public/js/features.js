@@ -149,7 +149,7 @@
         sideNames(sides) { return (sides || []).map(s => ['NE', 'SE', 'SW', 'NW'][s]).join('+'); }
         // Red markers: on the map near the edge, or pinned to the screen border when that edge is out of view
         drawRaidSides(g) {
-            const show = this.wave.active || this.wave.timer < 25;
+            const show = this.wave.active || this.wave.timer < 25 || this.settings.raidStart === 'manual';
             const sides = this.wave.active ? this.wave.sides : this.wave.nextSides;
             if (!show || !sides || !sides.length || this.gameOverShown) return;
             const gw = CFG.gridW, gh = CFG.gridH, t = this.tnow;

@@ -8,6 +8,7 @@
     'use strict';
     const { CFG, VIEWS, BLD, ENEMY, waveTable, PERKS, QUEST_KINDS, ACHS, DIFFICULTY, BOONS, scaledCost, levelCap, countCap, thForCount, thForLevel } = K.data;
     const U = K.util;
+    const SPEEDS = [1, 2, 3, 5];
     const { rand, randi, clamp, fmt, safeNum, compact, alive, tierOf, resColor } = U;
     const A = K.art;
     const TAU = Math.PI * 2;
@@ -152,7 +153,7 @@
             this.tipsSeen = {};
             this.opened = {};                         // panels the player has looked at (tutorial)
             this.weather = { rain: 0, target: 0, timer: rand(150, 300) };
-            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, spacing: true, difficulty: 'normal' };
+            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, spacing: true, raidStart: 'auto', difficulty: 'normal' };
             this.speed = 1;
 
             this.cam = { x: 0, y: 0, zoom: 1 };
@@ -624,6 +625,7 @@
             else if (k === 't' || k === 'T') this.setTheme(this.isLight() ? 'dark' : 'light');
             else if (k === 'u' || k === 'U') { if (this.selected) this.upgradeBuilding(this.selected); else this.upgradeCheapest(); }
             else if (k === 'x' || k === 'X') this.cycleSpeed();
+            else if (k === 'n' || k === 'N') this.callRaid();
             else if (k === 'v' || k === 'V') { const n = Object.keys(VIEWS); this.changeView(n[(n.indexOf(this.settings.view) + 1) % n.length]); }
             else if (k === '?' || k === 'h' || k === 'H') this.showHelp();
             else if (k >= '1' && k <= '5') this.openPanel(['build', 'upgrade', 'kingdom', 'coop', 'menu'][k - 1]);
@@ -932,6 +934,17 @@
             return q;
         }
 
+        // call the next raid now (also works with the countdown running)
+        callRaid() {
+            if (this.wave.active || this.gameOverShown || this.welcomeOpen || this.boonOpen || this.paused) return;
+            this.audio.click();
+            this.startWave();
+        }
+        toggleRaidMode() {
+            this.settings.raidStart = this.settings.raidStart === 'manual' ? 'auto' : 'manual';
+            this.syncToggles(); this.updateUI(); this.save();
+            this.toast(this.settings.raidStart === 'manual' ? 'Raids wait until you press Start raid' : 'Raids start on their own when the timer ends', 'success');
+        }
         startWave() {
             this.wave.number++;
             this.wave.active = true;
@@ -1467,7 +1480,7 @@
             this.toast(this.paused ? 'Paused' : 'Resumed', 'warn');
         }
         cycleSpeed() {
-            this.speed = this.speed >= 3 ? 1 : this.speed + 1;
+            this.speed = SPEEDS[(SPEEDS.indexOf(this.speed) + 1) % SPEEDS.length];
             this.syncToggles();
             this.toast(`Game speed x${this.speed}`, 'success');
         }
@@ -1715,8 +1728,11 @@
                     this._boonTimer = setTimeout(() => this.offerPendingBoon(), 1100);
                 }
             } else {
-                this.wave.timer -= dt;
-                if (this.wave.timer <= 0) this.startWave();
+                // in manual mode the raid waits until the player calls it
+                if (this.settings.raidStart !== 'manual') {
+                    this.wave.timer -= dt;
+                    if (this.wave.timer <= 0) this.startWave();
+                }
             }
 
             this.defenseTick(dt);
