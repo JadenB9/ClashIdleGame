@@ -1979,18 +1979,54 @@
             g.restore();
         }
 
+        // The build grid, shown whenever something is being placed or carried. It darkens the lawn a little, checkers the
+        // 3x3 blocks so the building cells read at a glance, lays a dark underline beneath bright lines (so they show on light
+        // and dark grass), makes every 3rd line heavy, and marks the ground that is already taken.
         drawGrid(g) {
-            const gw = CFG.gridW, gh = CFG.gridH;
+            const gw = CFG.gridW, gh = CFG.gridH, z = this.cam.zoom, px = 1 / z;
             g.save();
-            g.lineWidth = 1 / this.cam.zoom;
+            this.tilePoly(g, 0, 0, gw); g.fillStyle = 'rgba(6,22,10,0.14)'; g.fill();
+            const fine = clamp((z - 0.8) / 1.2, 0, 1);              // the single-tile lines fade out when zoomed out; the 3x3 block lines always stay
+            g.fillStyle = 'rgba(255,255,255,0.06)';
+            g.beginPath();
+            for (let by = 0; by < gh / S; by++) for (let bx = 0; bx < gw / S; bx++) {
+                if ((bx + by) & 1) continue;
+                const a = this.worldIso(bx * S, by * S), b = this.worldIso((bx + 1) * S, by * S), c = this.worldIso((bx + 1) * S, (by + 1) * S), d = this.worldIso(bx * S, (by + 1) * S);
+                g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.closePath();
+            }
+            g.fill();
+            // what is already standing there
+            const carried = new Set(this.gmove ? this.group : (this.moveMode ? [this.moveMode] : []));
+            for (const b of this.buildings) {
+                if (carried.has(b) || BLD[b.type].decor && false) continue;
+                this.tilePoly(g, b.tx, b.ty, BLD[b.type].size);
+                g.fillStyle = 'rgba(30,14,0,0.26)'; g.fill();
+                g.strokeStyle = 'rgba(255,238,190,0.7)'; g.lineWidth = 1.4 * px; g.stroke();
+            }
+            // lines: dark underline first, then bright; every third is a building edge
             for (const major of [false, true]) {
-                g.strokeStyle = major ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.12)';
-                g.beginPath();
-                for (let i = 0; i <= gw; i++) { if ((i % S === 0) !== major) continue; const a = this.worldIso(i, 0), b = this.worldIso(i, gh); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
-                for (let j = 0; j <= gh; j++) { if ((j % S === 0) !== major) continue; const a = this.worldIso(0, j), b = this.worldIso(gw, j); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
-                g.stroke();
+                const path = () => {
+                    g.beginPath();
+                    for (let i = 0; i <= gw; i++) { if ((i % S === 0) !== major) continue; const a = this.worldIso(i, 0), b = this.worldIso(i, gh); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
+                    for (let j = 0; j <= gh; j++) { if ((j % S === 0) !== major) continue; const a = this.worldIso(0, j), b = this.worldIso(gw, j); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
+                };
+                path(); g.strokeStyle = major ? 'rgba(0,0,0,0.42)' : `rgba(0,0,0,${0.08 + 0.12 * fine})`; g.lineWidth = (major ? 3.4 : 2.2) * px; g.stroke();
+                path(); g.strokeStyle = major ? 'rgba(255,255,255,0.85)' : `rgba(255,255,255,${0.1 + 0.2 * fine})`; g.lineWidth = (major ? 1.8 : 0.8) * px; g.stroke();
             }
             g.restore();
+        }
+        // the footprint of something about to land: a tile-by-tile fill under the picture, then (after it) one strong outline
+        ghostFill(g, tx, ty, size, tileOk, ok) {
+            for (let dy = 0; dy < size; dy++) for (let dx = 0; dx < size; dx++) {
+                this.tilePoly(g, tx + dx, ty + dy);
+                g.fillStyle = tileOk(tx + dx, ty + dy) ? ok : 'rgba(255,70,70,0.62)'; g.fill();
+            }
+        }
+        ghostEdge(g, tx, ty, size, edge) {
+            this.tilePoly(g, tx, ty, size);
+            g.lineJoin = 'round';
+            g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 6 / this.cam.zoom; g.stroke();
+            g.strokeStyle = edge; g.lineWidth = 3.2 / this.cam.zoom; g.stroke();
         }
 
         // ---------- the row tool: pick buildings by dragging along a row, a column or a box ----------
@@ -2160,6 +2196,7 @@
                     const moved = this.group.slice().sort((a, b) => (a.tx + a.ty) - (b.tx + b.ty));
                     for (const b of moved) { this.tilePoly(g, b.tx + off.dx, b.ty + off.dy, BLD[b.type].size); g.fillStyle = fill; g.fill(); g.strokeStyle = edge; g.lineWidth = 1.4; g.stroke(); }
                     if (moved.length <= 40) for (const b of moved) { const s = BLD[b.type].size, c = this.worldIso(b.tx + off.dx + s / 2, b.ty + off.dy + s / 2); A.drawSprite(g, this.spriteOf(b), c.x, c.y, ok ? 0.75 : 0.4, false); }
+                    for (const b of moved) { this.tilePoly(g, b.tx + off.dx, b.ty + off.dy, BLD[b.type].size); g.strokeStyle = edge; g.lineWidth = 2.4 / this.cam.zoom; g.stroke(); }
                 }
             }
         }
@@ -2182,13 +2219,8 @@
             const { tx, ty } = this.hoverTile;
             const placeable = this.canBuildHere(this.buildMode, tx, ty);
             const ok = placeable && this.canAfford(this.buildCost(this.buildMode));
-            const col = ok ? '107,255,149' : '255,93,93';
-            for (let dy = 0; dy < def.size; dy++) for (let dx = 0; dx < def.size; dx++) {
-                const free = !this.cell(tx + dx, ty + dy) && tx + dx < CFG.gridW && ty + dy < CFG.gridH && tx + dx >= 0 && ty + dy >= 0;
-                this.tilePoly(g, tx + dx, ty + dy);
-                g.fillStyle = free ? `rgba(${col},0.35)` : 'rgba(255,93,93,0.45)'; g.fill();
-                g.strokeStyle = free ? `rgba(${col},0.95)` : 'rgba(255,93,93,0.95)'; g.lineWidth = 2; g.stroke();
-            }
+            const inside = (x, y) => x >= 0 && y >= 0 && x < CFG.gridW && y < CFG.gridH && !this.cell(x, y);
+            this.ghostFill(g, tx, ty, def.size, inside, ok ? 'rgba(107,255,149,0.42)' : 'rgba(255,190,90,0.4)');
             if (placeable) {
                 const sp = A.getSprite(this.buildMode, 1, this.buildMode === 'wall' ? 0 : 0);
                 const c = this.worldIso(tx + def.size / 2, ty + def.size / 2);
@@ -2196,6 +2228,7 @@
                 const r = def.defense ? def.defense(1).range : 0;
                 if (r) this.rangeRing(g, c.x, c.y, r, ok ? 'rgba(255,224,130,0.9)' : 'rgba(255,120,120,0.8)');
             }
+            this.ghostEdge(g, tx, ty, def.size, ok ? '#7dffa0' : '#ff6a6a');
         }
         drawMoveGhost(g) {
             const m = this.moveMode, def = BLD[m.type];
@@ -2207,18 +2240,11 @@
             const pulse = 0.5 + 0.5 * Math.sin(this.tnow * 6);
             const fill = swap ? `rgba(255,208,80,${0.25 + pulse * 0.2})` : ok ? `rgba(92,216,255,${0.25 + pulse * 0.2})` : 'rgba(255,93,93,0.45)';
             const edge = swap ? '#ffd050' : ok ? '#5cd8ff' : '#ff5d5d';
-            for (let dy = 0; dy < def.size; dy++) for (let dx = 0; dx < def.size; dx++) {
-                this.tilePoly(g, tx + dx, ty + dy);
-                g.fillStyle = fill; g.fill();
-                g.strokeStyle = edge; g.lineWidth = 2.5; g.stroke();
-            }
+            this.ghostFill(g, tx, ty, def.size, () => ok, fill);
             if (swap) {
                 // outline where the other building will end up
-                const od = BLD[other.type];
-                for (let dy = 0; dy < od.size; dy++) for (let dx = 0; dx < od.size; dx++) {
-                    this.tilePoly(g, m.tx + dx, m.ty + dy);
-                    g.strokeStyle = '#ffd050'; g.lineWidth = 2; g.setLineDash([5, 4]); g.stroke(); g.setLineDash([]);
-                }
+                this.tilePoly(g, m.tx, m.ty, BLD[other.type].size);
+                g.strokeStyle = '#ffd050'; g.lineWidth = 2.5 / this.cam.zoom; g.setLineDash([6, 4]); g.stroke(); g.setLineDash([]);
             }
             if (free) {
                 const sp = this.spriteOf(m);
@@ -2226,6 +2252,7 @@
                 A.drawSprite(g, sp, c.x, c.y, 0.8, false);
                 if (def.defense) this.rangeRing(g, c.x, c.y, def.defense(m.level).range, 'rgba(255,224,130,0.9)');
             }
+            this.ghostEdge(g, tx, ty, def.size, edge);
         }
         drawSpellGhost(g) {
             const c = this.screenToTile(this.input.x, this.input.y);
