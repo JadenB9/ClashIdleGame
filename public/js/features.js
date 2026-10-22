@@ -7,7 +7,7 @@
     'use strict';
     const { CFG, BLD, BOONS, ENEMY } = K.data;
     const U = K.util;
-    const { rand, randi, fmt } = U;
+    const { rand, randi, fmt, clamp } = U;
     const A = K.art;
     const TAU = Math.PI * 2;
 
@@ -87,7 +87,7 @@
             if (this.wave.number >= 2 && !this.wave.active && this.buildings.filter(b => BLD[b.type].defense).length < 3) this.tip('defense', 'Raids grow every wave. Build more towers in the Build tab.');
             if (this.enemies.some(e => e.flying) && !this.buildings.some(b => ['airdef', 'archer', 'wizard', 'tesla', 'xbow', 'frost', 'inferno', 'clancastle'].includes(b.type))) this.tip('air', 'Flying raiders! Cannons and mortars cannot hit them. Build an Archer Tower or Air Defense.');
             if (this.enemies.some(e => e.boss)) this.tip('boss', 'A Stone Golem! It is slow but huge. Focus fire and use Lightning or War Cry.');
-            if (!this.wave.active && this.buildings.some(b => !BLD[b.type].decor && b.hp < b.maxHp * 0.4)) this.tip('hurt', 'Buildings are damaged. Press Rally (R) to repair everything.');
+            if (!this.wave.active && this.buildings.some(b => !BLD[b.type].decor && b.hp < b.maxHp * 0.4)) this.tip('hurt', 'Buildings are damaged. Rally (R) heals some; Repair (K) fixes everything for gems or from the repair fund.');
             if (this.res.gems >= 8 && this.stats.spells === 0 && this.boost.timeLeft <= 0) this.tip('gems', 'You have gems! Boost doubles income for a minute. Lightning and Freeze stop raiders.');
         }
 
@@ -153,7 +153,7 @@
             const sides = this.wave.active ? this.wave.sides : this.wave.nextSides;
             if (!show || !sides || !sides.length || this.gameOverShown) return;
             const gw = CFG.gridW, gh = CFG.gridH, t = this.tnow;
-            const spots = [[gw / 2, -1.4], [gw + 1.4, gh / 2], [gw / 2, gh + 1.4], [-1.4, gh / 2]];
+            const k = CFG.tileDiv, spots = [[gw / 2, -1.4 * k], [gw + 1.4 * k, gh / 2], [gw / 2, gh + 1.4 * k], [-1.4 * k, gh / 2]];
             const c = this.worldIso(gw / 2, gh / 2);
             const cs = { x: this.cam.x + c.x * this.cam.zoom, y: this.cam.y + c.y * this.cam.zoom };
             const m = 46, top = this.vw < 900 ? 250 : 108, bot = this.vh - 100;
@@ -191,6 +191,60 @@
             this.audio.spell();
             this.toast(`Froze ${this.enemies.length} raider${this.enemies.length > 1 ? 's' : ''} for 4 seconds`, 'success');
             this.updateUI(); this.checkAchievements();
+        }
+
+        // ---------- repairs ----------
+        // Full repair of a building costs a share of its base price, growing with its level.
+        // Gems fix everything at once; the fund takes gold in over time and pays for the lot the moment it covers the damage.
+        repairBase(b) { return Math.max(40, (BLD[b.type].baseCost.gold || 800) * CFG.repairGoldPerFrac * (1 + 0.2 * (b.level - 1))); }
+        repairCost() {
+            let gold = 0, n = 0, max = 0;
+            for (const b of this.buildings) {
+                if (BLD[b.type].decor) continue;
+                const base = this.repairBase(b), miss = 1 - b.hp / b.maxHp;
+                max += base;
+                if (miss > 0.002) { gold += miss * base; n++; }
+            }
+            return { gold: Math.ceil(gold), n, max: Math.ceil(max), gems: n ? clamp(Math.ceil(gold / CFG.repairGemGold), 1, CFG.repairGemMax) : 0 };
+        }
+        healEverything() {
+            let shown = 0;
+            for (const b of this.buildings) {
+                if (BLD[b.type].decor || b.hp >= b.maxHp) continue;
+                b.hp = b.maxHp;
+                if (shown++ < 24 && this.particles.length < 380) { const p = this.centerOf(b); this.particles.push({ x: p.x, y: p.y - 16, vx: rand(-14, 14), vy: -rand(30, 70), life: 0.9, max: 0.9, color: '#7adf6a', size: 5, kind: 'spark' }); }
+            }
+            this.audio.upgrade();
+        }
+        repairWithGems() {
+            const c = this.repairCost();
+            if (!c.n) { this.toast('Nothing needs repairing', 'warn'); return; }
+            if (this.res.gems < c.gems) { this.audio.error(); this.toast(`Repairing everything costs ${c.gems} gem${c.gems === 1 ? '' : 's'}`, 'warn'); return; }
+            this.res.gems -= c.gems;
+            this.healEverything();
+            this.toast(`Repaired ${c.n} building${c.n === 1 ? '' : 's'} for ${c.gems} gem${c.gems === 1 ? '' : 's'}`, 'success');
+            this.updateUI();
+        }
+        contributeRepair(amount) {
+            const c = this.repairCost();
+            const room = Math.max(0, c.max - this.repairFund);
+            const put = Math.floor(Math.min(amount, this.res.gold, room));
+            if (put <= 0) { this.audio.error(); this.toast(room <= 0 ? 'The repair fund is full' : 'Not enough gold', 'warn'); return; }
+            this.res.gold -= put; this.repairFund += put;
+            this.audio.coin();
+            if (!this.applyRepairFund()) this.toast(`+${fmt(put)} gold in the repair fund`, 'success');
+            this.updateUI();
+        }
+        // pays for a full repair as soon as the fund covers it (not while raiders are still on the field)
+        applyRepairFund() {
+            if (this.repairFund <= 0 || this.enemies.length) return false;
+            const c = this.repairCost();
+            if (!c.n || this.repairFund < c.gold) return false;
+            this.repairFund -= c.gold;
+            this.healEverything();
+            this.toast(`The repair fund fixed ${c.n} building${c.n === 1 ? '' : 's'} (${fmt(c.gold)} gold)`, 'success');
+            this.updateUI();
+            return true;
         }
 
         // ---------- weather ----------
@@ -249,7 +303,7 @@
         // Smoke and then flames on hurt buildings; a slow golden shine on maxed ones.
         drawBuildingFx(g, b, sp, c, t) {
             const def = BLD[b.type];
-            if (def.decor) return;
+            if (def.decor || b.type === 'wall') return;       // hundreds of walls: no smoke plumes
             const f = b.hp / b.maxHp;
             const top = c.y + sp.bbox.y0 + 14, cx = c.x + (sp.bbox.x0 + sp.bbox.x1) / 2 * 0.4;
             const seed = b.tx * 5 + b.ty * 3;

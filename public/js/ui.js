@@ -43,6 +43,7 @@
                 dotUp: $('dotUpgrade'), dotKing: $('dotKingdom'),
                 alert: $('alertPanel'), veil: $('pauseVeil'), speedTag: $('speedTag'),
                 goal: $('goalCard'), hint: $('modeHint'), collect: $('actCollect'), collectDot: $('collectDot'), freeze: $('actFreeze'),
+                repair: $('actRepair'), repairDot: $('repairDot'),
             };
             this.panel = null;
             this.buildCat = 'economy';
@@ -96,6 +97,9 @@
             click('actBoost', () => this.activateBoost());
             click('actSpell', () => this.beginSpell());
             click('actFreeze', () => this.castFreeze());
+            click('actRepair', () => this.openRepair());
+            click('btnRest', () => this.toggleRest());
+            click('btnEraser', () => this.toggleEraser());
             click('btnMenu', () => { this.audio.click(); this.openPanel('menu', true); });
             this.buildMenuHelp();
             const home = $('homeLink'); if (home && /(^|\.)j4den\.com$/.test(location.hostname)) home.hidden = false;
@@ -105,7 +109,6 @@
             click('actCancel', () => this.cancelModes());
             click('btnSpeed', () => this.cycleSpeed());
             click('btnStartRaid', () => this.callRaid());
-            click('btnRaidMode', () => this.toggleRaidMode());
             click('zoomIn', () => this.zoomBy(1.2, this.vw / 2, this.vh / 2));
             click('zoomOut', () => this.zoomBy(1 / 1.2, this.vw / 2, this.vh / 2));
             click('zoomReset', () => { this.cam.zoom = this.homeZoom(); this.centerCamera(); });
@@ -115,7 +118,6 @@
             click('btnShortcuts', () => this.showShortcuts());
             click('btnXray', () => { this.settings.xray = !this.settings.xray; this.syncSettingsUI(); this.save(); });
             click('btnHints', () => { this.settings.hints = !this.settings.hints; this.syncSettingsUI(); this.save(); });
-            click('btnSpacing', () => { this.settings.spacing = !this.settings.spacing; this.syncSettingsUI(); this.save(); this.toast(this.settings.spacing ? 'New buildings keep one empty tile between them' : 'Buildings can be placed side by side', 'success'); });
             document.querySelectorAll('#notationSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.setNotation(b.dataset.notation); }));
             document.querySelectorAll('#viewSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.changeView(b.dataset.view); }));
             document.querySelectorAll('#tagsSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.settings.levelTags = b.dataset.tags; this.syncSettingsUI(); this.save(); }));
@@ -242,13 +244,14 @@
             }
             this.buildMode = type;
             this.moveMode = null; this.spellMode = false;
+            if (type) { this.eraseMode = false; this.eraseSel = null; }
             if (type) this.deselect();
             this.updateCanvasCursor();
             this.buildMenu();
         }
 
         updateCanvasCursor() {
-            const busy = !!(this.buildMode || this.moveMode || this.spellMode);
+            const busy = !!(this.buildMode || this.moveMode || this.spellMode || this.eraseMode);
             this.canvas.classList.toggle('building', busy);
             this.canvas.classList.toggle('pointing', !busy && !!this.hoverBuilding);
             this.el.cancel.hidden = !busy;
@@ -261,7 +264,7 @@
             const sp = A.getSprite(type, 1, 0); A.maskOf(sp);
             const S = 96, cv = A.mk(S, S), g = cv.getContext('2d');
             const bb = sp.bbox, w = bb.x1 - bb.x0, h = bb.y1 - bb.y0;
-            const k = Math.min((S - 8) / w, (S - 8) / h, 1.6);
+            const k = Math.min((S - 8) / w, (S - 8) / h, type === 'wall' ? 3.4 : 1.6);
             g.translate(S / 2, S / 2); g.scale(k, k);
             g.translate(-(bb.x0 + bb.x1) / 2, -(bb.y0 + bb.y1) / 2);
             g.drawImage(sp.canvas, -sp.ox, -sp.oy, sp.canvas.width / A.SS, sp.canvas.height / A.SS);
@@ -389,19 +392,20 @@
             // raid card
             if (this.wave.active) {
                 const left = this.enemies.length + this.wave.spawnLeft;
-                setText(el.waveTimer, `${left} left`); el.waveTimer.classList.add('danger');
+                setText(el.waveTimer, `${left} left`); el.waveTimer.classList.add('danger'); el.waveTimer.classList.remove('rest');
                 setText(el.waveInfo, `Wave ${this.wave.number} · ${this.sideNames(this.wave.sides)}`);
             } else {
                 const manual = this.settings.raidStart === 'manual';
-                setText(el.waveTimer, manual ? 'Ready' : fmtTime(this.wave.timer));
+                setText(el.waveTimer, manual ? 'Resting' : fmtTime(this.wave.timer));
                 el.waveTimer.classList.toggle('danger', !manual && this.wave.timer < 10);
-                setText(el.waveInfo, `Next ${this.wave.number + 1} · ${this.sideNames(this.wave.nextSides)}`);
+                el.waveTimer.classList.toggle('rest', manual);
+                setText(el.waveInfo, manual ? `Rest · collectors ${Math.round(CFG.restRate * 100)}%` : `Next ${this.wave.number + 1} · ${this.sideNames(this.wave.nextSides)}`);
             }
             const ra = $('waveActions');
             if (ra) {
                 ra.hidden = this.wave.active;
                 const manual = this.settings.raidStart === 'manual';
-                const rm = $('btnRaidMode'); setText(rm, manual ? 'Manual' : 'Auto'); rm.classList.toggle('on', manual); rm.setAttribute('aria-pressed', String(manual));
+                const rm = $('btnRest'); setText(rm, manual ? 'Resting' : 'Rest'); rm.classList.toggle('on', manual); rm.setAttribute('aria-pressed', String(manual));
                 setText($('btnStartRaid'), manual ? 'Start raid' : 'Start now');
             }
             const counts = {};
@@ -443,6 +447,10 @@
             el.collect.classList.toggle('glow', ready > 0);
             if (el.collectDot._n !== ready) { el.collectDot._n = ready; el.collectDot.textContent = String(ready); el.collectDot.hidden = ready === 0; }
             el.freeze.classList.toggle('dim', this.res.gems < CFG.freezeCost || this.enemies.length === 0);
+            const rc = this.repairCost();
+            if (el.repairDot._n !== rc.n) { el.repairDot._n = rc.n; el.repairDot.textContent = String(rc.n); el.repairDot.hidden = rc.n === 0; }
+            el.repair.classList.toggle('glow', rc.n > 0 && !this.wave.active);
+            if (this.repairOpen) this.renderRepair(rc);
             this.renderGoal();
 
             this.updateSelectionLive();
@@ -513,6 +521,7 @@
                     ${next && capped ? `<button class="btn upgrade th-locked" type="button" data-act="upgrade" id="selUpLock">${ico('lock')}Needs Town Hall ${thForLevel(b.type, b.level + 1)}</button>` : ''}
                     ${next && !capped ? `<button class="btn good upgrade" type="button" data-act="upgrade" id="selUp"><span class="up-label">${ico('up')}Upgrade</span><span class="up-cost" id="selUpCost">${this.upgradeChips(b)}</span></button>
                     <button class="btn small" type="button" data-act="max" title="Keep upgrading until you run out of money">Max</button>` : ''}
+                    ${b.type === 'wall' ? `<button class="btn small" type="button" data-act="erase" title="Select and remove whole rows of walls">Rows…</button>` : ''}
                     ${canMove ? `<button class="btn small" type="button" data-act="move" title="Move this building" aria-label="Move">${ico('move')}</button>` : ''}
                     <button class="btn small" type="button" data-act="info" title="Details" aria-label="Details">${ico('info')}</button>
                     ${canMove ? `<button class="btn small danger" type="button" data-act="sell" title="Sell (50% back)" aria-label="Sell">${ico('trash')}</button>` : ''}
@@ -557,6 +566,7 @@
             else if (act === 'upgrade') this.upgradeBuilding(b);
             else if (act === 'max') this.upgradeMax(b);
             else if (act === 'move') this.startMove(b);
+            else if (act === 'erase') { this.toggleEraser(); }
             else if (act === 'info') this.openBuildingModal(b);
             else if (act === 'sell') this.confirmSell(b);
         }
@@ -763,7 +773,7 @@
             document.querySelectorAll('#tagsSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tags === S.levelTags)));
             document.querySelectorAll('#autoUpSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.autoup === S.autoUpgrade)));
             const set = (id, on) => { const e = $(id); if (e) { e.textContent = on ? 'On' : 'Off'; e.setAttribute('aria-pressed', String(on)); } };
-            set('btnXray', S.xray); set('btnHints', S.hints); set('btnSpacing', S.spacing);
+            set('btnXray', S.xray); set('btnHints', S.hints);
             document.querySelectorAll('#diffSeg .seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.diff === S.difficulty)));
         }
         toggleAutoCollect() { this.autoCollect = !this.autoCollect; this.syncToggles(); this.toast(this.autoCollect ? 'Auto-collect on' : 'Auto-collect off', 'success'); }
@@ -791,7 +801,7 @@
             if (this.boonOpen) return;
             if (!modal.classList.contains('open')) return;
             modal.classList.remove('open');
-            this.modalBuilding = null;
+            this.modalBuilding = null; this.repairOpen = false;
             if (this._modalPaused) { this._modalPaused = false; this.paused = false; this.lastTime = performance.now(); this.syncToggles(); }
             if (this._modalReturnFocus && document.contains(this._modalReturnFocus)) this._modalReturnFocus.focus();
             this._modalReturnFocus = null;
@@ -818,7 +828,8 @@
         updateHint() {
             const h = this.el.hint;
             let text = '';
-            if (this.buildMode) { const d = BLD[this.buildMode]; text = `Tap the grass to place the ${d.name}.${d.drag ? ' Drag to paint a line.' : ''} Esc cancels.`; }
+            if (this.eraseMode) text = 'Wall eraser: drag along a row or column of walls, then let go. Hold Shift for a box. Esc stops.';
+            else if (this.buildMode) { const d = BLD[this.buildMode]; text = `Tap the grass to place the ${d.name}.${d.drag ? ' Drag to paint a line.' : ''} Esc cancels.`; }
             else if (this.moveMode) text = `Drop the ${BLD[this.moveMode.type].name} on an empty tile to move it, or on another building to swap places. Esc cancels.`;
             else if (this.spellMode) text = 'Tap the map to call down lightning. Esc cancels.';
             h.hidden = !text;
@@ -833,12 +844,47 @@
             setHtml(host, `
                 ${row('sack', 'Collect', 'Mines and wells fill a coin bubble every few seconds. Tap it for a bonus. Tap several quickly for a combo. The <b>Collect</b> button (or Space) grabs every ready bubble.')}
                 ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
-                ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Walls and decorations can be painted by dragging. The <b>Town Hall</b> level limits how many of each you can have and how high they upgrade.')}
+                ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Buildings are 3x3 tiles, the Town Hall 4x4, walls 1x1, and they can touch. Walls and decorations can be painted by dragging. The <b>Town Hall</b> level limits how many of each you can have and how high they upgrade.')}
+                ${row('trash', 'Wall eraser', 'Press <b>E</b> (or <b>Rows…</b> on a selected wall), then drag along a row or column of walls to select it and let go to remove it. Hold Shift to drag a box.')}
                 ${row('move', 'Move and swap', 'Select a building, then drag it. Drop it on empty grass to move it, or on another building to swap places.')}
-                ${row('sword', 'Defend', 'Raiders arrive when the raid timer (top left) runs out. Press <b>Start now</b> to call them early, or switch the timer to <b>Manual</b> so they wait for you. Red arrows show which side they come from. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
+                ${row('sword', 'Defend', 'Raiders arrive when the raid timer (top left) runs out. Press <b>Start now</b> to call them early, or hit <b>Rest</b> to hold raids back while you build: nothing attacks, but your collectors only run at half speed until you call the next raid. Red arrows show which side they come from. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
+                ${row('heart', 'Repair', 'Damaged buildings smoke and burn. <b>Repair</b> (K) fixes everything for a few gems, or you can feed gold into the <b>repair fund</b>: the moment it covers the damage, everything is mended. Upgrading a building also heals it fully.')}
                 ${row('star', 'Boons', 'After every raid you pick one of three rewards. They stack and last until you ascend.')}
                 ${row('gem', 'Gems', `Spend them on <b>Boost</b> (double income, ${CFG.boostCost} gems), <b>Lightning</b> (1) and <b>Freeze</b> (${CFG.freezeCost}). Earn them from waves, quests and goblins.`)}
                 ${row('crown', 'Ascend', `From wave ${CFG.ascendMinWave}, Ascend in the Kingdom tab: the kingdom restarts and you keep crowns that buy permanent perks.`)}`);
+        }
+
+        // ---------- repairs ----------
+        openRepair() {
+            if (this.gameOverShown || this.welcomeOpen || this.boonOpen) return;
+            this.repairOpen = true;
+            this.openPlainModal('<div id="repairBody" class="repair-card"></div>');
+            this.el.modalBody.onclick = (e) => {
+                const b = e.target.closest('[data-rep]'); if (!b) return;
+                this.audio.click();
+                const a = b.dataset.rep;
+                if (a === 'gems') this.repairWithGems();
+                else if (a === 'all') this.contributeRepair(this.res.gold);
+                else this.contributeRepair(Number(a));
+                this.renderRepair();
+            };
+            this.renderRepair();
+        }
+        renderRepair(c = this.repairCost()) {
+            const body = $('repairBody'); if (!body) return;
+            const f = Math.min(1, c.gold ? this.repairFund / c.gold : (c.max ? this.repairFund / c.max : 0));
+            const pct = (f * 100).toFixed(1);
+            const need = c.n ? `${c.n} building${c.n === 1 ? ' is' : 's are'} damaged. A full repair is <b>${fmt(c.gold)} gold</b>.` : 'Everything is in good shape.';
+            const step = Math.max(50, Math.round((c.gold || c.max) / 10 / 50) * 50);
+            const wait = this.enemies.length ? ' The fund pays out when the raiders are gone.' : '';
+            const html = `<h2 id="modalTitle">Repair</h2>
+                <div class="subtitle">${need}</div>
+                <div class="rep-row"><span>Repair everything now</span><button type="button" class="btn ${c.n && this.res.gems >= c.gems ? 'good' : ''}" data-rep="gems" ${c.n ? '' : 'disabled'}>${ico('gem')}${c.n ? c.gems : 0} gem${c.gems === 1 ? '' : 's'}</button></div>
+                <div><div class="rep-row"><b>Repair fund</b><span>${fmt(this.repairFund)} gold saved</span></div>
+                <div class="bar"><span data-w="${pct}"></span><em>${c.n ? `${fmt(Math.min(this.repairFund, c.gold))} / ${fmt(c.gold)}` : `${fmt(this.repairFund)} saved for next time`}</em></div></div>
+                <div class="rep-btns"><button type="button" class="btn small" data-rep="${step}">+${fmt(step)}</button><button type="button" class="btn small" data-rep="${step * 5}">+${fmt(step * 5)}</button><button type="button" class="btn small gold" data-rep="all">All my gold</button></div>
+                <p class="hint">Put gold into the fund as you like. The moment it covers the damage, every building is mended, and anything left over stays saved.${wait} Upgrading a building also heals it completely.</p>`;
+            if (setHtml(body, html)) fixBars(body);
         }
 
         // ---------- wave boons ----------
@@ -879,7 +925,7 @@
             this.pauseForModal();
             const rows = [
                 [['Space'], 'Collect every ready coin bubble'], [['F'], 'Freeze all raiders'], [['U'], 'Upgrade the selected building (or the cheapest one)'],
-                [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3 / x5'], [['N'], 'Start the next raid now'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
+                [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3 / x5'], [['N'], 'Start the next raid now'], [['Z'], 'Rest between raids (raids wait, collectors at half rate)'], [['K'], 'Repair everything'], [['E'], 'Wall eraser: drag along a row of walls'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
                 [['A'], 'Auto-collect on / off'], [['R'], 'Rally defenses'], [['M'], 'Sound on / off'], [['T'], 'Light / dark theme'],
                 [['V'], 'Cycle the camera angle'], [['1', '2', '3', '4', '5'], 'Build · Upgrade · Kingdom · Co-op · Menu'],
                 [['+', '−'], 'Zoom'], [['0'], 'Back to the Town Hall'], [['Esc'], 'Cancel, deselect, close'],
@@ -912,7 +958,7 @@
             this.openPlainModal(`<h2 id="modalTitle">${def.name}</h2><div class="subtitle">${def.desc}</div>
                 <div class="modal-pic"><img alt="" src="${this.thumbURL(b.type)}" width="96" height="96"></div>
                 <div class="stat-grid">${stats.map(([l, v]) => `<div class="stat-box"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('')}</div>
-                ${def.maxLevel > 1 ? `<div class="modal-hint">Appearance changes at levels ${[1, ...U.tierLevels(b.type)].join(', ')} (now look ${tier} of 4).</div>` : ''}`);
+                ${def.maxLevel > 1 ? `<div class="modal-hint">Appearance changes at levels ${[1, ...U.tierLevels(b.type)].join(', ')} (now look ${tier} of ${U.tierCount(b.type)}).</div>` : ''}`);
             this.modalBuilding = b;
         }
 

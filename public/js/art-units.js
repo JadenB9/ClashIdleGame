@@ -96,6 +96,12 @@
             g.fillStyle = p.helm; g.strokeStyle = 'rgba(10,10,14,0.85)'; g.lineWidth = 1;
             g.beginPath(); g.ellipse(0, hy - 1, hr + 0.6, hr, 0, Math.PI, 0); g.closePath(); g.fill(); g.stroke();
         }
+        if (p.hat) {                 // wizard or witch: wide brim and a pointed, slightly bent cone
+            g.fillStyle = p.hat; g.strokeStyle = 'rgba(10,6,20,0.9)'; g.lineWidth = 0.9;
+            g.beginPath(); g.ellipse(0, hy - hr * 0.55, hr * 1.5, hr * 0.42, 0, 0, TAU); g.fill(); g.stroke();
+            g.beginPath(); g.moveTo(-hr * 0.9, hy - hr * 0.6); g.quadraticCurveTo(-hr * 0.2, hy - hr * 2.2, hr * 0.5 + (p.hatBend || 0), hy - hr * 3.1); g.quadraticCurveTo(hr * 0.5, hy - hr * 1.8, hr * 0.9, hy - hr * 0.6); g.closePath(); g.fill(); g.stroke();
+            g.fillStyle = p.hatBand || '#e8c35a'; g.fillRect(-hr * 0.8, hy - hr * 1.02, hr * 1.6, hr * 0.28);
+        }
         // face (toward +x)
         if (p.skull) {
             g.fillStyle = '#16120e';
@@ -124,6 +130,13 @@
         else if (wp === 'club') { limb(g, -1, 0, 9, 0, 2.4, '#7a5230'); blob(g, 11, 0, 4.2, 3.4, '#8a6238'); }
         else if (wp === 'spiked') { limb(g, -1, 0, 10, 0, 2.6, '#6a4424'); blob(g, 12, 0, 4.6, 3.8, '#6a4424'); g.fillStyle = '#c8ccd8'; for (let i = 0; i < 5; i++) { const a = i / 5 * TAU; g.beginPath(); g.moveTo(12 + Math.cos(a) * 4, Math.sin(a) * 3.4); g.lineTo(12 + Math.cos(a) * 7, Math.sin(a) * 6); g.lineTo(12 + Math.cos(a + 0.4) * 4, Math.sin(a + 0.4) * 3.4); g.fill(); } }
         else if (wp === 'trunk') { limb(g, -2, 0, 12, 0, 4.4, '#6a4a2a'); blob(g, 13, 0, 5.4, 4.6, '#7a5632'); }
+        else if (wp === 'sword') { limb(g, 0, 0, p.bigSword ? 13 : 9, 0, p.bigSword ? 2.6 : 1.8, '#d8dcea'); limb(g, 0, 0, 1.2, 0, 4.4, '#8a6a2a'); }
+        else if (wp === 'staff') { limb(g, -2, 0, 10, 0, 1.6, '#6a4a2a'); const pu = 0.5 + 0.5 * Math.sin(ph * 2); g.fillStyle = p.orb || '#7ad8ff'; g.beginPath(); g.arc(11.5, 0, 2.4 + pu * 0.6, 0, TAU); g.fill(); g.strokeStyle = 'rgba(10,10,20,0.8)'; g.lineWidth = 0.7; g.stroke(); }
+        else if (wp === 'bomb') {
+            blob(g, 5, 0, 4.2, 4.2, '#1c1c24', 'rgba(0,0,0,0.9)');
+            g.strokeStyle = '#c8b890'; g.lineWidth = 1; g.beginPath(); g.moveTo(5, -4); g.quadraticCurveTo(7, -7, 9, -6); g.stroke();
+            g.fillStyle = (ph * 4 | 0) % 2 ? '#ffd84a' : '#ff6a2a'; g.beginPath(); g.arc(9, -6, 1.5, 0, TAU); g.fill();
+        }
         else if (wp === 'bow') {
             g.strokeStyle = '#6a4a2a'; g.lineWidth = 1.6; g.beginPath(); g.arc(3, 0, 6.4, -Math.PI / 2, Math.PI / 2); g.stroke();
             g.strokeStyle = '#d8d0b8'; g.lineWidth = 0.7; g.beginPath(); g.moveTo(3, -6.4); g.lineTo(3 - atk * 0 - 1.4, 0); g.lineTo(3, 6.4); g.stroke();
@@ -227,7 +240,61 @@
         g.restore();
     };
 
+    // Hog Rider: a charging boar with a mohawked rider. Runs on the wolf's stride.
+    const hog = (g, e, ph, atk) => {
+        const s = e.size / 14;
+        g.save(); g.scale(s, s);
+        const sw = Math.sin(ph * 1.5) * 4, bob = Math.abs(Math.sin(ph * 1.5)) * 1.4;
+        const fur = '#b07a68';
+        limb(g, -7, -6, -7 - sw, 0, 3.4, shade(fur, 0.7)); limb(g, 8, -6, 8 + sw, 0, 3.4, shade(fur, 0.7));
+        g.save(); g.translate(0, -bob);
+        blob(g, 0, -9, 14, 7, fur);
+        blob(g, 2, -8, 9, 4.4, shade(fur, 1.18), null);
+        limb(g, -6, -5, -6 + sw, 0.5, 3.6, fur); limb(g, 10, -5, 10 - sw, 0.5, 3.6, fur);
+        blob(g, 15, -10, 6.4, 5.6, fur);
+        blob(g, 20.4, -8.6, 4, 3.2, shade(fur, 1.25));
+        g.fillStyle = '#2a1a1a'; g.beginPath(); g.arc(22, -9, 0.9, 0, TAU); g.arc(22.6, -7.4, 0.9, 0, TAU); g.fill();
+        g.fillStyle = '#f4efe0'; g.beginPath(); g.moveTo(18, -6.4); g.lineTo(20.6, -3.2); g.lineTo(21, -6.4); g.fill();
+        g.fillStyle = '#ffcc40'; g.beginPath(); g.arc(16, -12, 1.2, 0, TAU); g.fill();
+        g.strokeStyle = '#4a3030'; g.lineWidth = 2.4; g.lineCap = 'round'; g.beginPath(); g.moveTo(-14, -11); g.quadraticCurveTo(-18, -13, -17, -8); g.stroke();
+        // the rider
+        g.save(); g.translate(1, -13); g.scale(0.78, 0.78);
+        humanoid(g, { s: 1, skin: '#e8b890', cloth: '#7a2a2a', pants: '#3a2a20', head: 5.2, bulk: 4.6, weapon: 'club', belt: '#2a1c10', hair: '#3a78d8', armor: '#c8a040' }, ph * 0.4, atk);
+        g.restore();
+        g.restore();
+        g.restore();
+    };
+
+    // Balloon: a striped envelope with a basket of bombs
+    const balloon = (g, e, ph, atk) => {
+        const s = e.size / 17, sway = Math.sin(ph * 0.8) * 1.2;
+        g.save(); g.scale(s, s); g.translate(sway, 0);
+        g.strokeStyle = '#6a4a2a'; g.lineWidth = 0.9;
+        for (const dx of [-6, -2, 2, 6]) { g.beginPath(); g.moveTo(dx * 0.9, -17); g.lineTo(dx * 0.35, -4); g.stroke(); }
+        const env = g.createRadialGradient(-6, -34, 2, 0, -28, 22);
+        env.addColorStop(0, '#ff9a7a'); env.addColorStop(0.55, '#d8382e'); env.addColorStop(1, '#7a1612');
+        g.fillStyle = env; g.strokeStyle = 'rgba(30,6,6,0.9)'; g.lineWidth = 1.1;
+        g.beginPath(); g.moveTo(-3, -17); g.bezierCurveTo(-24, -22, -22, -48, 0, -50); g.bezierCurveTo(22, -48, 24, -22, 3, -17); g.closePath(); g.fill(); g.stroke();
+        g.save(); g.clip();
+        g.strokeStyle = 'rgba(255,230,160,0.8)'; g.lineWidth = 2.2;
+        for (const dx of [-12, -4, 4, 12]) { g.beginPath(); g.moveTo(dx * 0.35, -17); g.quadraticCurveTo(dx * 1.7, -32, dx * 0.6, -50); g.stroke(); }
+        g.restore();
+        g.fillStyle = '#7a5230'; g.strokeStyle = '#2a1a0c'; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(-5, -5); g.lineTo(5, -5); g.lineTo(4, 1.5); g.lineTo(-4, 1.5); g.closePath(); g.fill(); g.stroke();
+        blob(g, -1.2, -7, 2.4, 2.4, '#1c1c24', 'rgba(0,0,0,0.9)'); blob(g, 2.2, -6.6, 1.9, 1.9, '#1c1c24', 'rgba(0,0,0,0.9)');
+        if (atk > 0.2) { g.fillStyle = 'rgba(255,170,40,0.7)'; g.beginPath(); g.arc(0, 6 + (1 - atk) * 8, 3 + atk * 2, 0, TAU); g.fill(); }
+        g.restore();
+    };
+
     const KINDS = {
+        barbarian:{ s: 1.0, skin: '#f0c8a0', cloth: '#a8782e', pants: '#5a3e24', head: 5.4, bulk: 4.8, hair: '#f2d24a', weapon: 'sword', belt: '#2a1c10' },
+        archer:   { s: 0.95, skin: '#f0c8a0', cloth: '#3a8a4a', pants: '#5a3a2a', head: 5.2, bulk: 3.8, hair: '#ff7aa8', weapon: 'bow', belt: '#2a1c10' },
+        giant:    { s: 1.5, skin: '#e0b088', cloth: '#8a4a2a', pants: '#4a3020', head: 5.8, bulk: 8, belly: true, hair: '#7a4a1a', weapon: 'club', armW: 4.4, legW: 4.8, belt: '#2a1c10' },
+        wallbreaker: { s: 0.9, skin: '#e8e0c8', cloth: '#d8d0b8', pants: '#e0d8c0', head: 5.2, bulk: 3.6, skull: true, ribs: true, weapon: 'bomb', legW: 2, armW: 2, boots: '#bdb49a' },
+        wizard:   { s: 1.0, skin: '#f0c8a0', cloth: '#3a5ad0', pants: '#2a3a8a', head: 5.2, bulk: 4, weapon: 'staff', hat: '#2f4ab8', orb: '#ff9a4a', belt: '#e8c35a' },
+        witch:    { s: 1.05, skin: '#b8c8d0', cloth: '#5a2a6a', pants: '#3a1a48', head: 5.2, bulk: 4.2, weapon: 'staff', hat: '#4a2060', hatBand: '#9a5ad0', hatBend: 1.6, orb: '#b070ff', belt: '#9a5ad0' },
+        minion:   { s: 0.75, skin: '#e8e0c8', cloth: '#cfc6ac', pants: '#d8d0b8', head: 5.2, bulk: 3.2, skull: true, ribs: true, weapon: 'dagger', legW: 2, armW: 2, boots: '#bdb49a' },
+        pekka:    { s: 1.7, skin: '#5a6070', cloth: '#2a2e48', pants: '#2a2e48', head: 6, bulk: 8.6, armor: '#6a7088', helm: '#4a5068', horns: true, weapon: 'sword', bigSword: true, eyeCol: '#8ae0ff', legW: 4.6, armW: 4.4, belt: '#1a1a28' },
         goblin:   { s: 0.9, skin: '#7fb23a', cloth: '#6a4a2a', pants: '#4a3a24', head: 5.4, bulk: 4.4, ears: 5, weapon: 'dagger', belt: '#2a1c10' },
         orc:      { s: 1.15, skin: '#6a8a52', cloth: '#5a4a3a', pants: '#3a3028', head: 5.6, bulk: 6, armor: '#6a6e7a', weapon: 'club', tusks: true, belt: '#2a1c10', hair: '#222' },
         skeleton: { s: 1.0, skin: '#e8e0c8', cloth: '#d8d0b8', pants: '#e0d8c0', head: 5.2, bulk: 3.6, skull: true, ribs: true, weapon: 'bow', legW: 2, armW: 2, boots: '#bdb49a' },
@@ -256,6 +323,8 @@
         else if (e.kind === 'golem') golem(g, e, ph, atk);
         else if (e.kind === 'bat') bat(g, e, ph);
         else if (e.kind === 'dragon') dragon(g, e, ph, atk);
+        else if (e.kind === 'hogrider') hog(g, e, ph, atk);
+        else if (e.kind === 'balloon') balloon(g, e, ph, atk);
         else humanoid(g, KINDS[e.kind], ph, atk);
         if (e.slow > 0) {         // frost tint
             g.fillStyle = 'rgba(150,220,255,0.28)';
@@ -506,6 +575,20 @@
                 case 'smoke': smokePuffs(g, ax, ay, t, seed, a.green); break;
                 case 'steam': smokePuffs(g, ax, ay, t * 1.6, seed + 2, false); break;
                 case 'fire': flame(g, ax, ay, a.s || 1, t, seed); break;
+                case 'crown': {          // a ring of light turning over a fully evolved building
+                    g.save(); g.globalCompositeOperation = 'lighter';
+                    const spr = glowSprite('#ffd86a');
+                    g.globalAlpha = 0.5 + 0.2 * Math.sin(t * 2 + seed);
+                    g.drawImage(spr, ax - a.r * 1.6, ay - a.r * 1.1, a.r * 3.2, a.r * 2.2);
+                    g.globalAlpha = 1;
+                    for (let i = 0; i < 5; i++) {
+                        const ang = t * 1.3 + i / 5 * TAU, px = ax + Math.cos(ang) * a.r * 1.5, py = ay + Math.sin(ang) * a.r * 0.45;
+                        g.fillStyle = i % 2 ? '#fff0b0' : '#ffd34a';
+                        g.beginPath(); g.moveTo(px, py - 3); g.lineTo(px + 1.7, py); g.lineTo(px, py + 3); g.lineTo(px - 1.7, py); g.closePath(); g.fill();
+                    }
+                    g.restore();
+                    break;
+                }
                 case 'sparkle': {
                     const k = (Math.sin(t * 3 + seed * 5 + a.x * 0.7) + 1) / 2;
                     if (k > 0.82) {

@@ -11,6 +11,7 @@
     const { mk, rng, hash2, makeFbm, T, SS, box, shade } = Object.assign({}, A, { shade: U.shade });
     const { leafBlob } = A.h;
 
+    const TD = CFG.tileDiv;               // tiles per old building tile: ground art is laid out in old units and scaled by this
     const G = 2;                          // island bake resolution
     const world = { ready: false };
 
@@ -100,7 +101,7 @@
 
     const patternIso = (g, tex, tilesAcross) => {
         const pat = g.createPattern(tex, 'repeat');
-        const k = tilesAcross / 2 / tex.width;
+        const k = tilesAcross * TD / 2 / tex.width;
         if (pat.setTransform) pat.setTransform(new DOMMatrix([k * CFG.tileW, k * CFG.tileH, -k * CFG.tileW, k * CFG.tileH, 0, 0]));
         return pat;
     };
@@ -183,6 +184,7 @@
     // ---------- build ----------
     world.build = () => {
         const gw = CFG.gridW, gh = CFG.gridH, tw = CFG.tileW, th = CFG.tileH;
+        const btw = tw * TD, bth = th * TD;                 // the width of one building-sized block
         const cliff = 36;
         const N = iso(0, 0), E = iso(gw, 0), S = iso(gw, gh), W = iso(0, gh);
         // island bake
@@ -220,7 +222,7 @@
             [[12, 12], [15, 11], [19, 8], [24.5, 6]],
             [[12, 12], [14, 15], [18, 17], [24.5, 18]],
             [[12, 12], [9, 10], [6, 6], [1, -0.5]],
-        ];
+        ].map(rd => rd.map(([a, b]) => [a * TD, b * TD]));
         const dirt = patternIso(g, dirtTex(), 4);
         const road = (w, style, off) => {
             g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = w; g.strokeStyle = style;
@@ -234,9 +236,9 @@
         road(26, 'rgba(120,200,70,0.4)', 0);
         road(23, dirt, 0);
         // flagstone plaza around the Town Hall
-        g.beginPath(); { const c = iso(12, 12); g.ellipse(c.x, c.y, tw * 1.25, th * 1.25, 0, 0, 7); }
+        g.beginPath(); { const c = iso(12 * TD, 12 * TD); g.ellipse(c.x, c.y, btw * 1.25, bth * 1.25, 0, 0, 7); }
         g.fillStyle = 'rgba(30,60,20,0.3)'; g.fill();
-        g.beginPath(); { const c = iso(12, 12); g.ellipse(c.x, c.y, tw * 1.15, th * 1.15, 0, 0, 7); }
+        g.beginPath(); { const c = iso(12 * TD, 12 * TD); g.ellipse(c.x, c.y, btw * 1.15, bth * 1.15, 0, 0, 7); }
         g.fillStyle = patternIso(g, T.stone(128, 128, '#a89c84', { rows: 9, aspect: 1.1, seed: 19 }), 5); g.fill();
         g.strokeStyle = 'rgba(40,30,20,0.4)'; g.lineWidth = 1.2; g.stroke();
         // scattered detail: flowers, pebbles, tufts, mushrooms
@@ -284,10 +286,10 @@
         };
         const fb = makeFbm(222, 3, 4);
         const items = [];
-        const m = 26;
+        const m = 26 * TD;
         for (let i = 0; i < 1900 && items.length < 720; i++) {
             const tx = -m + hash2(i, 5) * (gw + 2 * m), ty = -m + hash2(i, 9) * (gh + 2 * m);
-            if (tx > -2.5 && tx < gw + 2.5 && ty > -2.5 && ty < gh + 2.5) continue;
+            if (tx > -2.5 * TD && tx < gw + 2.5 * TD && ty > -2.5 * TD && ty < gh + 2.5 * TD) continue;
             const dens = fb((tx + m) / (gw + 2 * m), (ty + m) / (gh + 2 * m));
             const k = hash2(i, 13);
             let spr;
@@ -301,9 +303,9 @@
             items.push({ spr, x: p.x, y: p.y, depth: tx + ty, flip: hash2(i, 3) < 0.5 });
         }
         // two lakes
-        const l1 = iso(gw + 12, -6), l2 = iso(-10, gh + 9);
-        items.push({ spr: world.sprites.lakes[0], x: l1.x, y: l1.y, depth: gw + 12 - 6 - 40, lake: true, shadowless: true });
-        items.push({ spr: world.sprites.lakes[1], x: l2.x, y: l2.y, depth: -10 + gh + 9 - 40, lake: true, shadowless: true });
+        const l1 = iso(gw + 12 * TD, -6 * TD), l2 = iso(-10 * TD, gh + 9 * TD);
+        items.push({ spr: world.sprites.lakes[0], x: l1.x, y: l1.y, depth: gw + 6 * TD - 40 * TD, lake: true, shadowless: true });
+        items.push({ spr: world.sprites.lakes[1], x: l2.x, y: l2.y, depth: gh - TD - 40 * TD, lake: true, shadowless: true });
         items.sort((a, b) => a.depth - b.depth);
         world.scenery = items;
         world.ready = true;

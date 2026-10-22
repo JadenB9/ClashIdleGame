@@ -730,6 +730,15 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
 .build-card.full .count { background: #5a2a2a; }
 
 /* raid start: call it now, or switch between automatic and manual */
+.tool-row { display: flex; align-items: center; gap: 10px; margin: 10px 0 2px; font-size: 13px; color: var(--muted, #9aa6c4); }
+.tool-row .btn svg { width: 15px; height: 15px; margin-right: 5px; vertical-align: -3px; }
+.wave-timer.rest { font-size: 0.78em; color: #9ad8ff; }
+.repair-card { display: grid; gap: 12px; }
+.repair-card .rep-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.repair-card .bar { position: relative; height: 22px; border-radius: 11px; overflow: hidden; background: rgba(0,0,0,0.35); border: 1.5px solid rgba(255,255,255,0.18); }
+.repair-card .bar > span { display: block; height: 100%; background: linear-gradient(180deg, #8cf07a, #2ea03a); }
+.repair-card .bar > em { position: absolute; inset: 0; display: grid; place-items: center; font: 12px var(--font-display); font-style: normal; text-shadow: 0 1px 0 rgba(0,0,0,0.6); }
+.repair-card .rep-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .wave-actions { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
 .wave-actions .btn.small { padding: 4px 10px; font-size: 13px; }
 .chip-btn { font: 12px var(--font-display); letter-spacing: 0.4px; padding: 4px 9px; border-radius: 10px; color: var(--hud-text); background: rgba(0,0,0,0.28); border: 1.5px solid rgba(255,255,255,0.2); }

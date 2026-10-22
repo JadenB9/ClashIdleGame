@@ -9,7 +9,8 @@
     const { CFG, VIEWS, BLD, ENEMY, waveTable, PERKS, QUEST_KINDS, ACHS, DIFFICULTY, BOONS, scaledCost, levelCap, countCap, thForCount, thForLevel } = K.data;
     const U = K.util;
     const SPEEDS = [1, 2, 3, 5];
-    const { rand, randi, clamp, fmt, safeNum, compact, alive, tierOf, resColor } = U;
+    const { rand, randi, clamp, fmt, safeNum, compact, alive, tierOf, tierCount, resColor } = U;
+    const S = CFG.tileDiv;                  // tiles per old building tile (3): ranges, speeds and radii in data.js are written in the old unit
     const A = K.art;
     const TAU = Math.PI * 2;
 
@@ -80,42 +81,14 @@
         error()  { this.beep(160, 0.14, 'square', 0.3, 0.7); }
     }
 
-    // ---------- tiny binary heap for the flow fields ----------
-    class Heap {
-        constructor() { this.k = []; this.v = []; }
-        get size() { return this.k.length; }
-        push(key, val) {
-            const k = this.k, v = this.v;
-            let i = k.length; k.push(key); v.push(val);
-            while (i > 0) {
-                const p = (i - 1) >> 1;
-                if (k[p] <= k[i]) break;
-                [k[p], k[i]] = [k[i], k[p]]; [v[p], v[i]] = [v[i], v[p]]; i = p;
-            }
-        }
-        pop() {
-            const k = this.k, v = this.v;
-            const rk = k[0], rv = v[0];
-            const lk = k.pop(), lv = v.pop();
-            if (k.length) {
-                k[0] = lk; v[0] = lv;
-                let i = 0;
-                for (;;) {
-                    const l = i * 2 + 1, r = l + 1;
-                    let m = i;
-                    if (l < k.length && k[l] < k[m]) m = l;
-                    if (r < k.length && k[r] < k[m]) m = r;
-                    if (m === i) break;
-                    [k[m], k[i]] = [k[i], k[m]]; [v[m], v[i]] = [v[i], v[m]]; i = m;
-                }
-            }
-            return { key: rk, val: rv };
-        }
-    }
-
+    // seconds between blows; anything not listed swings every 1.1s
+    const ATTACK_CD = { golem: 1.6, pekka: 1.7, giant: 1.4, wizard: 1.9, witch: 1.6, balloon: 2.0, archer: 1.2, hogrider: 0.9, minion: 0.9 };
     const GROUND_ONLY = new Set(['cannon', 'mortar']);
     const AIR_ONLY = new Set(['airdef']);
-    const MARGIN = 5;                       // free tiles around the grid that raiders may walk on
+    const MARGIN = 5 * S;                   // free tiles around the grid that raiders may walk on
+    const COST_WALL = 6 * S, COST_BLDG = 12;   // walking cost per tile: chewing through a wall, or through a building
+    const TIER_COL = ['#c98a52', '#d5dde6', '#ffd34a', '#ff6fb1', '#9af0ff', '#ff9a4a'];
+    const TIER_GLOW = [null, null, '#ffd86a', '#ff6a8a', '#ffd86a', '#ff8a3a'];   // ground aura for the upper looks
     const easeOutBack = (t) => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 
     // ---------- MAIN GAME ----------
@@ -153,8 +126,10 @@
             this.tipsSeen = {};
             this.opened = {};                         // panels the player has looked at (tutorial)
             this.weather = { rain: 0, target: 0, timer: rand(150, 300) };
-            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, spacing: true, raidStart: 'auto', difficulty: 'normal' };
+            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, raidStart: 'auto', difficulty: 'normal' };
             this.speed = 1;
+            this.repairFund = 0;                       // gold set aside; repairs everything once it covers the damage
+            this.eraseMode = false; this.eraseSel = null; this.eraseShape = 'line';
 
             this.cam = { x: 0, y: 0, zoom: 1 };
             this.input = { x: 0, y: 0, down: false, drag: false, downX: 0, downY: 0, lastX: 0, lastY: 0, downTarget: null, touch: false, paint: false, lastPaint: null, lastTapT: 0, lastTapB: null };
@@ -337,18 +312,7 @@
             }
             return true;
         }
-        // "Breathing room": a new building keeps one empty tile away from other buildings (walls and decorations do not count)
-        spacedOK(type, tx, ty, ignore = null, ignore2 = null) {
-            if (!this.settings.spacing) return true;
-            const def = BLD[type];
-            if (def.decor || type === 'wall') return true;
-            for (let y = ty - 1; y <= ty + def.size; y++) for (let x = tx - 1; x <= tx + def.size; x++) {
-                const o = this.cell(x, y);
-                if (o && o !== ignore && o !== ignore2 && o.type !== 'wall' && !BLD[o.type].decor) return false;
-            }
-            return true;
-        }
-        canBuildHere(type, tx, ty, ignore = null, ignore2 = null) { return this.canPlace(type, tx, ty, ignore, ignore2) && this.spacedOK(type, tx, ty, ignore, ignore2); }
+        canBuildHere(type, tx, ty, ignore = null, ignore2 = null) { return this.canPlace(type, tx, ty, ignore, ignore2); }
         // the one other building a footprint would land on, if there is exactly one (the swap partner)
         swapPartner(mb, tx, ty) {
             if (this.occDirty) this.rebuildOcc();
@@ -485,14 +449,20 @@
                 const w = this.screenToWorld(x, y), g = this.goblin;
                 return Math.hypot(w.x - g.x, w.y - (g.y - 14)) <= (this.input.touch ? 34 : 24);
             };
+            // walk every tile between the last sample and this one so a quick drag never leaves gaps
             const paintAt = (x, y) => {
                 const t = this.screenToTile(x, y);
                 const L = this.input.lastPaint;
                 if (L && L.tx === t.tx && L.ty === t.ty) return;
                 this.input.lastPaint = { tx: t.tx, ty: t.ty };
-                if (!this.buildMode || !this.canBuildHere(this.buildMode, t.tx, t.ty)) return;
-                if (!this.canAfford(this.buildCost(this.buildMode))) { if (!this.input.paintWarned) { this.input.paintWarned = true; this.audio.error(); this.toast('Not enough resources to keep painting', 'warn'); } return; }
-                this.placeBuilding(this.buildMode, t.tx, t.ty, true);
+                if (!this.buildMode) return;
+                for (const p of this.lineTiles(L || t, t)) {
+                    if (!this.buildMode) return;
+                    if (L && p.tx === L.tx && p.ty === L.ty) continue;
+                    if (!this.canBuildHere(this.buildMode, p.tx, p.ty)) continue;
+                    if (!this.canAfford(this.buildCost(this.buildMode))) { if (!this.input.paintWarned) { this.input.paintWarned = true; this.audio.error(); this.toast('Not enough resources to keep painting', 'warn'); } return; }
+                    this.placeBuilding(this.buildMode, p.tx, p.ty, true);
+                }
             };
 
             const onDown = (e, touch) => {
@@ -500,11 +470,12 @@
                 const p = getPos(e);
                 const I = this.input;
                 I.touch = !!touch; I.paintWarned = false;
-                I.down = true; I.drag = false; I.dragMove = false; I.paint = false; I.lastPaint = null;
+                I.down = true; I.drag = false; I.dragMove = false; I.paint = false; I.erase = false; I.lastPaint = null;
                 I.downX = I.lastX = I.x = p.x; I.downY = I.lastY = I.y = p.y;
                 I.shift = !!e.shiftKey;
                 this.audio.ensure();
                 I.downTarget = null;
+                if (this.eraseMode) { const t = this.screenToTile(p.x, p.y); I.erase = true; this.eraseSel = { a: { tx: t.tx, ty: t.ty }, b: { tx: t.tx, ty: t.ty }, box: !!e.shiftKey }; this.updateHover(); return; }
                 if (this.buildMode && BLD[this.buildMode].drag) { I.paint = true; this.updateHover(); paintAt(p.x, p.y); return; }
                 if (this.buildMode || this.spellMode || this.moveMode) return;
                 if (goblinAt(p.x, p.y)) { I.downTarget = 'goblin'; return; }
@@ -522,6 +493,7 @@
                 if (I.down) {
                     const dist = Math.hypot(p.x - I.downX, p.y - I.downY);
                     if (I.paint) { this.updateHover(); paintAt(p.x, p.y); return; }
+                    if (I.erase && this.eraseSel) { const t = this.screenToTile(p.x, p.y); this.eraseSel.b = { tx: t.tx, ty: t.ty }; this.updateHover(); return; }
                     if (!I.drag && dist > DRAG) {
                         I.drag = true;
                         // Dragging the building you already selected picks it up; anything else pans
@@ -540,10 +512,11 @@
                 const I = this.input;
                 if (I.down) {
                     if (I.paint) { /* tiles were placed as the finger moved */ }
+                    else if (I.erase) this.commitErase();
                     else if (I.dragMove) this.commitMove();
                     else if (!I.drag) this.handleTap(I.x, I.y, I.shift);
                 }
-                I.down = false; I.drag = false; I.dragMove = false; I.paint = false; I.downBuilding = null; I.downTarget = null;
+                I.down = false; I.drag = false; I.dragMove = false; I.paint = false; I.erase = false; I.downBuilding = null; I.downTarget = null;
             };
 
             c.addEventListener('mousedown', (e) => onDown(e, false));
@@ -561,7 +534,7 @@
                 e.preventDefault();
                 if (e.touches.length === 2) {
                     if (this.input.dragMove) { this.moveMode = null; this.updateCanvasCursor(); }
-                    this.input.down = this.input.drag = this.input.dragMove = this.input.paint = false;
+                    this.input.down = this.input.drag = this.input.dragMove = this.input.paint = this.input.erase = false; this.eraseSel = null;
                     pinch = tinfo(e).dist; return;
                 }
                 if (e.touches.length === 1) onDown(e, true);
@@ -576,7 +549,7 @@
 
             c.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                if (this.buildMode || this.moveMode || this.spellMode) { this.cancelModes(); return; }
+                if (this.buildMode || this.moveMode || this.spellMode || this.eraseMode) { this.cancelModes(); return; }
                 const r = c.getBoundingClientRect();
                 const b = this.buildingAtScreen(e.clientX - r.left, e.clientY - r.top);
                 if (b) this.selectBuilding(b);
@@ -591,7 +564,7 @@
         }
 
         cancelModes() {
-            this.setBuildMode(null); this.moveMode = null; this.spellMode = false;
+            this.setBuildMode(null); this.moveMode = null; this.spellMode = false; this.eraseMode = false; this.eraseSel = null;
             this.updateCanvasCursor();
         }
 
@@ -603,9 +576,9 @@
             if (dialogOpen && e.key !== 'Escape') return;
             if (this.welcomeOpen) return;
             const k = e.key;
-            if (e.repeat && 'frwulp x'.includes(k.toLowerCase()) && k !== 'Escape') return;
+            if (e.repeat && 'frwulp xekz'.includes(k.toLowerCase()) && k !== 'Escape') return;
             if (k === 'Escape') {
-                if (this.buildMode || this.moveMode || this.spellMode) this.cancelModes();
+                if (this.buildMode || this.moveMode || this.spellMode || this.eraseMode) this.cancelModes();
                 else if (document.getElementById('modal').classList.contains('open')) this.closeModal();
                 else if (this.selected) this.deselect();
                 else this.closePanel();
@@ -626,6 +599,9 @@
             else if (k === 'u' || k === 'U') { if (this.selected) this.upgradeBuilding(this.selected); else this.upgradeCheapest(); }
             else if (k === 'x' || k === 'X') this.cycleSpeed();
             else if (k === 'n' || k === 'N') this.callRaid();
+            else if (k === 'z' || k === 'Z') this.toggleRest();
+            else if (k === 'k' || k === 'K') this.openRepair();
+            else if (k === 'e' || k === 'E') this.toggleEraser();
             else if (k === 'v' || k === 'V') { const n = Object.keys(VIEWS); this.changeView(n[(n.indexOf(this.settings.view) + 1) % n.length]); }
             else if (k === '?' || k === 'h' || k === 'H') this.showHelp();
             else if (k >= '1' && k <= '5') this.openPanel(['build', 'upgrade', 'kingdom', 'coop', 'menu'][k - 1]);
@@ -637,7 +613,7 @@
             this.hoverTile = (t.tx >= 0 && t.tx < CFG.gridW && t.ty >= 0 && t.ty < CFG.gridH) ? { tx: t.tx, ty: t.ty } : null;
             const prev = this.hoverBuilding;
             // while carrying something, hovering buildings only gets in the way
-            this.hoverBuilding = (this.buildMode || this.spellMode || I.touch && !I.down) ? null : (this.moveMode && I.dragMove ? null : this.buildingAtScreen(I.x, I.y));
+            this.hoverBuilding = (this.buildMode || this.spellMode || this.eraseMode || I.touch && !I.down) ? null : (this.moveMode && I.dragMove ? null : this.buildingAtScreen(I.x, I.y));
             if (prev !== this.hoverBuilding || (this.hoverBuilding && this._hoverLevel !== this.hoverBuilding.level)) this.rebuildHoverTip();
             this.positionHoverTip();
             this.updateCanvasCursor();
@@ -657,7 +633,7 @@
             }
             if (this.buildMode) {
                 if (this.canBuildHere(this.buildMode, t.tx, t.ty)) this.placeBuilding(this.buildMode, t.tx, t.ty);
-                else { this.audio.error(); this.toast(this.canPlace(this.buildMode, t.tx, t.ty) ? 'Leave one empty tile between buildings (you can turn this off in Menu)' : 'Something is in the way', 'warn'); }
+                else { this.audio.error(); this.toast('Something is in the way', 'warn'); }
                 return;
             }
             if (this.moveMode) { this.commitMove({ tx: t.tx, ty: t.ty }); return; }
@@ -712,10 +688,11 @@
             this.buildings.push(b);
             this.touchGrid();
             this.stats.built++;
-            this.gainXp(def.decor ? 4 : 10);
+            this.gainXp(def.decor ? 4 : (type === 'wall' ? 1 : 10));
             if (!quiet) this.audio.build(); else if (this.audio.gate('buildq', 90)) this.audio.build();
             const p = this.centerOf(b);
-            for (let i = 0; i < 12; i++) this.particles.push({ x: p.x + rand(-18, 18), y: p.y + rand(-4, 8), vx: rand(-30, 30), vy: rand(-45, -12), life: 0.8, max: 0.8, color: '#d8c8a8', size: rand(3, 6), kind: 'dust' });
+            const dustN = type === 'wall' ? 3 : 12, dustW = type === 'wall' ? 6 : 18;
+            for (let i = 0; i < dustN; i++) this.particles.push({ x: p.x + rand(-dustW, dustW), y: p.y + rand(-4, 8), vx: rand(-30, 30), vy: rand(-45, -12), life: 0.8, max: 0.8, color: '#d8c8a8', size: rand(3, 6), kind: 'dust' });
             const singleton = this.maxedOut(type);
             if (singleton || !this.canAfford(this.buildCost(type))) {
                 this.setBuildMode(null);
@@ -736,30 +713,52 @@
             const cost = this.upgradeCostOf(b);
             if (!this.canAfford(cost)) { this.audio.error(); if (!quiet) this.toast('Not enough resources', 'warn'); return false; }
             this.spend(cost);
+            const oldTier = tierOf(b.type, b.level);
             b.level++;
             b.maxHp = this.hpFor(b.type, b.level);
-            b.hp = b.maxHp;
+            b.hp = b.maxHp;                      // an upgrade is also a full repair
             b.upg = 1;
             this.stats.upgrades++;
             this.gainXp(12);
             if (!quiet) this.audio.upgrade(); else if (this.audio.gate('upq', 120)) this.audio.upgrade();
+            const evolved = tierOf(b.type, b.level) !== oldTier;
+            if (evolved) b.evolve = 1;
             const p = this.centerOf(b);
-            for (let i = 0; i < 18; i++) {
-                const a = i / 18 * TAU;
-                this.particles.push({ x: p.x, y: p.y - 10, vx: Math.cos(a) * 70, vy: Math.sin(a) * 40 - 40, life: 0.8, max: 0.8, color: i % 2 ? '#ffe066' : '#ffffff', size: rand(2, 4), kind: 'spark' });
+            const wall = b.type === 'wall';
+            // a bulk upgrade of hundreds of walls must not bury the screen in sparks
+            const room = this.particles.length < (quiet ? 140 : 300);
+            if (room && !(quiet && wall && !evolved)) {
+                const n = wall ? 6 : 18;
+                for (let i = 0; i < n; i++) {
+                    const a = i / n * TAU;
+                    this.particles.push({ x: p.x, y: p.y - 10, vx: Math.cos(a) * 70, vy: Math.sin(a) * 40 - 40, life: 0.8, max: 0.8, color: i % 2 ? '#ffe066' : '#ffffff', size: rand(2, 4), kind: 'spark' });
+                }
+                this.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.6, max: 0.6, color: '#ffe066', size: wall ? 14 : 30, kind: 'ring' });
             }
-            this.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.6, max: 0.6, color: '#ffe066', size: 30, kind: 'ring' });
-            this.floatText(`Level ${b.level}`, p.x, p.y - 56, '#ffe066');
+            if (!(quiet && wall) && this.popups.length < 40) this.floatText(`Level ${b.level}`, p.x, p.y - (wall ? 30 : 56), '#ffe066');
             if (!quiet) this.toast(`${def.name} is now level ${b.level}`, 'success');
-            // new tiers change the look
-            if (tierOf(b.type, b.level) !== tierOf(b.type, b.level - 1)) {
-                this.floatText('NEW LOOK', p.x, p.y - 74, '#9af0ff');
-            }
+            // new tiers change the look: make it an event
+            if (evolved) this.evolveFx(b, p, quiet);
             this.recomputeRates(); this.updateUI(); this.checkAchievements();
             if (b === this.selected || b.type === 'townhall') this.refreshSelection();
             if (b.type === 'townhall') { this.toast(`Town Hall ${b.level}: more buildings and higher levels unlocked`, 'success'); this.buildMenu(true); }
             if (this.modalBuilding === b) this.openBuildingModal(b);
             return true;
+        }
+        // A building steps up to its next look: light pillar, shock rings, a burst in the new tier's colour
+        evolveFx(b, p, quiet) {
+            const tier = tierOf(b.type, b.level), col = TIER_COL[tier - 1] || '#ffe066', wall = b.type === 'wall';
+            if (this.popups.length < 40) this.floatText(wall && quiet ? '' : 'NEW LOOK', p.x, p.y - (wall ? 44 : 78), '#9af0ff');
+            if (quiet && wall) return;
+            const n = wall ? 14 : 40;
+            for (let i = 0; i < n && this.particles.length < 380; i++) {
+                const a = rand(0, TAU), sp = rand(60, 260);
+                this.particles.push({ x: p.x, y: p.y - 12, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6 - rand(80, 200), life: rand(0.7, 1.4), max: 1.4, color: i % 3 ? col : '#ffffff', size: rand(2, 5), kind: i % 4 === 0 ? 'coin' : 'spark' });
+            }
+            this.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.9, max: 0.9, color: col, size: wall ? 30 : 74, kind: 'ring' });
+            this.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.6, max: 0.6, color: '#ffffff', size: wall ? 18 : 44, kind: 'ring' });
+            if (!wall) { this.shake = Math.max(this.shake, 3.5); this.flash = Math.max(this.flash, 0.16); this.flashTint = '255,236,170'; }
+            this.audio.levelup();
         }
         // Keep upgrading one building until it runs out of money or levels
         upgradeMax(b) {
@@ -823,6 +822,18 @@
             return refund;
         }
 
+        // Remove a batch of buildings with one grid rebuild (the wall eraser)
+        removeMany(list) {
+            const gone = new Set(list);
+            this.buildings = this.buildings.filter(x => !gone.has(x));
+            this.touchGrid();
+            for (const e of this.enemies) if (gone.has(e.target)) e.target = null;
+            if (gone.has(this.hoverBuilding)) { this.hoverBuilding = null; this.rebuildHoverTip(); }
+            if (gone.has(this.selected)) { this.selected = null; this.refreshSelection(); }
+            if (this.input.downBuilding && gone.has(this.input.downBuilding)) { this.input.downBuilding = null; this.input.downTarget = null; }
+            if (this.modalBuilding && gone.has(this.modalBuilding)) this.closeModal();
+            this.recomputeRates();
+        }
         removeBuilding(b) {
             this.buildings = this.buildings.filter(x => x !== b);
             this.touchGrid();
@@ -855,8 +866,7 @@
                 this.refreshSelection();
             } else {
                 const other = this.canPlace(mb.type, t.tx, t.ty, mb) ? null : this.swapPartner(mb, t.tx, t.ty);
-                if (!other && this.canPlace(mb.type, t.tx, t.ty, mb)) { this.audio.error(); this.toast('Leave one empty tile between buildings (you can turn this off in Menu)', 'warn'); }
-                else if (other && this.swapBuildings(mb, other)) { this.toast(`${BLD[mb.type].name} and ${BLD[other.type].name} swapped places`, 'success'); this.refreshSelection(); }
+                if (other && this.swapBuildings(mb, other)) { this.toast(`${BLD[mb.type].name} and ${BLD[other.type].name} swapped places`, 'success'); this.refreshSelection(); }
                 else { this.audio.error(); this.toast(other ? 'No room to swap those two' : 'Cannot place it there', 'warn'); }
             }
             this.updateCanvasCursor();
@@ -917,7 +927,14 @@
             if (t > 0.72) return (t - 0.72) / 0.14;
             return 0;
         }
-        rateMult() { return this.boost.mult * (this.isNight() ? 1.25 : 1); }
+        // Resting (raids held back, nothing attacking): collectors tick over at half the raid-time rate
+        resting() { return !this.wave.active && this.settings.raidStart === 'manual'; }
+        restMult() { return this.resting() ? CFG.restRate : 1; }
+        rateMult() { return this.boost.mult * (this.isNight() ? 1.25 : 1) * this.restMult(); }
+        toggleRest() {
+            if (this.wave.active) { this.audio.error(); this.toast('You cannot rest in the middle of a raid', 'warn'); return; }
+            this.toggleRaidMode();
+        }
 
         // ---------- combat ----------
         buildQueue(n) {
@@ -930,7 +947,7 @@
                 for (const e of table) { r -= e.w; if (r <= 0) { kind = e.kind; break; } }
                 q.push(kind);
             }
-            if (n % 10 === 0) { q.length = Math.max(4, Math.floor(total * 0.6)); q.unshift('golem'); }
+            if (n % 10 === 0) { q.length = Math.max(4, Math.floor(total * 0.6)); q.unshift('golem'); if (n >= 20 && n % 20 === 0) q.unshift('pekka'); }
             return q;
         }
 
@@ -943,7 +960,7 @@
         toggleRaidMode() {
             this.settings.raidStart = this.settings.raidStart === 'manual' ? 'auto' : 'manual';
             this.syncToggles(); this.updateUI(); this.save();
-            this.toast(this.settings.raidStart === 'manual' ? 'Raids wait until you press Start raid' : 'Raids start on their own when the timer ends', 'success');
+            this.toast(this.settings.raidStart === 'manual' ? `Resting: no raids until you call one. Collectors work at ${Math.round(CFG.restRate * 100)}% while you rest.` : 'Raids start on their own when the timer ends', 'success');
         }
         startWave() {
             this.wave.number++;
@@ -962,30 +979,44 @@
             this.showAlert(boss ? `BOSS WAVE ${this.wave.number}` : `WAVE ${this.wave.number}`, 3, boss);
         }
 
-        spawnEnemy(kind) {
+        // 'at' puts a summoned minion where its witch stands instead of on the map edge
+        spawnEnemy(kind, at = null) {
             const T = ENEMY[kind];
             const sides = (this.wave.sides && this.wave.sides.length) ? this.wave.sides : [0, 1, 2, 3];
             const edge = sides[randi(0, sides.length)];
+            const OUT = 2 * S;
             let tx, ty;
-            if (edge === 0)      { tx = randi(0, CFG.gridW); ty = -2; }
-            else if (edge === 1) { tx = CFG.gridW + 1; ty = randi(0, CFG.gridH); }
-            else if (edge === 2) { tx = randi(0, CFG.gridW); ty = CFG.gridH + 1; }
-            else                 { tx = -2; ty = randi(0, CFG.gridH); }
+            if (at) { tx = at.tx - 0.5 + rand(-1, 1); ty = at.ty - 0.5 + rand(-1, 1); }
+            else if (edge === 0) { tx = randi(0, CFG.gridW); ty = -OUT; }
+            else if (edge === 1) { tx = CFG.gridW + OUT - 1; ty = randi(0, CFG.gridH); }
+            else if (edge === 2) { tx = randi(0, CFG.gridW); ty = CFG.gridH + OUT - 1; }
+            else                 { tx = -OUT; ty = randi(0, CFG.gridH); }
             const wv = this.wave.number;
             const hpScale = 1 + wv * 0.12 + wv * wv * 0.004;      // gentle early, steeper once defenses snowball
             const dmgScale = 1 + wv * 0.03 + Math.max(0, wv - 10) * 0.02;
             const p = this.worldIso(tx + 0.5, ty + 0.5);
+            const d = this.diff();
             this.enemies.push({
                 kind, flying: !!T.flying, boss: !!T.boss, size: T.size, tx: tx + 0.5, ty: ty + 0.5, x: p.x, y: p.y, air: 0,
-                hp: T.hp * hpScale * this.diff().hp, maxHp: T.hp * hpScale * this.diff().hp, dmg: T.dmg * dmgScale * this.diff().dmg, spd: T.spd, reach: T.reach || (T.flying ? 0.9 : 0.75),
+                hp: T.hp * hpScale * d.hp, maxHp: T.hp * hpScale * d.hp, dmg: T.dmg * dmgScale * d.dmg, spd: T.spd * S,
+                ranged: !!T.reach, jump: !!T.jump, bomb: (T.bomb || 0) * S, splash: (T.splash || 0) * S,
+                reach: T.reach ? T.reach * S : (T.flying ? 1.5 : (T.boss ? 1.8 : 1.05)),
                 reward: { gold: T.gold, xp: T.xp }, target: null, attackCd: rand(0, 0.6), walk: rand(0, 6), wobble: rand(0, 6), dir: 1,
-                off: { x: rand(-0.28, 0.28), y: rand(-0.28, 0.28) }, slow: 0, slowAmt: 0, hit: 0, atkAnim: 0, retarget: 0,
+                off: { x: rand(-0.3, 0.3), y: rand(-0.3, 0.3) }, slow: 0, slowAmt: 0, hit: 0, atkAnim: 0, retarget: 0, summonCd: rand(2, 4),
             });
         }
 
         pickTarget(e) {
-            const pref = ENEMY[e.kind].prefers;
+            const T = ENEMY[e.kind], pref = T.prefers;
             let best = null, bestD = Infinity;
+            if (pref === 'wall') {           // Wall Breakers run for the nearest wall; with none left they behave like anyone else
+                for (const b of this.buildings) {
+                    if (b.type !== 'wall' || b.hp <= 0) continue;
+                    const d = Math.hypot(b.tx + 0.5 - e.tx, b.ty + 0.5 - e.ty);
+                    if (d < bestD) { bestD = d; best = b; }
+                }
+                if (best) return best;
+            }
             for (const b of this.buildings) {
                 const def = BLD[b.type];
                 if (def.decor || b.hp <= 0 || b.type === 'wall') continue;
@@ -1008,44 +1039,56 @@
             return Math.hypot(dx, dy);
         }
 
-        // Walking costs toward a target, for every tile: open ground 1, wall 6 (chew through),
-        // other buildings 12, decorations are solid. Raiders step downhill.
-        flowFor(target) {
-            let f = this._flow.get(target.id);
-            if (f && f.ver === this.gridVer) return f;
+        // Walking cost of every tile (open ground 1, wall chewed through, building chewed through, decoration solid).
+        // Hog Riders hop walls, so they get a copy where walls cost nothing extra. Rebuilt whenever the grid changes.
+        costGrid(jump) {
+            const key = jump ? '_costJ' : '_cost';
+            if (this[key] && this[key].ver === this.gridVer) return this[key];
             const W = CFG.gridW + MARGIN * 2, H = CFG.gridH + MARGIN * 2;
+            const g = new Uint8Array(W * H).fill(1);
+            for (const b of this.buildings) {
+                const def = BLD[b.type], s = def.size;
+                const c = def.decor ? 255 : (b.type === 'wall' ? (jump ? 1 : COST_WALL) : COST_BLDG);
+                for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) {
+                    const x = b.tx + dx, y = b.ty + dy;
+                    if (x >= 0 && y >= 0 && x < CFG.gridW && y < CFG.gridH) g[(y + MARGIN) * W + (x + MARGIN)] = c;
+                }
+            }
+            return (this[key] = { ver: this.gridVer, g, W, H });
+        }
+
+        // Cheapest walking cost from every tile to a target (Dial's bucket queue: all costs are small whole numbers).
+        flowFor(target, jump = false) {
+            const key = target.id + (jump ? 'j' : '');
+            let f = this._flow.get(key);
+            if (f && f.ver === this.gridVer) return f;
+            const { g: cost, W, H } = this.costGrid(jump);
             const dist = new Float32Array(W * H).fill(Infinity);
-            const idx = (x, y) => (y + MARGIN) * W + (x + MARGIN);
-            const cost = (x, y) => {
-                const o = this.cell(x, y);
-                if (!o) return 1;
-                if (o.type === 'wall') return 6;
-                if (BLD[o.type].decor) return Infinity;
-                return 12;
-            };
-            const heap = new Heap();
+            const NB = 19, buckets = Array.from({ length: NB }, () => []);
+            let pending = 0;
             const s = BLD[target.type].size;
-            for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) { const i = idx(target.tx + dx, target.ty + dy); dist[i] = 0; heap.push(0, i); }
-            while (heap.size) {
-                const { key: d, val: i } = heap.pop();
-                if (d > dist[i]) continue;
-                const x = (i % W) - MARGIN, y = Math.floor(i / W) - MARGIN;
-                for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
-                    if (nx < -MARGIN || ny < -MARGIN || nx >= CFG.gridW + MARGIN || ny >= CFG.gridH + MARGIN) continue;
-                    const nd = d + cost(nx, ny);
-                    const j = idx(nx, ny);
-                    if (nd < dist[j]) { dist[j] = nd; heap.push(nd, j); }
+            for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) { const i = (target.ty + dy + MARGIN) * W + (target.tx + dx + MARGIN); dist[i] = 0; buckets[0].push(i); pending++; }
+            for (let cur = 0; pending > 0; cur++) {
+                const bk = buckets[cur % NB];
+                while (bk.length) {
+                    const i = bk.pop(); pending--;
+                    if (dist[i] !== cur) continue;
+                    const x = i % W, y = (i / W) | 0;
+                    if (x > 0) { const j = i - 1, c = cost[j]; if (c !== 255 && cur + c < dist[j]) { dist[j] = cur + c; buckets[(cur + c) % NB].push(j); pending++; } }
+                    if (x < W - 1) { const j = i + 1, c = cost[j]; if (c !== 255 && cur + c < dist[j]) { dist[j] = cur + c; buckets[(cur + c) % NB].push(j); pending++; } }
+                    if (y > 0) { const j = i - W, c = cost[j]; if (c !== 255 && cur + c < dist[j]) { dist[j] = cur + c; buckets[(cur + c) % NB].push(j); pending++; } }
+                    if (y < H - 1) { const j = i + W, c = cost[j]; if (c !== 255 && cur + c < dist[j]) { dist[j] = cur + c; buckets[(cur + c) % NB].push(j); pending++; } }
                 }
             }
             f = { ver: this.gridVer, dist, W, MARGIN };
-            this._flow.set(target.id, f);
+            this._flow.set(key, f);
             return f;
         }
         // The neighbouring tile with the lowest remaining cost, or null if boxed in
-        nextStep(f, tx, ty) {
+        nextStep(f, tx, ty, jump = false) {
             const { dist, W } = f;
             const at = (x, y) => (x < -MARGIN || y < -MARGIN || x >= CFG.gridW + MARGIN || y >= CFG.gridH + MARGIN) ? Infinity : dist[(y + MARGIN) * W + (x + MARGIN)];
-            const solid = (x, y) => { const o = this.cell(x, y); return !!o; };
+            const solid = (x, y) => { const o = this.cell(x, y); return !!o && !(jump && o.type === 'wall'); };
             let best = null, bestD = at(tx, ty);
             for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
                 if (!dx && !dy) continue;
@@ -1075,6 +1118,17 @@
                     if (t !== e.target) e.target = t;
                     e.retarget = 2.5;
                 }
+                // a Witch keeps raising skeletons while she walks (never more than a handful at once)
+                const T = ENEMY[e.kind];
+                if (T.summons && this.wave.active) {
+                    e.summonCd -= dt;
+                    if (e.summonCd <= 0) {
+                        e.summonCd = 7;
+                        let alive = 0; for (const o of this.enemies) if (o.kind === T.summons && o.hp > 0) alive++;
+                        if (alive < 8) for (let i = 0; i < 2; i++) this.spawnEnemy(T.summons, { tx: e.tx, ty: e.ty });
+                        for (let i = 0; i < 6; i++) this.particles.push({ x: e.x, y: e.y - 6, vx: rand(-40, 40), vy: -rand(40, 110), life: 0.6, max: 0.6, color: '#b070ff', size: rand(2, 4), kind: 'spark' });
+                    }
+                }
                 const tgt = e.target;
                 let moveX = 0, moveY = 0, attack = null;
                 if (!tgt) {
@@ -1088,8 +1142,8 @@
                         const dx = tgt.tx + s / 2 - e.tx, dy = tgt.ty + s / 2 - e.ty, d = Math.hypot(dx, dy) || 1;
                         moveX = dx / d; moveY = dy / d;
                     } else {
-                        const f = this.flowFor(tgt);
-                        const step = this.nextStep(f, Math.floor(e.tx), Math.floor(e.ty));
+                        const f = this.flowFor(tgt, e.jump);
+                        const step = this.nextStep(f, Math.floor(e.tx), Math.floor(e.ty), e.jump);
                         if (!step) {
                             const dx = tgt.tx + s / 2 - e.tx, dy = tgt.ty + s / 2 - e.ty, d = Math.hypot(dx, dy) || 1;
                             moveX = dx / d; moveY = dy / d;
@@ -1097,7 +1151,8 @@
                             const blocker = this.cell(step.tx, step.ty);
                             const cx = step.tx + 0.5 + e.off.x, cy = step.ty + 0.5 + e.off.y;
                             const dx = cx - e.tx, dy = cy - e.ty, d = Math.hypot(dx, dy) || 1;
-                            if (blocker && blocker !== tgt && this.distToBuilding(e.tx, e.ty, blocker) < 0.7) attack = blocker;
+                            const hops = blocker && e.jump && blocker.type === 'wall';       // a Hog Rider simply leaps the wall
+                            if (blocker && blocker !== tgt && !hops && this.distToBuilding(e.tx, e.ty, blocker) < 0.9) attack = blocker;
                             else { moveX = dx / d; moveY = dy / d; }
                         }
                     }
@@ -1108,24 +1163,24 @@
                     const ddx = (attack.tx + s / 2) - e.tx, ddy = (attack.ty + s / 2) - e.ty;
                     e.dir = (ddx - ddy) >= 0 ? 1 : -1;
                     if (e.attackCd <= 0) {
-                        e.attackCd = e.kind === 'golem' ? 1.6 : 1.1;
+                        e.attackCd = ATTACK_CD[e.kind] || 1.1;
                         e.atkAnim = 1;
                         this.enemyStrike(e, attack);
                     }
                 } else {
                     e.tx += moveX * spd * dt; e.ty += moveY * spd * dt;
                     if (moveX - moveY) e.dir = (moveX - moveY) >= 0 ? 1 : -1;
-                    e.walk += dt * spd * 5.2;
+                    e.walk += dt * spd / S * 5.2;
                 }
             }
             // gentle separation so a wave doesn't collapse into one pixel
-            const list = this.enemies;
+            const list = this.enemies, R2 = (0.35 * S) * (0.35 * S);
             for (let i = 0; i < list.length; i++) {
                 const a = list[i]; if (a.hp <= 0 || a.flying) continue;
                 for (let j = i + 1; j < list.length; j++) {
                     const b = list[j]; if (b.hp <= 0 || b.flying) continue;
                     const dx = a.tx - b.tx, dy = a.ty - b.ty, d2 = dx * dx + dy * dy;
-                    if (d2 < 0.12 && d2 > 1e-6) { const d = Math.sqrt(d2), push = (0.35 - d) * 0.5 * Math.min(1, dt * 14); a.tx += dx / d * push; a.ty += dy / d * push; b.tx -= dx / d * push; b.ty -= dy / d * push; }
+                    if (d2 < R2 && d2 > 1e-6) { const d = Math.sqrt(d2), push = (0.35 * S - d) * 0.5 * Math.min(1, dt * 14); a.tx += dx / d * push; a.ty += dy / d * push; b.tx -= dx / d * push; b.ty -= dy / d * push; }
                 }
             }
             for (const e of list) {
@@ -1137,13 +1192,36 @@
         }
 
         enemyStrike(e, b) {
-            if (ENEMY[e.kind].reach >= 2) {      // ranged: throw something
+            if (e.bomb) { this.wallBreakerBlast(e); return; }
+            if (e.ranged) {      // ranged: throw, shoot or cast something
                 const from = { x: e.x, y: e.y - 14 }, c = this.centerOf(b);
-                this.projectiles.push({ type: 'bone', x: from.x, y: from.y, sx: from.x, sy: from.y, tx: c.x, ty: c.y - 14, t: 0, dur: 0.45, arc: 26, building: b, dmg: e.dmg });
+                const type = ({ skeleton: 'bone', archer: 'earrow', wizard: 'fireorb', witch: 'darkorb' })[e.kind] || 'bone';
+                this.projectiles.push({ type, x: from.x, y: from.y, sx: from.x, sy: from.y, tx: c.x, ty: c.y - 14, t: 0, dur: type === 'earrow' ? 0.3 : 0.45, arc: type === 'earrow' ? 10 : 26, building: b, dmg: e.dmg, splash: e.splash });
                 this.audio.bow();
                 return;
             }
             this.damageBuilding(b, e.dmg, e);
+            if (e.splash) this.splashBuildings(b, e.dmg * 0.5, e.splash, e);       // balloons drop bombs that spill onto neighbours
+        }
+        // damage everything standing near a building, not just the one that was hit
+        splashBuildings(centre, dmg, radius, e) {
+            const s0 = BLD[centre.type].size, cx = centre.tx + s0 / 2, cy = centre.ty + s0 / 2;
+            for (const o of this.buildings.slice()) {
+                if (o === centre || o.hp <= 0 || BLD[o.type].decor) continue;
+                if (this.distToBuilding(cx, cy, o) <= radius) this.damageBuilding(o, dmg, e);
+            }
+        }
+        // A Wall Breaker runs up, drops its barrel and is gone; walls take the worst of it
+        wallBreakerBlast(e) {
+            const p = { x: e.x, y: e.y };
+            for (let i = 0; i < 26; i++) this.particles.push({ x: p.x + rand(-6, 6), y: p.y - rand(0, 12), vx: rand(-170, 170), vy: rand(-220, -30), life: 0.9, max: 0.9, color: i % 3 === 0 ? '#ffe070' : (i % 3 === 1 ? '#ff7a35' : '#4a4048'), size: rand(3, 6), kind: 'p' });
+            this.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.5, max: 0.5, color: '#ffb050', size: 40, kind: 'ring' });
+            this.shake = Math.max(this.shake, 3); this.audio.boom();
+            for (const b of this.buildings.slice()) {
+                if (b.hp <= 0 || BLD[b.type].decor) continue;
+                if (this.distToBuilding(e.tx, e.ty, b) <= e.bomb) this.damageBuilding(b, b.type === 'wall' ? e.dmg : e.dmg * 0.3, e);
+            }
+            e.hp = 0; e.dead = true;        // spent: no loot, not a kill
         }
 
         damageBuilding(b, dmg, e) {
@@ -1151,9 +1229,9 @@
             b.hp -= dmg;
             b.hurt = 0.25;
             const c = this.centerOf(b);
-            this.popups.push({ x: c.x + rand(-8, 8), y: c.y - 30, text: `-${Math.floor(dmg)}`, color: '#ff6a5a', life: 0.9, max: 0.9, size: 13 });
+            if (this.popups.length < 28 && (b.type !== 'wall' || Math.random() < 0.35)) this.popups.push({ x: c.x + rand(-8, 8), y: c.y - (b.type === 'wall' ? 18 : 30), text: `-${Math.floor(dmg)}`, color: '#ff6a5a', life: 0.9, max: 0.9, size: 13 });
             this.audio.hit();
-            for (let i = 0; i < 4; i++) this.particles.push({ x: c.x + rand(-10, 10), y: c.y - rand(8, 24), vx: rand(-60, 60), vy: rand(-70, -10), life: 0.45, max: 0.45, color: '#d8c8a8', size: rand(2, 3.5), kind: 'dust' });
+            if (this.particles.length < 300) for (let i = 0; i < 4; i++) this.particles.push({ x: c.x + rand(-10, 10), y: c.y - rand(8, 24), vx: rand(-60, 60), vy: rand(-70, -10), life: 0.45, max: 0.45, color: '#d8c8a8', size: rand(2, 3.5), kind: 'dust' });
             if (e && e.kind === 'golem') { this.shake = Math.max(this.shake, 4); }
             if (b.hp <= 0) this.destroyBuilding(b);
         }
@@ -1161,13 +1239,14 @@
         destroyBuilding(b) {
             const def = BLD[b.type];
             const p = this.centerOf(b);
-            for (let i = 0; i < 34; i++) this.particles.push({ x: p.x + rand(-14, 14), y: p.y - rand(0, 20), vx: rand(-150, 150), vy: rand(-210, -40), life: 1.1, max: 1.1, color: i % 3 === 0 ? '#ff7a35' : (i % 3 === 1 ? '#8a6a44' : '#4a4048'), size: rand(3, 7), kind: 'p' });
-            for (let i = 0; i < 6; i++) this.particles.push({ x: p.x + rand(-12, 12), y: p.y - rand(4, 18), vx: rand(-12, 12), vy: rand(-40, -18), life: rand(1.4, 2.4), max: 2.4, color: 'rgba(60,56,64,', size: rand(6, 11), kind: 'smoke' });
-            this.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.5, max: 0.5, color: '#ffb050', size: 46, kind: 'ring' });
-            this.shake = Math.max(this.shake, 5);
+            const wall = b.type === 'wall';
+            for (let i = 0; i < (wall ? 8 : 34); i++) this.particles.push({ x: p.x + rand(-14, 14), y: p.y - rand(0, 20), vx: rand(-150, 150), vy: rand(-210, -40), life: 1.1, max: 1.1, color: i % 3 === 0 ? '#ff7a35' : (i % 3 === 1 ? '#8a6a44' : '#4a4048'), size: rand(3, 7) * (wall ? 0.7 : 1), kind: 'p' });
+            if (!wall) for (let i = 0; i < 6; i++) this.particles.push({ x: p.x + rand(-12, 12), y: p.y - rand(4, 18), vx: rand(-12, 12), vy: rand(-40, -18), life: rand(1.4, 2.4), max: 2.4, color: 'rgba(60,56,64,', size: rand(6, 11), kind: 'smoke' });
+            if (!wall) this.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.5, max: 0.5, color: '#ffb050', size: 46, kind: 'ring' });
+            this.shake = Math.max(this.shake, wall ? 1.2 : 5);
             this.removeBuilding(b);
-            this.audio.boom();
-            this.toast(`${def.name} destroyed!`, 'error');
+            if (!wall || this.audio.gate('wallboom', 140)) this.audio.boom();
+            if (!wall) this.toast(`${def.name} destroyed!`, 'error');
             if (b.type === 'townhall') this.gameOver();
         }
 
@@ -1188,7 +1267,7 @@
                     if (e.flying && GROUND_ONLY.has(b.type)) continue;
                     if (!e.flying && AIR_ONLY.has(b.type)) continue;
                     const dd = Math.hypot(e.tx - c.x, e.ty - c.y);
-                    if (dd <= d.range && dd < best) { best = dd; target = e; }
+                    if (dd <= d.range * S && dd < best) { best = dd; target = e; }
                 }
                 b.hasT = !!target;
                 if (target) {
@@ -1221,7 +1300,7 @@
                     let prev = target, n = 0;
                     for (const e of this.enemies) {
                         if (n >= 2 || e === target || e.hp <= 0) continue;
-                        if (Math.hypot(e.tx - prev.tx, e.ty - prev.ty) < 1.8) {
+                        if (Math.hypot(e.tx - prev.tx, e.ty - prev.ty) < 1.8 * S) {
                             this.beams.push({ type, x0: prev.x, y0: prev.y - 12, x1: e.x, y1: e.y - 12, life: 0.16, max: 0.16, seed: Math.random() * 99 });
                             this.hitEnemy(e, dmg * 0.6); prev = e; n++;
                         }
@@ -1242,7 +1321,7 @@
             })[type] || { dur: 0.3, arc: 10, sound: 'shoot' };
             this.projectiles.push({
                 type, x: mx, y: my, sx: mx, sy: my, target, t: 0, dur: Math.max(0.12, spec.dur * (0.6 + Math.hypot(tgtp.x - mx, tgtp.y - my) / 520)),
-                arc: spec.arc, dmg, splash: d.splash || 0, slow: d.slow || 0, tx: tgtp.x, ty: tgtp.y, trail: [],
+                arc: spec.arc, dmg, splash: (d.splash || 0) * S, slow: d.slow || 0, tx: tgtp.x, ty: tgtp.y, trail: [],
             });
             this.audio[spec.sound]();
             // muzzle puff for the big guns
@@ -1257,7 +1336,13 @@
                 if (p.building) {                     // an enemy's thrown bone
                     const k = Math.min(1, p.t);
                     p.x = p.sx + (p.tx - p.sx) * k; p.y = p.sy + (p.ty - p.sy) * k - Math.sin(k * Math.PI) * p.arc;
-                    if (p.t >= 1) { p.dead = true; if (p.building.hp > 0) this.damageBuilding(p.building, p.dmg); }
+                    if (p.t >= 1) {
+                        p.dead = true;
+                        if (p.building.hp > 0) {
+                            this.damageBuilding(p.building, p.dmg);
+                            if (p.splash) { this.splashBuildings(p.building, p.dmg * 0.5, p.splash); this.particles.push({ x: p.x, y: p.y + 4, vx: 0, vy: 0, life: 0.4, max: 0.4, color: p.type === 'darkorb' ? '#b070ff' : '#ff9a4a', size: p.splash / S * 24, kind: 'ring' }); }
+                        }
+                    }
                     continue;
                 }
                 const tg = p.target;
@@ -1284,7 +1369,7 @@
                     if (dd <= p.splash) this.hitEnemy(e, e === tg ? p.dmg : p.dmg * 0.55);
                 }
                 if (cx === null && tg) { /* the target died on the way; the shell still bursts */ }
-                this.particles.push({ x: p.x, y: p.y + 6, vx: 0, vy: 0, life: 0.45, max: 0.45, color: p.type === 'wizard' ? '#7ad8ff' : '#ffb050', size: p.splash * 24, kind: 'ring' });
+                this.particles.push({ x: p.x, y: p.y + 6, vx: 0, vy: 0, life: 0.45, max: 0.45, color: p.type === 'wizard' ? '#7ad8ff' : '#ffb050', size: p.splash / S * 24, kind: 'ring' });
                 if (p.type === 'mortar') { this.shake = Math.max(this.shake, 2.4); this.audio.boom(); }
             } else if (tg && tg.hp > 0) {
                 this.hitEnemy(tg, p.dmg);
@@ -1308,7 +1393,7 @@
         killEnemy(e) {
             if (e.dead) return;
             e.dead = true;
-            this.stats.kills++;
+            if (!ENEMY[e.kind].summoned) this.stats.kills++;
             if (e.boss) { this.stats.bosses++; this.res.gems += 5; this.floatText('+5 gems', e.x, e.y - 50, '#5cd8ff'); this.shake = Math.max(this.shake, 8); this.showAlert('GOLEM DEFEATED', 2.5); }
             const loot = Math.round(e.reward.gold * (1 + 0.25 * this.boon('loot')) * this.diff().loot);
             this.stats.goldEarned += this.addRes('gold', loot);
@@ -1433,7 +1518,7 @@
             let hits = 0;
             for (const e of this.enemies) {
                 if (e.hp <= 0) continue;
-                if (Math.hypot(e.tx - tfx, e.ty - tfy) <= CFG.spellRadius) { this.hitEnemy(e, dmg); hits++; }
+                if (Math.hypot(e.tx - tfx, e.ty - tfy) <= CFG.spellRadius * S) { this.hitEnemy(e, dmg); hits++; }
             }
             this.toast(hits ? `Lightning struck ${hits} raider${hits > 1 ? 's' : ''}` : 'Lightning struck nothing', hits ? 'success' : 'warn');
             this.checkAchievements();
@@ -1488,14 +1573,14 @@
         // ---------- treasure goblin ----------
         spawnGoblin() {
             const side = randi(0, 4);
-            const g = CFG.gridW;
+            const g = CFG.gridW, m = 2 * S, o = 3 * S, v = 1.9 * S;
             let a, b;
-            if (side === 0) { a = [rand(2, g - 2), -3]; b = [rand(2, g - 2), g + 3]; }
-            else if (side === 1) { a = [g + 3, rand(2, g - 2)]; b = [-3, rand(2, g - 2)]; }
-            else if (side === 2) { a = [rand(2, g - 2), g + 3]; b = [rand(2, g - 2), -3]; }
-            else { a = [-3, rand(2, g - 2)]; b = [g + 3, rand(2, g - 2)]; }
+            if (side === 0) { a = [rand(m, g - m), -o]; b = [rand(m, g - m), g + o]; }
+            else if (side === 1) { a = [g + o, rand(m, g - m)]; b = [-o, rand(m, g - m)]; }
+            else if (side === 2) { a = [rand(m, g - m), g + o]; b = [rand(m, g - m), -o]; }
+            else { a = [-o, rand(m, g - m)]; b = [g + o, rand(m, g - m)]; }
             const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy);
-            this.goblin = { tx: a[0], ty: a[1], vx: dx / d * 1.9, vy: dy / d * 1.9, x: 0, y: 0, dir: 1, ph: 0, left: d / 1.9 + 1, gone: false };
+            this.goblin = { tx: a[0], ty: a[1], vx: dx / d * v, vy: dy / d * v, x: 0, y: 0, dir: 1, ph: 0, left: d / v + 1, gone: false };
             this.showAlert('A TREASURE GOBLIN!', 2.2);
             if (!this.tipsSeen.goblin) { this.tipsSeen.goblin = true; this.toast('Tap the Treasure Goblin before it escapes: gold and gems!', 'tip'); }
             this.audio.beep(1568, 0.12, 'triangle', 0.3); setTimeout(() => this.audio.beep(2093, 0.16, 'triangle', 0.3), 120);
@@ -1675,7 +1760,7 @@
             this.stats.goldEarned += this.addRes('gold', this.rates.gold * dt * rm);
             this.addRes('elixir', this.rates.elixir * dt * rm);
             this.addRes('dark', this.rates.dark * dt * rm);
-            if (this.rates.gems > 0) { this.gemAcc += this.rates.gems * dt * this.boost.mult; if (this.gemAcc >= 1) { const n = Math.floor(this.gemAcc); this.gemAcc -= n; this.res.gems += n; this.toast(`The Gem Quarry found ${n} gem${n > 1 ? 's' : ''}`, 'success'); } }
+            if (this.rates.gems > 0) { this.gemAcc += this.rates.gems * dt * this.boost.mult * this.restMult(); if (this.gemAcc >= 1) { const n = Math.floor(this.gemAcc); this.gemAcc -= n; this.res.gems += n; this.toast(`The Gem Quarry found ${n} gem${n > 1 ? 's' : ''}`, 'success'); } }
 
             if (this.boost.timeLeft > 0) { this.boost.timeLeft -= dt; if (this.boost.timeLeft <= 0) { this.boost.mult = 1; this.toast('Boost ended', 'warn'); } }
             if (this.warCry.active) { this.warCry.timeLeft -= dt; if (this.warCry.timeLeft <= 0) { this.warCry.active = false; this.toast('War Cry ended', 'warn'); } }
@@ -1686,11 +1771,12 @@
             for (const b of this.buildings) {
                 if (b.build < 1) b.build = Math.min(1, (b.build ?? 1) + dt * 2.2);
                 if (b.upg > 0) b.upg = Math.max(0, b.upg - dt * 2.2);
+                if (b.evolve > 0) b.evolve = Math.max(0, b.evolve - dt * 0.75);
                 if (b.pop > 0) b.pop = Math.max(0, b.pop - dt * 5);
                 if (b.hurt > 0) b.hurt -= dt;
                 if (BLD[b.type].clickBonus && b.build >= 1) {
                     const sec = this.bubbleSec();
-                    b.charge = Math.min(sec, (b.charge ?? rand(0, sec)) + dt * (this.boost.timeLeft > 0 ? 1.5 : 1));
+                    b.charge = Math.min(sec, (b.charge ?? rand(0, sec)) + dt * (this.boost.timeLeft > 0 ? 1.5 : 1) * this.restMult());
                     if (b.charge >= sec) {
                         // the first goal needs the bubble to stay put until it has been tapped
                         const hold = this.tutCurrent && this.tutCurrent() && this.tutCurrent().id === 'tap';
@@ -1765,7 +1851,7 @@
             this._uiAcc = (this._uiAcc || 0) + dt;
             if (this._uiAcc >= 0.1) { this._uiAcc = 0; this.updateUI(); }
             this._tipAcc = (this._tipAcc || 0) + dt;
-            if (this._tipAcc >= 0.5) { this._tipAcc = 0; this.tutCheck(); this.tipCheck(); }
+            if (this._tipAcc >= 0.5) { this._tipAcc = 0; this.tutCheck(); this.tipCheck(); this.applyRepairFund(); }
         }
 
         // ---------- rendering ----------
@@ -1787,8 +1873,9 @@
 
             A.world.drawMeadow(g, vx0, vy0, vx1, vy1);
             A.world.drawIsland(g);
-            const carrying = this.buildMode || this.moveMode;
+            const carrying = this.buildMode || this.moveMode || this.eraseMode;
             if (carrying) this.drawGrid(g);
+            this.drawEraser(g);
             if (this.buildMode && this.hoverTile) this.drawBuildGhost(g);
             if (this.moveMode && this.hoverTile) this.drawMoveGhost(g);
             if (this.spellMode && this.hoverTile) this.drawSpellGhost(g);
@@ -1874,12 +1961,91 @@
         drawGrid(g) {
             const gw = CFG.gridW, gh = CFG.gridH;
             g.save();
-            g.strokeStyle = 'rgba(255,255,255,0.22)'; g.lineWidth = 1 / this.cam.zoom;
-            g.beginPath();
-            for (let i = 0; i <= gw; i++) { const a = this.worldIso(i, 0), b = this.worldIso(i, gh); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
-            for (let j = 0; j <= gh; j++) { const a = this.worldIso(0, j), b = this.worldIso(gw, j); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
-            g.stroke();
+            g.lineWidth = 1 / this.cam.zoom;
+            for (const major of [false, true]) {
+                g.strokeStyle = major ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.12)';
+                g.beginPath();
+                for (let i = 0; i <= gw; i++) { if ((i % S === 0) !== major) continue; const a = this.worldIso(i, 0), b = this.worldIso(i, gh); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
+                for (let j = 0; j <= gh; j++) { if ((j % S === 0) !== major) continue; const a = this.worldIso(0, j), b = this.worldIso(gw, j); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); }
+                g.stroke();
+            }
             g.restore();
+        }
+
+        // The wall eraser: the tiles under the drag, and the walls among them
+        eraseTiles() {
+            const s = this.eraseSel; if (!s) return [];
+            let { a, b } = s;
+            const out = [];
+            if (s.box || this.eraseShape === 'box') {
+                for (let y = Math.min(a.ty, b.ty); y <= Math.max(a.ty, b.ty); y++) for (let x = Math.min(a.tx, b.tx); x <= Math.max(a.tx, b.tx); x++) out.push({ tx: x, ty: y });
+            } else if (Math.abs(b.tx - a.tx) >= Math.abs(b.ty - a.ty)) {      // a straight row...
+                for (let x = Math.min(a.tx, b.tx); x <= Math.max(a.tx, b.tx); x++) out.push({ tx: x, ty: a.ty });
+            } else {                                                          // ...or a straight column
+                for (let y = Math.min(a.ty, b.ty); y <= Math.max(a.ty, b.ty); y++) out.push({ tx: a.tx, ty: y });
+            }
+            return out.filter(t => t.tx >= 0 && t.ty >= 0 && t.tx < CFG.gridW && t.ty < CFG.gridH);
+        }
+        eraseWalls() {
+            if (this.occDirty) this.rebuildOcc();
+            const set = new Set();
+            for (const t of this.eraseTiles()) { const o = this.cell(t.tx, t.ty); if (o && o.type === 'wall') set.add(o); }
+            return [...set];
+        }
+        commitErase() {
+            const walls = this.eraseWalls();
+            this.eraseSel = null;
+            if (!walls.length) { this.toast('No walls there. Drag along a row of walls to select it.', 'warn'); return; }
+            const refund = walls.length * Math.floor(BLD.wall.baseCost.gold * 0.5);
+            const doIt = () => {
+                const live = walls.filter(w => this.buildings.includes(w));
+                this.removeMany(live);
+                this.addRes('gold', refund);
+                this.audio.coin();
+                this.toast(`Removed ${live.length} wall${live.length === 1 ? '' : 's'} (+${fmt(refund)} gold)`, 'success');
+                this.updateUI();
+            };
+            if (walls.length <= 6) doIt();
+            else this.showConfirm({ title: `Remove ${walls.length} walls?`, icon: 'trash', body: `You get back ${fmt(refund)} gold. Their upgrades are not refunded.`, yesText: 'Remove', noText: 'Keep them', danger: true, onYes: doIt });
+        }
+        toggleEraser() {
+            if (!this.buildings.some(b => b.type === 'wall') && !this.eraseMode) { this.toast('You have no walls to remove yet', 'warn'); return; }
+            const on = !this.eraseMode;
+            this.cancelModes();
+            this.eraseMode = on; this.eraseSel = null;
+            this.deselect();
+            this.updateCanvasCursor();
+            if (on) this.toast('Drag along a row or column of walls to select it. Hold Shift for a box.', 'warn');
+        }
+        // 4-connected tiles from a to b: a quick drag still lays an unbroken wall, even on diagonals
+        lineTiles(a, b) {
+            const out = [], dx = b.tx - a.tx, dy = b.ty - a.ty, n = Math.max(Math.abs(dx), Math.abs(dy));
+            let prev = null;
+            for (let i = 0; i <= n; i++) {
+                const k = n ? i / n : 0, p = { tx: Math.round(a.tx + dx * k), ty: Math.round(a.ty + dy * k) };
+                if (prev && prev.tx !== p.tx && prev.ty !== p.ty) out.push({ tx: p.tx, ty: prev.ty });
+                out.push(p); prev = p;
+            }
+            return out;
+        }
+        drawEraser(g) {
+            if (!this.eraseMode) return;
+            const tiles = this.eraseTiles(), t = this.tnow;
+            const walls = new Set(this.eraseWalls().map(w => w.tx + ',' + w.ty));
+            if (this.hoverTile && !this.eraseSel) { this.tilePoly(g, this.hoverTile.tx, this.hoverTile.ty); g.strokeStyle = 'rgba(255,120,110,0.9)'; g.lineWidth = 2; g.stroke(); }
+            for (const p of tiles) {
+                const o = this.cell(p.tx, p.ty), hit = o && o.type === 'wall';
+                this.tilePoly(g, p.tx, p.ty);
+                g.fillStyle = hit ? `rgba(255,70,60,${0.5 + 0.15 * Math.sin(t * 8)})` : 'rgba(255,200,190,0.16)'; g.fill();
+                if (hit) { g.strokeStyle = 'rgba(255,230,220,0.95)'; g.lineWidth = 1.4; g.stroke(); }
+            }
+            if (this.eraseSel) {
+                const b = this.eraseSel.b, c = this.worldIso(b.tx + 0.5, b.ty + 0.5), n = this.eraseWalls().length;
+                g.font = '700 15px "Lilita One", "Nunito", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+                const label = n ? `${n} wall${n === 1 ? '' : 's'}` : 'no walls';
+                g.lineWidth = 4; g.strokeStyle = 'rgba(20,6,6,0.9)'; g.strokeText(label, c.x, c.y - 28);
+                g.fillStyle = n ? '#ffd6ce' : '#c8c8d0'; g.fillText(label, c.x, c.y - 28);
+            }
         }
 
         tilePoly(g, tx, ty, size = 1) {
@@ -1941,7 +2107,7 @@
             const c = this.screenToTile(this.input.x, this.input.y);
             const w = this.worldIso(c.tfx, c.tfy);
             g.save(); g.strokeStyle = 'rgba(166,236,255,0.9)'; g.lineWidth = 2.5; g.setLineDash([8, 5]);
-            g.beginPath(); g.ellipse(w.x, w.y, CFG.spellRadius * CFG.tileW / 2, CFG.spellRadius * CFG.tileH / 2, 0, 0, TAU); g.stroke();
+            g.beginPath(); g.ellipse(w.x, w.y, CFG.spellRadius * S * CFG.tileW / 2, CFG.spellRadius * S * CFG.tileH / 2, 0, 0, TAU); g.stroke();
             g.fillStyle = 'rgba(166,236,255,0.12)'; g.fill();
             g.restore();
         }
@@ -1949,7 +2115,7 @@
             g.save();
             g.fillStyle = col.replace(/[\d.]+\)$/, '0.08)');
             g.strokeStyle = col; g.lineWidth = 2; g.setLineDash([7, 6]);
-            g.beginPath(); g.ellipse(x, y, range * CFG.tileW / 2, range * CFG.tileH / 2, 0, 0, TAU); g.fill(); g.stroke();
+            g.beginPath(); g.ellipse(x, y, range * S * CFG.tileW / 2, range * S * CFG.tileH / 2, 0, 0, TAU); g.fill(); g.stroke();
             g.restore();
         }
         drawRange(g) {
@@ -1984,7 +2150,8 @@
 
             const grow = b.build < 1 ? easeOutBack(Math.max(0, b.build)) : 1;
             const popS = b.pop > 0 ? 1 + 0.07 * Math.sin(b.pop * Math.PI) : 1;
-            const upS = b.upg > 0 ? 1 + 0.09 * Math.sin(b.upg * Math.PI) : 1;
+            const upS = (b.upg > 0 ? 1 + 0.09 * Math.sin(b.upg * Math.PI) : 1) * (b.evolve > 0 ? 1 + 0.2 * Math.sin(Math.min(1, (1 - b.evolve) * 2.2) * Math.PI) * Math.min(1, b.evolve * 3) : 1);
+            this.drawTierAura(g, b, def, sp, c, t, alpha);
             const sx = popS * upS, sy = grow * popS * upS;
             const sel = this.selected === b, hov = this.hoverBuilding === b;
 
@@ -2003,6 +2170,7 @@
             A.drawSprite(g, sp, 0, 0, alpha);
             g.restore();
 
+            if (b.evolve > 0) this.drawEvolve(g, b, def, sp, c, alpha);
             if (b.upg > 0) {       // upgrade flash
                 g.save(); g.globalAlpha = b.upg * 0.55 * alpha; g.globalCompositeOperation = 'lighter';
                 A.drawGlow(g, sp, c.x, c.y, '#ffe9a0', 0.5); g.restore();
@@ -2016,6 +2184,37 @@
             g.restore();
             if (sp.lights.length) this._lightQ.push({ sp, x: c.x, y: c.y });
             if (alpha > 0.6) this.drawBuildingFx(g, b, sp, c, t);
+        }
+
+        // The upper looks glow on the ground: gold for tier 3, ruby for tier 4; walls get violet, gold and ember
+        drawTierAura(g, b, def, sp, c, t, alpha) {
+            const tier = tierOf(b.type, b.level);
+            const col = b.type === 'wall' ? ['#000', '#000', '#000', '#a080ff', '#ffd86a', '#ff8a3a'][tier - 1] : TIER_GLOW[tier - 1];
+            if (!col || col === '#000' || alpha < 0.5 || def.decor) return;
+            const r = (b.type === 'wall' ? 1.6 : def.size * 0.62) * CFG.tileW, pulse = 0.55 + 0.45 * Math.sin(t * 2.2 + b.tx * 0.9 + b.ty * 0.5);
+            g.save(); g.globalCompositeOperation = 'lighter';
+            g.globalAlpha = (b.type === 'wall' ? 0.34 : 0.22 + 0.1 * (tier - 3)) * pulse * alpha;
+            g.drawImage(A.glowSprite(col), c.x - r * 1.15, c.y - r * 0.62, r * 2.3, r * 1.24);
+            g.restore();
+        }
+        // The moment a building steps up to its next look: a pillar of light, shock rings and a white-hot flash
+        drawEvolve(g, b, def, sp, c, alpha) {
+            const k = b.evolve, tier = tierOf(b.type, b.level), col = TIER_COL[tier - 1] || '#ffe066';
+            const wall = b.type === 'wall', h = wall ? 90 : 260, w = wall ? 18 : 46;
+            g.save(); g.globalCompositeOperation = 'lighter';
+            const gr = g.createLinearGradient(0, c.y, 0, c.y - h);
+            gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(255,255,255,0)');
+            g.globalAlpha = Math.min(1, k * 1.4) * 0.55;
+            g.fillStyle = gr; g.fillRect(c.x - w / 2 * (0.4 + k * 0.6), c.y - h, w * (0.4 + k * 0.6), h);
+            g.globalAlpha = k * k * 0.85;
+            A.drawGlow(g, sp, c.x, c.y, '#ffffff', 0.8);
+            g.restore();
+            for (const [rk, rc] of [[0, col], [0.22, '#ffffff']]) {
+                const p = Math.max(0, (1 - k) - rk);
+                if (p <= 0 || p > 0.6) continue;
+                g.save(); g.globalAlpha = Math.max(0, 1 - p / 0.6) * 0.9; g.strokeStyle = rc; g.lineWidth = 3;
+                g.beginPath(); g.ellipse(c.x, c.y, (wall ? 24 : def.size * CFG.tileW * 1.3) * (0.3 + p * 3), (wall ? 12 : def.size * CFG.tileH * 1.3) * (0.3 + p * 3), 0, 0, TAU); g.stroke(); g.restore();
+            }
         }
 
         // level tags, hp bars and upgrade arrows, drawn above everything on the map
@@ -2037,7 +2236,7 @@
                 const sel = this.selected === b, hov = this.hoverBuilding === b;
                 // HP bar (above the upgrade arrow when there is one)
                 if (b.hp < b.maxHp && !def.decor) {
-                    const bw = def.size * 36, bx = c.x - bw / 2, by = c.y + sp.bbox.y0 - (arrowOn(b) ? 40 : 22);
+                    const bw = Math.max(14, def.size * 12), bx = c.x - bw / 2, by = c.y + sp.bbox.y0 - (arrowOn(b) ? 40 : 22);
                     g.fillStyle = 'rgba(8,6,6,0.85)'; g.fillRect(bx - 1.5, by - 1.5, bw + 3, 7);
                     g.fillStyle = '#3a1010'; g.fillRect(bx, by, bw, 4);
                     const f = Math.max(0, b.hp / b.maxHp);
@@ -2052,7 +2251,7 @@
                     const tx = c.x, ty = c.y + fh + 6;
                     const max = b.level >= def.maxLevel;
                     // the badge takes the colour of the building's look: bronze, silver, gold, ruby
-                    const tcol = ['#c98a52', '#d5dde6', '#ffd34a', '#ff6fb1'][tierOf(b.type, b.level) - 1];
+                    const tcol = TIER_COL[tierOf(b.type, b.level) - 1];
                     const label = max ? 'MAX' : String(b.level);
                     g.font = '700 11px "Lilita One", "Nunito", sans-serif';
                     const w = Math.max(22, g.measureText(label).width + 14);
@@ -2187,8 +2386,14 @@
                     g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill();
                     break;
                 }
-                case 'archer': case 'xbow': case 'clancastle': case 'bone': {
-                    const a = p.type === 'bone' ? ang : Math.atan2(p.ty - p.y, p.tx - p.x) || ang;
+                case 'fireorb': case 'darkorb': {
+                    const c1 = p.type === 'fireorb' ? ['#fff3c0', '#ff9a30', 'rgba(255,120,30,0)'] : ['#f0d8ff', '#a050e0', 'rgba(150,60,220,0)'];
+                    const gr = g.createRadialGradient(0, 0, 0, 0, 0, 9); gr.addColorStop(0, c1[0]); gr.addColorStop(0.45, c1[1]); gr.addColorStop(1, c1[2]);
+                    g.fillStyle = gr; g.beginPath(); g.arc(0, 0, 9, 0, TAU); g.fill();
+                    break;
+                }
+                case 'archer': case 'xbow': case 'clancastle': case 'bone': case 'earrow': {
+                    const a = (p.type === 'bone' || p.type === 'earrow') ? ang : Math.atan2(p.ty - p.y, p.tx - p.x) || ang;
                     g.rotate(a);
                     g.strokeStyle = p.type === 'bone' ? '#efe6cc' : '#d8c8a0'; g.lineWidth = p.type === 'xbow' ? 2.2 : 1.6; g.lineCap = 'round';
                     g.beginPath(); g.moveTo(-7, 0); g.lineTo(5, 0); g.stroke();

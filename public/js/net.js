@@ -387,10 +387,12 @@
                     if (!b || typeof b !== 'object' || typeof b.type !== 'string' || !Object.hasOwn(BLD, b.type)) continue;
                     const def = BLD[b.type];
                     const maxHp = cleanInt(b.maxHp, 1, 1, 1e9);
+                    // a partner on the older, coarser map sends tile positions a third of the size
+                    const old = s.grid !== CFG.gridW, k = old ? CFG.tileDiv : 1, off = old && def.size >= 4 ? 1 : 0;
                     buildings.push({
                         type: b.type,
-                        tx: cleanInt(b.tx, 0, 0, CFG.gridW - 1),
-                        ty: cleanInt(b.ty, 0, 0, CFG.gridH - 1),
+                        tx: cleanInt(Number(b.tx) * k + off, 0, 0, CFG.gridW - 1),
+                        ty: cleanInt(Number(b.ty) * k + off, 0, 0, CFG.gridH - 1),
                         level: cleanInt(b.level, 1, 1, def.maxLevel),
                         hp: cleanInt(b.hp, maxHp, 0, maxHp),
                         maxHp,
@@ -423,6 +425,7 @@
                     type: b.type, tx: b.tx, ty: b.ty, level: b.level,
                     hp: b.hp, maxHp: b.maxHp,
                 })),
+                grid: CFG.gridW,
                 wave: { number: this.wave.number, active: this.wave.active, timer: this.wave.timer },
                 enemies: this.enemies.length,
                 dayTime: this.dayTime,
@@ -638,6 +641,7 @@
         //   v5 — adds the number format (settings.notation)
         //   v6 — ascension (meta), quests, view / x-ray / auto-upgrade settings
         //   v7 — wave boons, tutorial progress, seen tips, difficulty
+        //   v8 — the map is 72x72 small tiles: buildings 3x3, walls 1x1, Town Hall 4x4; repair fund
         snapshot() {
             // Sanitize wave timer on write so a stale game-over value never leaks into saves
             const sanitizedTimer = Math.max(5, Math.min(this.wave.timer || CFG.waveBaseSec, Math.max(CFG.waveBaseSec, 120)));
@@ -656,9 +660,9 @@
                 settings: {
                     sound: !this.audio.muted, autoCollect: this.autoCollect, notation: K.data.state.notation,
                     view: this.settings.view, xray: this.settings.xray, autoUpgrade: this.settings.autoUpgrade,
-                    levelTags: this.settings.levelTags, hints: this.settings.hints, spacing: this.settings.spacing, raidStart: this.settings.raidStart, difficulty: this.settings.difficulty,
+                    levelTags: this.settings.levelTags, hints: this.settings.hints, raidStart: this.settings.raidStart, difficulty: this.settings.difficulty,
                 },
-                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen, pending: this.pendingBoon, reignCrowns: this.reignCrowns, sides: this.wave.active ? this.wave.sides : this.wave.nextSides },
+                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen, pending: this.pendingBoon, reignCrowns: this.reignCrowns, repairFund: Math.floor(this.repairFund), sides: this.wave.active ? this.wave.sides : this.wave.nextSides },
                 quests: this.quests.map(q => ({ kind: q.kind, target: q.target, start: q.start, gems: q.gems, done: !!q.done })),
                 // While the tab is hidden the game is frozen, so the clock for
                 // offline earnings starts when it was hidden, not when we saved
@@ -718,8 +722,29 @@
                 if (!d.settings) d.settings = {};
                 d.settings.difficulty = 'normal';
             }
+            if (v < 8) d.buildings = this.upscaleLayout(d.buildings);
             d.v = CFG.saveVersion;
             return d;
+        }
+        // An old save lives on a 24x24 grid of big tiles. Each old tile becomes a 3x3 block: ordinary buildings fill it,
+        // the 2x2 buildings (now 4x4) sit in the middle of their 6x6, and each wall becomes a one-tile post that
+        // keeps its links to the walls beside it, so a long rampart is still one unbroken line.
+        upscaleLayout(list) {
+            const S = CFG.tileDiv, out = [], walls = new Map();
+            for (const b of list) {
+                if (!b || !Object.hasOwn(BLD, b.type) || !Number.isInteger(b.tx) || !Number.isInteger(b.ty)) continue;
+                if (b.type === 'wall') { walls.set(b.tx + ',' + b.ty, b); continue; }
+                const big = b.type === 'townhall' || b.type === 'clancastle' || b.type === 'fountain';
+                out.push(Object.assign({}, b, { tx: b.tx * S + (big ? 1 : 0), ty: b.ty * S + (big ? 1 : 0) }));
+            }
+            for (const w of walls.values()) {
+                const x = w.tx * S + 1, y = w.ty * S + 1;
+                out.push(Object.assign({}, w, { tx: x, ty: y }));
+                const link = (dx, dy) => { for (let i = 1; i < S; i++) out.push(Object.assign({}, w, { id: undefined, tx: x + dx * i, ty: y + dy * i })); };
+                if (walls.has((w.tx + 1) + ',' + w.ty)) link(1, 0);
+                if (walls.has(w.tx + ',' + (w.ty + 1))) link(0, 1);
+            }
+            return out;
         }
 
         loadSave() {
@@ -757,7 +782,8 @@
             this.achievements = {};
             this.crowns = 0; this.crownsEver = 0; this.perks = {}; for (const k in PERKS) this.perks[k] = 0; this.ascensions = 0;
             this.reignCrowns = 1; this.pendingBoon = false;
-            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, spacing: true, raidStart: 'auto', difficulty: 'normal' };
+            this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, raidStart: 'auto', difficulty: 'normal' };
+            this.repairFund = 0;
             this.boons = {}; this.tut = { step: 0, done: false }; this.tipsSeen = {};
             this.quests = [];
             this.wave.number = 0; this.wave.timer = 120; this.wave.active = false;
@@ -800,7 +826,6 @@
             this.settings.autoUpgrade = ['off', 'economy', 'defense', 'all'].includes(s.autoUpgrade) ? s.autoUpgrade : 'off';
             this.settings.levelTags = s.levelTags === 'hover' ? 'hover' : 'always';
             this.settings.hints = s.hints !== false;
-            this.settings.spacing = s.spacing !== false;
             this.settings.raidStart = s.raidStart === 'manual' ? 'manual' : 'auto';
             this.settings.difficulty = Object.hasOwn(K.data.DIFFICULTY, s.difficulty) ? s.difficulty : 'normal';
 
@@ -817,6 +842,7 @@
             // keep the telegraphed raid sides across a reload (a mid-raid save replays the same wave)
             this._loadedSides = Array.isArray(m.sides) ? [...new Set(m.sides.map(Number).filter(s => s >= 0 && s <= 3))].slice(0, 3) : null;
             this.reignCrowns = safeNum(m.reignCrowns, 1, 0.5, 2);
+            this.repairFund = Math.floor(safeNum(m.repairFund, 0, 0, 1e9));
             if (this.pendingBoon) setTimeout(() => this.offerPendingBoon(), 1500);
             this.tipsSeen = {};
             if (m.tips && typeof m.tips === 'object') for (const k of Object.keys(m.tips).slice(0, 40)) if (m.tips[k] === true) this.tipsSeen[String(k).slice(0, 24)] = true;
@@ -883,8 +909,8 @@
         }
 
         placeInitial() {
-            const cx = Math.floor(CFG.gridW / 2) - 1;
-            const cy = Math.floor(CFG.gridH / 2) - 1;
+            const cx = Math.floor(CFG.gridW / 2) - 2;       // the 4x4 Town Hall sits in the middle; everything else is 3x3 and touches it
+            const cy = Math.floor(CFG.gridH / 2) - 2;
             const push = (type, tx, ty) => {
                 const def = BLD[type];
                 this.buildings.push({
@@ -895,10 +921,10 @@
             this.buildings = [];
             push('townhall', cx, cy);
             push('goldmine', cx - 3, cy);
-            push('goldmine', cx - 3, cy + 2);
-            push('elixirwell', cx + 3, cy);
-            push('cannon', cx + 3, cy + 3);
-            push('cannon', cx - 3, cy - 2);
+            push('goldmine', cx - 3, cy + 3);
+            push('elixirwell', cx + 4, cy);
+            push('cannon', cx + 4, cy + 3);
+            push('cannon', cx - 3, cy - 3);
             this.occDirty = true;
             this.rebuildOcc();
             this.recomputeRates();

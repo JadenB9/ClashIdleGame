@@ -11,7 +11,7 @@ const K = window.KOE, A = K.art;
 const q = new URLSearchParams(location.search);
 A.setView(q.get('view') || 'balanced');
 const only = q.get('only') ? q.get('only').split(',') : null;
-const tiers = (q.get('tiers') || '1,2,3,4').split(',').map(Number);
+const tiers = (q.get('tiers') || '1,2,3,4,5,6').split(',').map(Number);
 const types = Object.keys(A.painters).filter(t => !only || only.includes(t));
 const cv = document.getElementById('c'), g = cv.getContext('2d');
 const Z = +(q.get('z') || 1);

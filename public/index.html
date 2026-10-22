@@ -30,7 +30,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261021l">
+    <link rel="stylesheet" href="css/style.css?v=20261022a">
 </head>
 <body>
     <!-- Icon sprite. Colour icons carry their own fills; the rest use currentColor. -->
@@ -147,7 +147,7 @@
                     <div class="wave-preview" id="wavePreview" aria-label="Next raid"></div>
                     <div class="wave-actions" id="waveActions">
                         <button class="btn small good" id="btnStartRaid" type="button" title="Call the next raid now (N)">Start now</button>
-                        <button class="chip-btn" id="btnRaidMode" type="button" aria-pressed="false" title="Auto: raids start when the timer ends. Manual: they wait until you press Start raid.">Auto</button>
+                        <button class="chip-btn" id="btnRest" type="button" aria-pressed="false" title="Rest (Z): raids wait until you call them, but your collectors only work at half speed while you rest.">Rest</button>
                     </div>
                 </div>
                 <div class="goal-card" id="goalCard" hidden></div>
@@ -173,7 +173,8 @@
             <!-- Abilities -->
             <div class="abilities" id="abilities">
                 <button class="ability" id="actCollect" type="button" aria-label="Collect all" title="Collect every ready coin bubble (Space)"><svg aria-hidden="true"><use href="#i-sack"/></svg><span class="ab-name">Collect</span><b class="dot" id="collectDot" hidden>0</b></button>
-                <button class="ability" id="actRally" type="button" aria-label="Rally defenses" title="Repair everything and reset tower cooldowns (R)"><svg aria-hidden="true"><use href="#i-heart"/></svg><span class="ab-name" id="rallyLabel">Rally</span></button>
+                <button class="ability" id="actRally" type="button" aria-label="Rally defenses" title="Heal every building a little and reset tower cooldowns (R)"><svg aria-hidden="true"><use href="#i-heart"/></svg><span class="ab-name" id="rallyLabel">Rally</span></button>
+                <button class="ability" id="actRepair" type="button" aria-label="Repair" title="Repair everything for gems, or pay into the repair fund (K)"><svg aria-hidden="true"><use href="#i-hammer"/></svg><span class="ab-name">Repair</span><b class="dot" id="repairDot" hidden>0</b></button>
                 <button class="ability" id="actBoost" type="button" aria-label="Boost production for 3 gems" title="3 gems: double production for 60s"><svg aria-hidden="true"><use href="#i-gem"/></svg><span class="ab-name" id="boostLabel">Boost</span></button>
                 <button class="ability" id="actSpell" type="button" aria-label="Lightning, 1 gem" title="1 gem: lightning strike (L)"><svg aria-hidden="true"><use href="#i-bolt"/></svg><span class="ab-name">Lightning</span></button>
                 <button class="ability" id="actFreeze" type="button" aria-label="Freeze, 2 gems" title="2 gems: freeze every raider for 4 seconds (F)"><svg aria-hidden="true"><use href="#i-snow"/></svg><span class="ab-name">Freeze</span></button>
@@ -203,7 +204,8 @@
                 <section class="tab-content" data-tab="build" id="panel-build" role="region" aria-label="Build">
                     <div class="seg cat-seg" id="catSeg" role="group" aria-label="Category"></div>
                     <div id="buildMenu" class="build-grid"></div>
-                    <p class="hint">Tap a card, then tap the grass. Walls and decorations can be painted by dragging.</p>
+                    <div class="tool-row"><button class="btn small" id="btnEraser" type="button" title="Select and remove whole rows of walls (E)"><svg aria-hidden="true"><use href="#i-trash"/></svg>Wall eraser</button><span>Drag along a row of walls to clear it.</span></div>
+                    <p class="hint">Tap a card, then tap the grass. Buildings are 3x3 tiles and can sit side by side. Walls (1x1) and decorations can be painted by dragging.</p>
                 </section>
 
                 <!-- Upgrade -->
@@ -318,7 +320,6 @@
                         </div>
                     </div>
                     <div class="setting-row"><span class="setting-label" id="lblXray">See-through front buildings</span><button class="btn small" id="btnXray" type="button" aria-pressed="true" aria-labelledby="lblXray btnXray">On</button></div>
-                    <div class="setting-row"><span class="setting-label" id="lblSpacing" title="New buildings must leave one empty tile between them. Walls and decorations are exempt.">Space between buildings</span><button class="btn small" id="btnSpacing" type="button" aria-pressed="true" aria-labelledby="lblSpacing btnSpacing">On</button></div>
                     <div class="setting-row"><span class="setting-label" id="lblHints">Upgrade arrows</span><button class="btn small" id="btnHints" type="button" aria-pressed="true" aria-labelledby="lblHints btnHints">On</button></div>
                     <div class="setting-row stacked"><span class="setting-label" id="lblTags">Level tags</span>
                         <div class="seg" role="group" aria-labelledby="lblTags" id="tagsSeg">
@@ -384,16 +385,16 @@
     </div>
 
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
-    <script src="js/data.js?v=20261021l"></script>
-    <script src="js/art-core.js?v=20261021l"></script>
-    <script src="js/art-buildings-a.js?v=20261021l"></script>
-    <script src="js/art-buildings-b.js?v=20261021l"></script>
-    <script src="js/art-world.js?v=20261021l"></script>
-    <script src="js/art-units.js?v=20261021l"></script>
-    <script src="js/game.js?v=20261021l"></script>
-    <script src="js/ui.js?v=20261021l"></script>
-    <script src="js/features.js?v=20261021l"></script>
-    <script src="js/net.js?v=20261021l"></script>
-    <script src="js/boot.js?v=20261021l"></script>
+    <script src="js/data.js?v=20261022a"></script>
+    <script src="js/art-core.js?v=20261022a"></script>
+    <script src="js/art-buildings-a.js?v=20261022a"></script>
+    <script src="js/art-buildings-b.js?v=20261022a"></script>
+    <script src="js/art-world.js?v=20261022a"></script>
+    <script src="js/art-units.js?v=20261022a"></script>
+    <script src="js/game.js?v=20261022a"></script>
+    <script src="js/ui.js?v=20261022a"></script>
+    <script src="js/features.js?v=20261022a"></script>
+    <script src="js/net.js?v=20261022a"></script>
+    <script src="js/boot.js?v=20261022a"></script>
 </body>
 </html>

@@ -15,7 +15,8 @@
 
     // sprite supersampling: sharper on high-density screens, where zoomed-in sprites would otherwise go soft
     const SS = (window.devicePixelRatio || 1) >= 1.5 ? 4 : 3;
-    const view = { name: 'balanced', hk: VIEWS.balanced.hk };
+    // tw/th: the tile size the sprites are DESIGNED at (a 3x3 block). The real tile (CFG.tileW) is a third of it.
+    const view = { name: 'balanced', hk: VIEWS.balanced.hk, tw: VIEWS.balanced.tileW, th: VIEWS.balanced.tileH };
 
     // ---------- tiny utilities ----------
     const mk = (w, h) => {
@@ -572,13 +573,14 @@
     // Painters register themselves on K.art.painters[type] = (P, tier, o) => void
     const painters = {};
     const sprites = new Map();
-    // How much room above/below/side the canvas needs, per footprint size
-    const HEADROOM = { 1: 150, 2: 230 };
+    // How much room above the footprint the canvas needs, by design size (in design units)
+    const headroom = (art) => (art >= 2 ? 230 : 150);
 
-    const geoFor = (size) => ({
-        size,
-        fw: CFG.tileW * size / 2,
-        fh: CFG.tileH * size / 2,
+    // art = design size in old building tiles (1 for a 3x3 building, 2 for the 4x4 Town Hall, 1/3 for a wall)
+    const geoFor = (art) => ({
+        size: art,
+        fw: view.tw * art / 2,
+        fh: view.th * art / 2,
         hk: view.hk,
     });
 
@@ -598,27 +600,33 @@
         return out;
     };
 
-    // Build a sprite from a paint function. o.key makes it cacheable.
-    const buildSprite = (paint, size, extra = {}) => {
-        const geo = geoFor(size);
+    // Build a sprite from a paint function. Painters work at their design size; k shrinks or grows the finished
+    // picture to the footprint it really covers (the 4x4 Town Hall is drawn from the 2x2 design at k = 2/3).
+    const buildSprite = (paint, art, extra = {}) => {
+        const geo = geoFor(art);
+        const k = extra.k || 1;
         geo.tier = extra.tier || 1;
         geo.lights = [];
         geo.anchors = [];
         geo.shadows = [];
-        geo.shadowAt = (x, y, rx, ry, a) => geo.shadows.push({ x, y, rx, ry, a: a == null ? 1 : a });
-        geo.light = (x, y, r, color) => geo.lights.push({ x, y, r, color: color || '#ffcf6a' });
-        geo.anchor = (name, x, y, o) => geo.anchors.push(Object.assign({ name, x, y }, o || {}));
+        geo.shadowAt = (x, y, rx, ry, a) => geo.shadows.push({ x: x * k, y: y * k, rx: rx * k, ry: ry * k, a: a == null ? 1 : a });
+        geo.light = (x, y, r, color) => geo.lights.push({ x: x * k, y: y * k, r: r * k, color: color || '#ffcf6a' });
+        geo.anchor = (name, x, y, o) => {
+            const a = Object.assign({ name, x: x * k, y: y * k }, o || {});
+            if (k !== 1) for (const key of ['rx', 'ry', 'r', 'h', 'w', 's']) if (typeof a[key] === 'number') a[key] *= k;
+            geo.anchors.push(a);
+        };
         const wUnits = Math.ceil(geo.fw * 2 + 72);
-        const up = extra.up || HEADROOM[size] * (0.6 + 0.4 * geo.hk);
+        const up = extra.up || headroom(art) * (0.6 + 0.4 * geo.hk);
         const down = geo.fh + 26;
-        const raw = mk(wUnits * SS, (up + down) * SS);
+        const raw = mk(wUnits * k * SS, (up + down) * k * SS);
         const g = raw.getContext('2d');
-        g.scale(SS, SS);
+        g.scale(SS * k, SS * k);
         g.translate(wUnits / 2, up);
         paint(g, geo);
         const lineCol = extra.outline || 'rgba(32,20,12,0.9)';
-        const canvas = outlined(raw, lineCol, 1.35 * SS);
-        const sp = { canvas, ox: wUnits / 2, oy: up, w: wUnits, h: up + down, mask: null, lights: geo.lights, anchors: geo.anchors, shadows: geo.shadows };
+        const canvas = outlined(raw, lineCol, (extra.edge || 1.35) * SS);
+        const sp = { canvas, ox: wUnits * k / 2, oy: up * k, w: wUnits * k, h: (up + down) * k, mask: null, lights: geo.lights, anchors: geo.anchors, shadows: geo.shadows };
         return sp;
     };
 
@@ -687,9 +695,10 @@
 
     // Upgraded buildings get pennant posts at their side corners, so the tier reads from across the map:
     // silver and blue, then gold and purple, then gold with ruby caps and bigger red pennants.
-    const flourish = (g, geo, tier, size) => {
+    // From tier 3 the posts carry burning braziers and tier 4 adds a floating crown of light.
+    const flourish = (g, geo, tier, art) => {
         if (tier < 2) return;
-        const X = geo.fw * 0.98, y = 2, H = size >= 2 ? 31 : 23;
+        const X = geo.fw * 0.98, y = 2, H = art >= 2 ? 31 : 23;
         const pole = tier === 2 ? '#d9dee8' : '#f0c040';
         const flag = tier === 2 ? '#3a78d8' : tier === 3 ? '#8a45c8' : '#e8403c';
         const len = tier === 4 ? 15 : 10.5, drop = tier === 4 ? 9 : 6.5;
@@ -701,18 +710,27 @@
             g.fillStyle = flag; g.strokeStyle = 'rgba(30,16,12,0.9)'; g.lineWidth = 1;
             g.beginPath(); g.moveTo(x, y - H); g.lineTo(x + s * len, y - H + drop * 0.5); g.lineTo(x, y - H + drop); g.closePath(); g.fill(); g.stroke();
             g.fillStyle = tier === 4 ? '#ff5a5a' : pole; g.beginPath(); g.arc(x, y - H, tier === 4 ? 3 : 2.3, 0, 7); g.fill(); g.stroke();
+            if (tier >= 3) {          // brazier bowl on the post, lit by the animation layer
+                g.fillStyle = '#2a2024'; g.strokeStyle = '#0c0808'; g.lineWidth = 0.9;
+                g.beginPath(); g.moveTo(x - 4, y - H * 0.42); g.lineTo(x + 4, y - H * 0.42); g.lineTo(x + 2.4, y - H * 0.42 + 4.4); g.lineTo(x - 2.4, y - H * 0.42 + 4.4); g.closePath(); g.fill(); g.stroke();
+                geo.anchor('fire', x, y - H * 0.42, { s: tier === 4 ? 0.8 : 0.55 });
+                geo.light(x, y - H * 0.42 - 3, 11, tier === 4 ? '#ff7a50' : '#ffb050');
+            }
         }
         g.restore();
+        if (tier === 4) geo.anchor('crown', 0, -(art >= 2 ? 190 : 120) * geo.hk, { r: 14 });
     };
 
+    // Which painter-level tier arrays exist: most buildings have 4 looks, walls have 6
     const getSprite = (type, tier, variant = 0) => {
         const key = `${view.name}|${type}|${tier}|${variant}`;
         let sp = sprites.get(key);
         if (sp) return sp;
         const painter = painters[type];
-        const size = K.data.BLD[type].size;
         const D = K.data.BLD[type];
-        sp = buildSprite((g, geo) => { painter(g, geo, tier, variant); if (type !== 'townhall' && type !== 'wall' && !D.decor) flourish(g, geo, tier, size); }, size, { up: painters[type].up, tier });
+        const art = U.artSize(type);
+        const k = (D.size / CFG.tileDiv) / art;
+        sp = buildSprite((g, geo) => { painter(g, geo, tier, variant); if (type !== 'townhall' && type !== 'wall' && !D.decor) flourish(g, geo, tier, art); }, art, { up: painters[type].up, tier, k, edge: type === 'wall' ? 0.9 : 1.35 });
         sp.type = type; sp.tier = tier;
         sprites.set(key, sp);
         return sp;
@@ -721,10 +739,10 @@
     const setView = (name) => {
         if (!VIEWS[name]) name = 'balanced';
         const v = VIEWS[name];
-        CFG.tileW = v.tileW;
-        CFG.tileH = v.tileH;
+        CFG.tileW = v.tileW / CFG.tileDiv;
+        CFG.tileH = v.tileH / CFG.tileDiv;
         view.name = name;
-        view.hk = v.hk;
+        view.hk = v.hk; view.tw = v.tileW; view.th = v.tileH;
         sprites.clear();
         K.art.spriteVersion = (K.art.spriteVersion || 0) + 1;
         K.art.thumbs = {};

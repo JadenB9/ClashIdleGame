@@ -31,13 +31,23 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   damage, XP, starting gold). Gems, crowns, perks and achievements stay.
 - **More to build.** 18 original structures plus the Frost Spire (slows
   raiders), Gem Quarry and four decorations (oak, garden, fountain, hero
-  statue) that add a little production each. Walls connect to each other
-  and can be painted by dragging. Cannons and mortars hit ground only, Air
-  Defense hits flyers only.
+  statue) that add a little production each. The map is a 72x72 grid:
+  buildings are 3x3 tiles, the Town Hall and Clan Castle 4x4, walls 1x1, and
+  everything can sit side by side. Walls connect to each other, can be painted
+  by dragging, and the **wall eraser** (E) removes whole rows or boxes at
+  once. Cannons and mortars hit ground only, Air Defense hits flyers only.
+  The Town Hall allows 50 more walls per level than before (75 at level 1).
 - **Smarter raiders.** Ground raiders path around walls with a flow field and
-  only chew through when walking is much worse. Wolves, skeleton archers
-  and the Stone Golem boss (every tenth wave) join the goblins, orcs,
-  trolls, ogres, bats and dragons. The raid card previews the next wave.
+  only chew through when walking is much worse. Barbarians, Archers, Giants,
+  Wall Breakers (blow holes in walls), Hog Riders (leap walls), Wizards,
+  Balloons, Witches (raise skeleton minions) and the P.E.K.K.A join the
+  goblins, wolves, orcs, trolls, ogres, bats and dragons, and the Stone
+  Golem boss comes every tenth wave. The raid card previews the next wave.
+- **Rest and repair.** **Rest** (Z) holds raids back so you never have to
+  defend non-stop, but collectors only run at half speed while you rest.
+  **Repair** (K) mends everything for gems, or you feed gold into a repair
+  fund that pays for the whole job the moment it covers the damage.
+  Upgrading a building also heals it fully.
 - **Clear from the first minute.** A goal card walks a new player through
   eight steps (tap a coin bubble, upgrade, build a cannon, survive a raid,
   pick a boon, the Upgrade tab, quests, the long-term goal), pointing at what
@@ -55,17 +65,20 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   gem Boost, 1x/2x/3x game speed, and a Relaxed / Normal / Hard setting.
 - **Alive map.** Rain comes and goes, birds cross the sky, hurt buildings
   smoke and then burn, maxed buildings shine, and every upgrade tier adds a
-  metal trim to the plinth plus extra crystals, coils or barrels.
-- **Saves.** `localStorage`, versioned (v7) with a backup slot, corrupt-save
+  metal trim to the plinth plus extra crystals, coils or barrels. Stepping
+  up to a new look fires a light pillar, shock rings and a flash, and the
+  upper tiers glow on the ground. Walls have six distinct looks: wood,
+  stone, riveted iron, obsidian crystal, gilded marble and molten basalt.
+- **Saves.** `localStorage`, versioned (v8) with a backup slot, corrupt-save
   recovery and export / import. The tab pauses when hidden; time away
-  pays half rate for up to 4 hours. Old saves load unchanged.
+  pays half rate for up to 4 hours. Old saves are upscaled onto the finer grid when they load.
 - **Themes.** Light and dark follow the site's `localStorage.theme`. Number
   format, sound, level tags and upgrade arrows are in Menu.
 - **Co-op over PeerJS** with a relay status, partner minimap and gifts.
 - **Phones.** Pinch to zoom, one-finger pan, panels become a bottom sheet.
 
 Keyboard: Space collect, U upgrade, P pause, X speed, V camera, W War Cry,
-L lightning, F freeze, A auto-collect, R rally, M mute, T theme, 1–5 panels,
+L lightning, F freeze, A auto-collect, R rally, Z rest, K repair, E wall eraser, M mute, T theme, 1–5 panels,
 +/− zoom, 0 home, Esc cancel, ? or H how to play.
 
 ## Running it

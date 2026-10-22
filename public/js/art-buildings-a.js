@@ -15,7 +15,7 @@
     // bp = { x, y, fw, fh, h, lift } is the same box you passed to box(); hRef is the
     // wall height in classic-view units so doors and windows keep their proportions.
     const faceSpace = (bp, hRef) => {
-        const fwc = bp.fw * 72 / K.data.CFG.tileW;
+        const fwc = bp.fw * 72 / A.view.tw;
         return { W: 100, H: Math.max(24, 100 * hRef * 0.8165 / fwc) };
     };
     const onFace = (g, side, bp, hRef, fn) => {
@@ -174,7 +174,7 @@
     };
     // General prism along the tile axes (walls, fences). a,b = half extents in tiles.
     const prism = (g, o) => {
-        const tw = K.data.CFG.tileW, th = K.data.CFG.tileH;
+        const tw = o.tw || A.view.tw, th = o.th || A.view.th;
         const ex = [tw / 2, th / 2], ey = [-tw / 2, th / 2];
         const lift = o.lift || 0, h = o.h;
         const pt = (sa, sb) => ({ x: o.cx + sa * o.a * ex[0] + sb * o.b * ey[0], y: o.cy + sa * o.a * ex[1] + sb * o.b * ey[1] - lift });
@@ -213,7 +213,7 @@
     A.h = { rimTrim, onFace, faceWorld, glowAt, windowF, doorF, timberF, coinPile, flagPole, leafBlob, plate, prism, archPath, faceSpace };
 
     // =========================================================
-    // TOWN HALL (2x2)
+    // TOWN HALL (4x4, drawn from the 2x2 design and scaled)
     // =========================================================
     P.townhall = (g, geo, tier) => {
         const { fw, fh, hk } = geo, H = (n) => n * hk, t = tier - 1;
@@ -674,45 +674,110 @@
     };
 
     // =========================================================
-    // WALL — variant is a 4-bit mask of connected neighbours:
+    // WALL (1x1 tile) — variant is a 4-bit mask of connected neighbours:
     //   1 = +x (down-right), 2 = +y (down-left), 4 = -x (up-left), 8 = -y (up-right)
+    // Six looks, each a clear step up: wooden palisade, cut stone, riveted iron,
+    // obsidian with glowing crystals, gilded marble with rubies, and molten basalt with flames.
     // =========================================================
-    P.wall = (g, geo, tier, mask = 0) => {
-        const { fh, hk } = geo, H = (n) => n * hk, t = tier - 1;
-        const stone = ['#9a9486', '#a8a4a0', '#8a90a0', '#d4cba8'][t];
-        const trimc = t === 3 ? '#e8c35a' : t === 2 ? '#4a5060' : shade(stone, 0.7);
-        const texL = T.stone(70, 60, stone, { rows: 4, seed: 41 + t, aspect: 1.5 });
-        const texR = T.stone(70, 60, shade(stone, 0.96), { rows: 4, seed: 42 + t, aspect: 1.5 });
-        const topC = shade(stone, 1.1);
-        const hw = H(22 + t * 1.5), ha = H(18 + t * 1.2);
-        geo.shadowAt(5, 3, geo.fw * 1.1, fh * 1.1, 0.8);
-        // Arms are prisms along a tile axis. Centre of an arm = 0.35 tile from the tile centre.
-        const tw = K.data.CFG.tileW, th = K.data.CFG.tileH;
-        const ex = [tw / 2, th / 2], ey = [-tw / 2, th / 2];
-        const drawArm = (sx, sy) => {
-            // direction vector (sx, sy) in tile space is (±1,0) or (0,±1)
-            const cx = (sx * ex[0] + sy * ey[0]) * 0.36, cy = (sx * ex[1] + sy * ey[1]) * 0.36;
-            const a = sx !== 0 ? 0.15 : 0.12, b = sx !== 0 ? 0.12 : 0.15;
-            prism(g, { cx, cy, a, b, h: ha, lift: 0, L: texL, R: texR, top: topC });
-        };
-        if (mask & 4) drawArm(-1, 0);
-        if (mask & 8) drawArm(0, -1);
-        // pillar
-        prism(g, { cx: 0, cy: 0, a: 0.2, b: 0.2, h: hw, L: texL, R: texR, top: topC });
-        // merlon cap on the pillar
-        prism(g, { cx: 0, cy: 0, a: 0.235, b: 0.235, h: H(4), lift: hw, L: shade(stone, 1.05), R: shade(stone, 0.7), top: shade(topC, 1.05) });
-        if (t >= 1) {
-            g.fillStyle = trimc;
-            prism(g, { cx: 0, cy: 0, a: 0.215, b: 0.215, h: H(2.2), lift: hw * 0.45, L: trimc, R: shade(trimc, 0.7) });
-        }
-        if (mask & 1) drawArm(1, 0);
-        if (mask & 2) drawArm(0, 1);
-        // moss for the oldest tier only
-        if (t === 0) {
-            g.fillStyle = 'rgba(80,130,50,0.7)';
-            g.beginPath(); g.ellipse(-4, -2, 3, 1.6, 0, 0, 7); g.ellipse(5, -hw * 0.7, 2.4, 1.4, 0, 0, 7); g.fill();
-        }
-        if (t === 3) geo.anchor('sparkle', 0, -hw - H(5), { color: '#fff3a8' });
+    const WALL = [
+        { base: '#8a6238', top: '#b88a52', cap: '#5a3a1c', ph: 9,  pw: 12 },
+        { base: '#aaa498', top: '#cfc9bb', cap: '#8a8478', ph: 11, pw: 14 },
+        { base: '#5b6272', top: '#8e98ac', cap: '#3a404e', ph: 12, pw: 15 },
+        { base: '#2e2644', top: '#6a5aa0', cap: '#1a1428', ph: 14, pw: 17 },
+        { base: '#ece4d2', top: '#fff6dc', cap: '#d9a21b', ph: 15, pw: 18 },
+        { base: '#2e2528', top: '#54403f', cap: '#161012', ph: 16, pw: 20 },
+    ];
+    const wallTex = (t, side) => {
+        const w = WALL[t], f = side === 'R' ? 0.94 : 1;
+        if (t === 0) return T.planks(30, 40, shade(w.base, f), { pw: 6, seed: 51 + (side === 'R' ? 1 : 0) });
+        if (t === 1) return T.stone(44, 36, shade(w.base, f), { rows: 3, seed: 52 + (side === 'R' ? 1 : 0), aspect: 1.5 });
+        if (t === 2) return T.iron(42, 30, shade(w.base, f), 53 + (side === 'R' ? 1 : 0));
+        if (t === 3) return T.rock(44, 36, shade(w.base, f), 54 + (side === 'R' ? 1 : 0));
+        if (t === 4) return T.stone(44, 36, shade(w.base, f), { rows: 3, seed: 55 + (side === 'R' ? 1 : 0), aspect: 2.3 });
+        return cached('wallember|' + side, () => {      // basalt with glowing lava seams
+            const c = mk(44, 36), g = c.getContext('2d');
+            g.drawImage(T.rock(44, 36, shade(w.base, f), 56), 0, 0);
+            const r = rng(side === 'R' ? 9 : 5);
+            for (const [col, lw] of [['rgba(255,90,20,0.9)', 2.6], ['#ffc040', 1.1]]) {
+                g.strokeStyle = col; g.lineWidth = lw; g.lineCap = 'round';
+                for (let i = 0; i < 4; i++) {
+                    let x = r() * 44, y = 2 + r() * 8;
+                    g.beginPath(); g.moveTo(x, y);
+                    for (let k = 0; k < 4; k++) { x += (r() - 0.5) * 14; y += 6 + r() * 6; g.lineTo(x, y); }
+                    g.stroke();
+                }
+            }
+            return c;
+        });
     };
-    P.wall.up = 80;
+    P.wall = (g, geo, tier, mask = 0) => {
+        const { hk } = geo, t = Math.min(5, tier - 1), W = WALL[t];
+        const tw = K.data.CFG.tileW, th = K.data.CFG.tileH;       // a wall is drawn at the real tile size
+        const hw = W.pw * hk, ha = W.ph * hk;                      // pillar and arm heights
+        const texL = wallTex(t, 'L'), texR = wallTex(t, 'R');
+        geo.shadowAt(2, 2, tw * 0.7, th * 0.7, 0.75);
+        const arm = (sx, sy) => {
+            const ex = [tw / 2, th / 2], ey = [-tw / 2, th / 2];
+            const cx = (sx * ex[0] + sy * ey[0]) * 0.26, cy = (sx * ex[1] + sy * ey[1]) * 0.26;
+            const along = 0.26, across = 0.17;
+            prism(g, { tw, th, cx, cy, a: sx !== 0 ? along : across, b: sx !== 0 ? across : along, h: ha, L: texL, R: texR, top: W.top });
+            // a capping lip so the wall top reads as a rampart
+            prism(g, { tw, th, cx, cy, a: sx !== 0 ? along : across + 0.03, b: sx !== 0 ? across + 0.03 : along, h: Math.max(1.2, 1.6 * hk), lift: ha, L: W.cap, R: shade(W.cap, 0.7), top: shade(W.top, 1.05) });
+            if (t === 2 && (sx + sy)) {         // iron: a row of spikes along the arm
+                for (const f of [0.45, 1.0]) {
+                    const px = (sx * ex[0] + sy * ey[0]) * f * 0.5, py = (sx * ex[1] + sy * ey[1]) * f * 0.5 - ha - 1.6 * hk;
+                    g.fillStyle = '#c8d0e0'; g.strokeStyle = 'rgba(10,10,16,0.85)'; g.lineWidth = 0.5;
+                    g.beginPath(); g.moveTo(px - 1, py); g.lineTo(px, py - 3.4 * hk); g.lineTo(px + 1, py); g.closePath(); g.fill(); g.stroke();
+                }
+            }
+            if (t === 4) {                      // gold band along the middle of a marble arm
+                prism(g, { tw, th, cx, cy, a: sx !== 0 ? along + 0.005 : across + 0.012, b: sx !== 0 ? across + 0.012 : along + 0.005, h: 1.6 * hk, lift: ha * 0.4, L: '#e2b030', R: '#a8760e' });
+            }
+        };
+        if (mask & 4) arm(-1, 0);
+        if (mask & 8) arm(0, -1);
+        // pillar
+        const pa = 0.3;
+        prism(g, { tw, th, cx: 0, cy: 0, a: pa, b: pa, h: hw, L: texL, R: texR, top: W.top });
+        prism(g, { tw, th, cx: 0, cy: 0, a: pa + 0.05, b: pa + 0.05, h: Math.max(1.6, 2.2 * hk), lift: hw, L: shade(W.cap, 1.25), R: shade(W.cap, 0.8), top: shade(W.top, 1.08) });
+        const topY = -hw - Math.max(1.6, 2.2 * hk);
+        if (t === 0) {                          // sharpened log tip and a rope wrap
+            g.fillStyle = '#a07646'; g.strokeStyle = 'rgba(30,16,8,0.9)'; g.lineWidth = 0.6;
+            g.beginPath(); g.moveTo(-3.2, topY); g.lineTo(0, topY - 5.6 * hk); g.lineTo(3.2, topY); g.closePath(); g.fill(); g.stroke();
+            g.strokeStyle = '#d8c8a0'; g.lineWidth = 0.9; g.beginPath(); g.moveTo(-3.6, -hw * 0.45); g.lineTo(0, -hw * 0.45 + 1.6); g.lineTo(3.6, -hw * 0.45); g.stroke();
+        } else if (t === 1) {                   // stone: a flag-shaped merlon notch
+            g.fillStyle = shade(W.cap, 1.2); g.strokeStyle = 'rgba(20,14,10,0.85)'; g.lineWidth = 0.6;
+            g.fillRect(-1.6, topY - 2.4, 3.2, 2.6); g.strokeRect(-1.6, topY - 2.4, 3.2, 2.6);
+        } else if (t === 2) {                   // iron: a three-spike crown
+            g.fillStyle = '#d8e0f0'; g.strokeStyle = 'rgba(10,10,16,0.9)'; g.lineWidth = 0.6;
+            for (const dx of [-2.6, 0, 2.6]) { const h = dx === 0 ? 6.4 : 4.4; g.beginPath(); g.moveTo(dx - 1.2, topY); g.lineTo(dx, topY - h * hk); g.lineTo(dx + 1.2, topY); g.closePath(); g.fill(); g.stroke(); }
+            g.fillStyle = '#9aa2b4'; for (const dy of [0.3, 0.62]) { g.beginPath(); g.arc(-3.4, -hw * dy, 0.7, 0, 7); g.arc(3.4, -hw * dy, 0.7, 0, 7); g.fill(); }
+        } else if (t === 3) {                   // obsidian: glowing crystal cluster
+            const cr = [[-2.6, 5.2, '#8a6aff'], [0, 8.4, '#c2a8ff'], [2.6, 5.8, '#6ad0ff']];
+            for (const [dx, h, col] of cr) {
+                g.fillStyle = col; g.strokeStyle = 'rgba(14,6,30,0.9)'; g.lineWidth = 0.6;
+                g.beginPath(); g.moveTo(dx - 1.5, topY); g.lineTo(dx - 0.8, topY - h * hk * 0.8); g.lineTo(dx, topY - h * hk); g.lineTo(dx + 1.4, topY - h * hk * 0.7); g.lineTo(dx + 1.5, topY); g.closePath(); g.fill(); g.stroke();
+                g.fillStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.moveTo(dx, topY - h * hk); g.lineTo(dx - 0.8, topY - h * hk * 0.8); g.lineTo(dx - 1.5, topY); g.lineTo(dx - 0.5, topY); g.closePath(); g.fill();
+            }
+            geo.light(0, topY - 4, 13, '#a080ff');
+        } else if (t === 4) {                   // gilded: crown finial with a ruby
+            g.fillStyle = '#f0c040'; g.strokeStyle = 'rgba(60,34,4,0.9)'; g.lineWidth = 0.6;
+            g.beginPath(); g.moveTo(-3.4, topY); g.lineTo(-3.4, topY - 3.6 * hk); g.lineTo(-1.7, topY - 2.2 * hk); g.lineTo(0, topY - 5.2 * hk); g.lineTo(1.7, topY - 2.2 * hk); g.lineTo(3.4, topY - 3.6 * hk); g.lineTo(3.4, topY); g.closePath(); g.fill(); g.stroke();
+            g.fillStyle = '#ff4a5a'; g.beginPath(); g.arc(0, topY - 2.2 * hk, 1.2, 0, 7); g.fill();
+            g.fillStyle = '#ff5a6a'; g.beginPath(); g.arc(0, -hw * 0.5, 1.5, 0, 7); g.fill(); g.strokeStyle = 'rgba(40,6,10,0.9)'; g.lineWidth = 0.6; g.stroke();
+            geo.anchor('sparkle', 0, topY - 5, { color: '#fff3a8' });
+        } else {                                // ember: a brazier of live flame on every post
+            g.fillStyle = '#1c1416'; g.strokeStyle = 'rgba(0,0,0,0.9)'; g.lineWidth = 0.6;
+            g.beginPath(); g.moveTo(-3.6, topY - 1); g.lineTo(3.6, topY - 1); g.lineTo(2.2, topY + 1.2); g.lineTo(-2.2, topY + 1.2); g.closePath(); g.fill(); g.stroke();
+            geo.anchor('fire', 0, topY - 1, { s: 0.5 });
+            geo.light(0, topY - 4, 16, '#ff7a30');
+        }
+        if (mask & 1) arm(1, 0);
+        if (mask & 2) arm(0, 1);
+        if (t === 0) {                          // moss on the oldest wall only
+            g.fillStyle = 'rgba(80,130,50,0.7)';
+            g.beginPath(); g.ellipse(-1.6, -1, 1.6, 0.9, 0, 0, 7); g.fill();
+        }
+    };
+    P.wall.up = 44;
 })(window.KOE = window.KOE || {});

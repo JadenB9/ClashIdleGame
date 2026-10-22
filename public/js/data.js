@@ -8,15 +8,16 @@
 
     // ---------- CONFIG ----------
     const CFG = {
-        gridW: 24,
-        gridH: 24,
-        tileW: 64,
-        tileH: 42,              // set by the view preset; see VIEWS
+        tileDiv: 3,             // one old "building tile" is now a 3x3 block of tiles: buildings are 3x3, walls 1x1, the Town Hall 4x4
+        gridW: 72,
+        gridH: 72,
+        tileW: 64 / 3,          // set by the view preset (see VIEWS) divided by tileDiv
+        tileH: 42 / 3,
         homeZoom: 1.5,          // where the camera sits on a fresh game and after 'reset view'
         zoomMin: 0.7,
         zoomMax: 2.2,
         saveKey: 'kingdomOfEmber.v3',   // key stays put so old saves still load; the format version lives in the data
-        saveVersion: 7,
+        saveVersion: 8,
         autoSaveMs: 15000,
         offlineMaxSec: 4 * 60 * 60,
         offlineRate: 0.5,
@@ -37,11 +38,18 @@
         freezeCost: 2,               // gems to freeze every raider for four seconds
         bubbleSec: 7, bubbleShowSec: 5,                // a mine or well refills its tap-to-collect bubble this often
         autoCollectRate: 0.8,        // auto-collect pays this share of a manual tap
+        restRate: 0.5,               // while resting between raids, collectors work at half the raid-time rate
+        repairGoldPerFrac: 0.6,      // full repair of one building costs this share of its base price (grows with level)
+        repairGemGold: 500,          // one gem covers this much repair gold (min 1 gem, max repairGemMax)
+        repairGemMax: 12,
+        wallBonus: 50,               // extra walls allowed at every Town Hall level
     };
+    const S = CFG.tileDiv;
 
     // Camera tilt presets. tileH/tileW is the sine of the camera elevation, so a
     // bigger ratio looks more from above: buildings show more roof and hide less
     // of what is behind them. hk scales building heights to match.
+    // tileW/tileH here are the width of a 3x3 building's tile block; the real tile is a third of that.
     const VIEWS = {
         classic:  { label: 'Classic',  tileW: 72, tileH: 36, hk: 1.00 },
         balanced: { label: 'Balanced', tileW: 64, tileH: 44, hk: 0.86 },
@@ -52,14 +60,14 @@
     // cat: where it sits in the shop. art: key used by the sprite painters in art.js.
     const BLD = {
         townhall: {
-            name: 'Town Hall', cat: 'core', size: 2, maxLevel: 20, unlockLevel: 1, maxCount: 1,
+            name: 'Town Hall', cat: 'core', size: 4, maxLevel: 20, unlockLevel: 1, maxCount: 1,
             baseCost: { gold: 0 }, baseHP: 2500, tone: '#c8553a',
             desc: 'The heart of your kingdom. Upgrading raises storage and unlocks the late game.',
             upgradeCost: (lv) => ({ gold: Math.min(1500 * Math.pow(1.85, lv - 1), Math.round(0.8 * (3000 + lv * 2500))), elixir: Math.min(400 * Math.pow(1.8, lv - 1), Math.round(0.15 * (3000 + lv * 2500))) }),
             provides: (lv) => ({ cap: 3000 + lv * 2500 }),
         },
         goldmine: {
-            name: 'Gold Mine', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 1, costScale: 1.3, maxCount: 6,
+            name: 'Gold Mine', cat: 'economy', size: 3, maxLevel: 25, unlockLevel: 1, costScale: 1.3, maxCount: 6,
             baseCost: { gold: 300 }, baseHP: 500, tone: '#d9b34e',
             desc: 'Digs gold around the clock. Tap it for a bonus burst.',
             upgradeCost: (lv) => ({ gold: 400 * Math.pow(1.55, lv - 1), elixir: 25 * Math.pow(1.5, lv - 1) }),
@@ -67,7 +75,7 @@
             clickBonus: (lv) => ({ gold: 15 + lv * 12 }),
         },
         elixirwell: {
-            name: 'Elixir Well', cat: 'economy', size: 1, maxLevel: 25, unlockLevel: 2, costScale: 1.3, maxCount: 4,
+            name: 'Elixir Well', cat: 'economy', size: 3, maxLevel: 25, unlockLevel: 2, costScale: 1.3, maxCount: 4,
             baseCost: { gold: 650 }, baseHP: 500, tone: '#c471ed',
             desc: 'Pumps magical elixir from deep underground. Tap for a burst.',
             upgradeCost: (lv) => ({ gold: 600 * Math.pow(1.55, lv - 1), elixir: 80 * Math.pow(1.5, lv - 1) }),
@@ -75,7 +83,7 @@
             clickBonus: (lv) => ({ elixir: 10 + lv * 8 }),
         },
         darkdrill: {
-            name: 'Dark Drill', cat: 'economy', size: 1, maxLevel: 20, unlockLevel: 6, costScale: 1.35, maxCount: 3,
+            name: 'Dark Drill', cat: 'economy', size: 3, maxLevel: 20, unlockLevel: 6, costScale: 1.35, maxCount: 3,
             baseCost: { gold: 4500, elixir: 1200 }, baseHP: 700, tone: '#6b2cc9',
             desc: 'Bores for rare dark elixir, the fuel of the strongest defenses.',
             upgradeCost: (lv) => ({ gold: 5000 * Math.pow(1.7, lv - 1), elixir: 1500 * Math.pow(1.6, lv - 1) }),
@@ -83,98 +91,98 @@
             clickBonus: (lv) => ({ dark: 2 + lv * 1.5 }),
         },
         gemquarry: {
-            name: 'Gem Quarry', cat: 'economy', size: 1, maxLevel: 8, unlockLevel: 8, maxCount: 2,
+            name: 'Gem Quarry', cat: 'economy', size: 3, maxLevel: 8, unlockLevel: 8, maxCount: 2,
             baseCost: { gold: 9000, elixir: 3500, dark: 20 }, baseHP: 650, tone: '#5cd8ff',
             desc: 'Cuts a trickle of gems from the rock. You can only run two.',
             upgradeCost: (lv) => ({ gold: 9000 * Math.pow(1.7, lv - 1), elixir: 3500 * Math.pow(1.6, lv - 1), dark: 25 * Math.pow(1.4, lv - 1) }),
             production: (lv) => ({ gems: 0.003 + lv * 0.0008 }),
         },
         storage: {
-            name: 'Vault', cat: 'economy', size: 1, maxLevel: 20, unlockLevel: 2, costScale: 1.25,
+            name: 'Vault', cat: 'economy', size: 3, maxLevel: 20, unlockLevel: 2, costScale: 1.25,
             baseCost: { gold: 800 }, baseHP: 900, tone: '#b08040',
             desc: 'Raises the storage cap for every resource.',
             upgradeCost: (lv) => ({ gold: 900 * Math.pow(1.6, lv - 1) }),
             provides: (lv) => ({ cap: 1500 * lv + 1500 }),
         },
         builderhut: {
-            name: 'Builder Hut', cat: 'economy', size: 1, maxLevel: 15, unlockLevel: 2, costScale: 1.4,
+            name: 'Builder Hut', cat: 'economy', size: 3, maxLevel: 15, unlockLevel: 2, costScale: 1.4,
             baseCost: { gold: 1500 }, baseHP: 400, tone: '#a0703c',
             desc: 'Each hut adds +10% gold production per level.',
             upgradeCost: (lv) => ({ gold: 1800 * Math.pow(1.5, lv - 1) }),
             provides: (lv) => ({ goldMult: 0.1 * lv }),
         },
         lab: {
-            name: 'Laboratory', cat: 'economy', size: 1, maxLevel: 18, unlockLevel: 4,
+            name: 'Laboratory', cat: 'economy', size: 3, maxLevel: 18, unlockLevel: 4,
             baseCost: { gold: 2500, elixir: 500 }, baseHP: 480, tone: '#4bb08e',
             desc: 'Research that boosts all XP gained by +15% per level.',
             upgradeCost: (lv) => ({ gold: 3000 * Math.pow(1.55, lv - 1), elixir: 600 * Math.pow(1.5, lv - 1) }),
             provides: (lv) => ({ xpMult: 0.15 * lv }),
         },
         cannon: {
-            name: 'Cannon', cat: 'defense', size: 1, maxLevel: 22, unlockLevel: 1,
+            name: 'Cannon', cat: 'defense', size: 3, maxLevel: 22, unlockLevel: 1,
             baseCost: { gold: 450 }, baseHP: 450, tone: '#666a72',
             desc: 'Single-target artillery. The backbone of any early defense.',
             upgradeCost: (lv) => ({ gold: 550 * Math.pow(1.5, lv - 1), elixir: 30 * Math.pow(1.45, lv - 1) }),
             defense: (lv) => ({ range: 5, dmg: 25 + lv * 14, cd: 1.2, splash: 0 }),
         },
         archer: {
-            name: 'Archer Tower', cat: 'defense', size: 1, maxLevel: 22, unlockLevel: 3,
+            name: 'Archer Tower', cat: 'defense', size: 3, maxLevel: 22, unlockLevel: 3,
             baseCost: { gold: 1200 }, baseHP: 380, tone: '#8b6b3d',
             desc: 'Quick, long-ranged volleys that never stop.',
             upgradeCost: (lv) => ({ gold: 1400 * Math.pow(1.5, lv - 1), elixir: 200 * Math.pow(1.4, lv - 1) }),
             defense: (lv) => ({ range: 6, dmg: 12 + lv * 7, cd: 0.45, splash: 0 }),
         },
         mortar: {
-            name: 'Mortar', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 4,
+            name: 'Mortar', cat: 'defense', size: 3, maxLevel: 20, unlockLevel: 4,
             baseCost: { gold: 2200, elixir: 400 }, baseHP: 420, tone: '#585b74',
             desc: 'Lobs heavy shells that burst on whole groups.',
             upgradeCost: (lv) => ({ gold: 2500 * Math.pow(1.55, lv - 1), elixir: 500 * Math.pow(1.5, lv - 1) }),
             defense: (lv) => ({ range: 7, dmg: 60 + lv * 25, cd: 3.2, splash: 1.8 }),
         },
         airdef: {
-            name: 'Air Defense', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 3,
+            name: 'Air Defense', cat: 'defense', size: 3, maxLevel: 20, unlockLevel: 3,
             baseCost: { gold: 1800, elixir: 400 }, baseHP: 500, tone: '#6ea04a',
             desc: 'Slow rocket launcher with a huge punch.',
             upgradeCost: (lv) => ({ gold: 3000 * Math.pow(1.55, lv - 1), elixir: 650 * Math.pow(1.5, lv - 1) }),
             defense: (lv) => ({ range: 5.5, dmg: 95 + lv * 40, cd: 2.4, splash: 0 }),
         },
         wizard: {
-            name: 'Wizard Tower', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 6,
+            name: 'Wizard Tower', cat: 'defense', size: 3, maxLevel: 20, unlockLevel: 6,
             baseCost: { gold: 3200, elixir: 900 }, baseHP: 420, tone: '#5c9de0',
             desc: 'Arcane bolts that splash across a crowd.',
             upgradeCost: (lv) => ({ gold: 3500 * Math.pow(1.6, lv - 1), elixir: 1100 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 6 * Math.pow(1.45, lv - 3) } : {}) }),
             defense: (lv) => ({ range: 4.5, dmg: 40 + lv * 20, cd: 1.8, splash: 1.2 }),
         },
         frost: {
-            name: 'Frost Spire', cat: 'defense', size: 1, maxLevel: 18, unlockLevel: 7,
+            name: 'Frost Spire', cat: 'defense', size: 3, maxLevel: 18, unlockLevel: 7,
             baseCost: { gold: 3800, elixir: 1200 }, baseHP: 460, tone: '#9fe3ff',
             desc: 'Freezes raiders in their tracks, slowing everything it hits.',
             upgradeCost: (lv) => ({ gold: 4000 * Math.pow(1.6, lv - 1), elixir: 1300 * Math.pow(1.55, lv - 1) }),
             defense: (lv) => ({ range: 5, dmg: 10 + lv * 6, cd: 0.9, splash: 0, slow: Math.min(0.65, 0.35 + lv * 0.02) }),
         },
         tesla: {
-            name: 'Hidden Tesla', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 7,
+            name: 'Hidden Tesla', cat: 'defense', size: 3, maxLevel: 20, unlockLevel: 7,
             baseCost: { gold: 4200, elixir: 1400 }, baseHP: 600, tone: '#7aa6ff',
             desc: 'Crackling coil that fires very fast.',
             upgradeCost: (lv) => ({ gold: 4500 * Math.pow(1.6, lv - 1), elixir: 1500 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 8 * Math.pow(1.45, lv - 3) } : {}) }),
             defense: (lv) => ({ range: 5, dmg: 28 + lv * 16, cd: 0.55, splash: 0 }),
         },
         xbow: {
-            name: 'X-Bow', cat: 'defense', size: 1, maxLevel: 18, unlockLevel: 8,
+            name: 'X-Bow', cat: 'defense', size: 3, maxLevel: 18, unlockLevel: 8,
             baseCost: { gold: 6000, elixir: 2000 }, baseHP: 520, tone: '#a67c4a',
             desc: 'A siege crossbow with enormous range.',
             upgradeCost: (lv) => ({ gold: 6500 * Math.pow(1.6, lv - 1), elixir: 2200 * Math.pow(1.55, lv - 1), ...(lv >= 3 ? { dark: 10 * Math.pow(1.45, lv - 3) } : {}) }),
             defense: (lv) => ({ range: 9, dmg: 22 + lv * 12, cd: 0.35, splash: 0 }),
         },
         inferno: {
-            name: 'Inferno Tower', cat: 'defense', size: 1, maxLevel: 18, unlockLevel: 9,
+            name: 'Inferno Tower', cat: 'defense', size: 3, maxLevel: 18, unlockLevel: 9,
             baseCost: { gold: 8500, elixir: 3000, dark: 50 }, baseHP: 680, tone: '#ff6b35',
             desc: 'A beam of hellfire with the best damage in the kingdom.',
             upgradeCost: (lv) => ({ gold: 9000 * Math.pow(1.65, lv - 1), elixir: 3300 * Math.pow(1.6, lv - 1), dark: 60 * Math.pow(1.5, lv - 1) }),
             defense: (lv) => ({ range: 4.5, dmg: 55 + lv * 30, cd: 0.22, splash: 0 }),
         },
         clancastle: {
-            name: 'Clan Castle', cat: 'defense', size: 2, maxLevel: 18, unlockLevel: 5, maxCount: 1,
+            name: 'Clan Castle', cat: 'defense', size: 4, maxLevel: 18, unlockLevel: 5, maxCount: 1,
             baseCost: { gold: 5500, elixir: 1200 }, baseHP: 1600, tone: '#8f95b2',
             desc: 'A fortress that defends itself and pays a gem every wave for every two levels.',
             upgradeCost: (lv) => ({ gold: 6500 * Math.pow(1.6, lv - 1), elixir: 1500 * Math.pow(1.55, lv - 1) }),
@@ -182,7 +190,7 @@
             defense: (lv) => ({ range: 4, dmg: 30 + lv * 15, cd: 1.5, splash: 0.8 }),
         },
         armycamp: {
-            name: 'Army Camp', cat: 'defense', size: 1, maxLevel: 15, unlockLevel: 3,
+            name: 'Army Camp', cat: 'defense', size: 3, maxLevel: 15, unlockLevel: 3,
             baseCost: { gold: 1800, elixir: 300 }, baseHP: 420, tone: '#a58048',
             desc: 'Troops rest here. Each level adds 10% to what Rally heals.',
             upgradeCost: (lv) => ({ gold: 2000 * Math.pow(1.5, lv - 1), elixir: 400 * Math.pow(1.45, lv - 1) }),
@@ -190,32 +198,33 @@
         },
         wall: {
             name: 'Wall', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 2,
-            baseCost: { gold: 180 }, baseHP: 1800, tone: '#8a8a94', drag: true,
-            desc: 'Stone rampart. Raiders must chew through it or walk around. Drag to build a line.',
-            upgradeCost: (lv) => ({ gold: 220 * Math.pow(1.55, lv - 1) }),
-            upgradeAlt: (lv) => ({ elixir: 110 * Math.pow(1.55, lv - 1) }),   // walls can be paid in gold or in elixir
+            baseCost: { gold: 60 }, baseHP: 1800, tone: '#8a8a94', drag: true,
+            tierFracs: [0.1, 0.2, 0.35, 0.55, 0.8],      // six looks: wood, stone, iron, obsidian, gilded, ember
+            desc: 'A one-tile rampart. Raiders must chew through it or walk around. Drag to build a line, or use the eraser to clear whole rows.',
+            upgradeCost: (lv) => ({ gold: 80 * Math.pow(1.5, lv - 1) }),
+            upgradeAlt: (lv) => ({ elixir: 40 * Math.pow(1.5, lv - 1) }),   // walls can be paid in gold or in elixir
         },
         // Decorations: no stats, but each adds a little production ("prosperity")
         oak: {
-            name: 'Oak Tree', cat: 'decor', size: 1, maxLevel: 1, unlockLevel: 1, decor: true, drag: true,
+            name: 'Oak Tree', cat: 'decor', size: 3, maxLevel: 1, unlockLevel: 1, decor: true, drag: true,
             baseCost: { gold: 150 }, baseHP: 1, tone: '#4f8a34',
             desc: 'An old oak. A little shade is good for business.',
             provides: () => ({ prosperity: 0.004 }),
         },
         garden: {
-            name: 'Flower Garden', cat: 'decor', size: 1, maxLevel: 1, unlockLevel: 3, decor: true, drag: true,
+            name: 'Flower Garden', cat: 'decor', size: 3, maxLevel: 1, unlockLevel: 3, decor: true, drag: true,
             baseCost: { gold: 400 }, baseHP: 1, tone: '#e87aa8',
             desc: 'Neat beds of flowers that cheer up the workers.',
             provides: () => ({ prosperity: 0.006 }),
         },
         fountain: {
-            name: 'Fountain', cat: 'decor', size: 2, maxLevel: 1, unlockLevel: 5, decor: true,
+            name: 'Fountain', cat: 'decor', size: 4, maxLevel: 1, unlockLevel: 5, decor: true,
             baseCost: { gold: 2500, elixir: 400 }, baseHP: 1, tone: '#6fc4e8',
             desc: 'A stone fountain in the village square.',
             provides: () => ({ prosperity: 0.02 }),
         },
         statue: {
-            name: 'Hero Statue', cat: 'decor', size: 1, maxLevel: 1, unlockLevel: 8, decor: true,
+            name: 'Hero Statue', cat: 'decor', size: 3, maxLevel: 1, unlockLevel: 8, decor: true,
             baseCost: { gold: 6000 }, baseHP: 1, tone: '#b9bcc8',
             desc: 'A monument to the first defenders of the realm.',
             provides: () => ({ prosperity: 0.025 }),
@@ -230,29 +239,50 @@
     ];
 
     // ---------- ENEMIES ----------
-    // reach is how far (in tiles) it can hit from; walking speed is tiles/second.
+    // Distances here are in "building widths" (the old 1x1 tile); the game multiplies them by tileDiv.
+    // reach: a ranged attacker hits from this far. splash: area of its blow. bomb: a Wall Breaker's blast radius.
+    // jump: hops over walls. summons: spawns minions as it walks. walls: goes for the nearest wall first.
     const ENEMY = {
         goblin:   { name: 'Goblin',   hp: 40,   dmg: 8,  spd: 1.4, gold: 18,  xp: 3,  size: 9,  prefers: 'economy' },
+        barbarian:{ name: 'Barbarian',hp: 95,   dmg: 15, spd: 1.25, gold: 32, xp: 5,  size: 11, prefers: 'any' },
+        archer:   { name: 'Archer',   hp: 48,   dmg: 11, spd: 1.2, gold: 30,  xp: 5,  size: 10, prefers: 'any', reach: 3.5 },
         wolf:     { name: 'Dire Wolf',hp: 55,   dmg: 12, spd: 2.2, gold: 24,  xp: 4,  size: 10, prefers: 'any' },
         orc:      { name: 'Orc',      hp: 110,  dmg: 16, spd: 1.1, gold: 40,  xp: 6,  size: 12, prefers: 'any' },
         skeleton: { name: 'Skeleton', hp: 80,   dmg: 14, spd: 1.2, gold: 34,  xp: 6,  size: 10, prefers: 'defense', reach: 3 },
+        wallbreaker: { name: 'Wall Breaker', hp: 38, dmg: 380, spd: 1.8, gold: 28, xp: 6, size: 9, prefers: 'wall', bomb: 1.3 },
         troll:    { name: 'Troll',    hp: 280,  dmg: 32, spd: 0.8, gold: 85,  xp: 12, size: 15, prefers: 'defense' },
+        giant:    { name: 'Giant',    hp: 750,  dmg: 38, spd: 0.62, gold: 150, xp: 20, size: 19, prefers: 'defense' },
+        hogrider: { name: 'Hog Rider',hp: 300,  dmg: 34, spd: 2.3, gold: 120, xp: 16, size: 15, prefers: 'defense', jump: true },
+        wizard:   { name: 'Wizard',   hp: 80,   dmg: 38, spd: 1.0, gold: 70,  xp: 10, size: 11, prefers: 'defense', reach: 4, splash: 0.9 },
         ogre:     { name: 'Ogre',     hp: 620,  dmg: 55, spd: 0.6, gold: 180, xp: 24, size: 18, prefers: 'defense' },
+        witch:    { name: 'Witch',    hp: 190,  dmg: 14, spd: 0.9, gold: 140, xp: 20, size: 12, prefers: 'defense', reach: 3.2, summons: 'minion' },
+        minion:   { name: 'Bone Minion', hp: 30, dmg: 9, spd: 1.7, gold: 3,   xp: 0.4, size: 8, prefers: 'any', summoned: true },
+        pekka:    { name: 'P.E.K.K.A',hp: 3200, dmg: 170, spd: 0.55, gold: 500, xp: 70, size: 23, prefers: 'defense' },
         golem:    { name: 'Stone Golem', hp: 6000, dmg: 100, spd: 0.45, gold: 900, xp: 120, size: 26, prefers: 'core', boss: true },
         bat:      { name: 'Bat',      hp: 30,   dmg: 6,  spd: 2.0, gold: 25,  xp: 5,  size: 8,  flying: true, prefers: 'economy' },
+        balloon:  { name: 'Balloon',  hp: 520,  dmg: 70, spd: 0.85, gold: 150, xp: 18, size: 17, flying: true, prefers: 'defense', splash: 0.7 },
         dragon:   { name: 'Dragon',   hp: 200,  dmg: 28, spd: 1.2, gold: 100, xp: 15, size: 20, flying: true, prefers: 'any' },
     };
 
     // What can show up on a given wave, with weights.
     const waveTable = (n) => {
         const t = [{ kind: 'goblin', w: Math.max(2, 10 - n * 0.6) }];
+        if (n >= 2)  t.push({ kind: 'barbarian', w: 2.5 });
         if (n >= 3)  t.push({ kind: 'wolf', w: 3 });
         if (n >= 3)  t.push({ kind: 'orc', w: Math.min(8, 2 + n * 0.5) });
+        if (n >= 4)  t.push({ kind: 'archer', w: 2.5 });
         if (n >= 5)  t.push({ kind: 'skeleton', w: 3 });
+        if (n >= 6)  t.push({ kind: 'wallbreaker', w: Math.min(4, 1.2 + n * 0.12) });
         if (n >= 7)  t.push({ kind: 'bat', w: n >= 10 ? 3 : 1.5 });
         if (n >= 8)  t.push({ kind: 'troll', w: Math.min(6, 1 + n * 0.3) });
+        if (n >= 9)  t.push({ kind: 'giant', w: Math.min(4, 1 + (n - 9) * 0.2) });
+        if (n >= 9)  t.push({ kind: 'hogrider', w: 2 });
+        if (n >= 10) t.push({ kind: 'wizard', w: 2 });
+        if (n >= 11) t.push({ kind: 'balloon', w: 2.5 });
         if (n >= 12) t.push({ kind: 'dragon', w: 2.5 });
         if (n >= 14) t.push({ kind: 'ogre', w: Math.min(5, n * 0.2) });
+        if (n >= 15) t.push({ kind: 'witch', w: 1.5 });
+        if (n >= 18) t.push({ kind: 'pekka', w: Math.min(2.5, 0.8 + (n - 18) * 0.1) });
         return t;
     };
 
@@ -383,9 +413,12 @@
     const tierLevels = (type) => {
         if (tierLevelCache[type]) return tierLevelCache[type];
         const m = BLD[type].maxLevel, out = [];
-        if (m > 1) { let prev = 1; for (const f of [0.12, 0.3, 0.55]) { const l = Math.max(prev + 1, Math.ceil(f * m)); out.push(l); prev = l; } }
+        if (m > 1) { let prev = 1; for (const f of (BLD[type].tierFracs || [0.12, 0.3, 0.55])) { const l = Math.max(prev + 1, Math.ceil(f * m)); out.push(l); prev = l; } }
         return (tierLevelCache[type] = out);
     };
+    const tierCount = (type) => 1 + tierLevels(type).length;
+    // art size = how big the sprite was designed to be (a 3x3 building and a 4x4 Town Hall use the old 1x1 and 2x2 art, scaled to fit)
+    const artSize = (type) => { const z = BLD[type].size; return z >= 4 ? 2 : z / S; };
     const tierOf = (type, level) => 1 + tierLevels(type).filter(l => level >= l).length;
 
     // ---- Town Hall limits ----
@@ -402,7 +435,7 @@
         tesla: [1, 4, 4], xbow: [1, 5, 3], inferno: [1, 6, 3], armycamp: [1, 6, 3], lab: [1, 99, 1],
     };
     const countCap = (type, th) => {
-        if (type === 'wall') return 25 + 15 * (th - 1);
+        if (type === 'wall') return 25 + CFG.wallBonus + 15 * (th - 1);
         const r = COUNT_RULES[type];
         if (!r) return BLD[type].maxCount || Infinity;
         return Math.min(r[2], r[0] + Math.floor((th - 1) / r[1]));
@@ -425,6 +458,6 @@
     };
     K.util = {
         rand, randi, clamp, fmt, fmtRate, safeNum, cleanStr, cleanInt, compact, alive,
-        fmtDuration, fmtTime, hexToRgb, rgbToHex, mixColor, shade, resSymbol, resColor, tierOf, tierLevels,
+        fmtDuration, fmtTime, hexToRgb, rgbToHex, mixColor, shade, resSymbol, resColor, tierOf, tierLevels, tierCount, artSize,
     };
 })(window.KOE = window.KOE || {});
