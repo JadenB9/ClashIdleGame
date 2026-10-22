@@ -42,6 +42,10 @@
         repairGoldPerFrac: 0.6,      // full repair of one building costs this share of its base price (grows with level)
         repairGemGold: 500,          // one gem covers this much repair gold (min 1 gem, max repairGemMax)
         repairGemMax: 12,
+        regenPerSec: 0.004,          // buildings mend this share of their health per second...
+        regenDelaySec: 6,            // ...once nothing has hit them for this long
+        earlyWaves: 14,              // raiders get tougher at the start and ease back to normal strength by this wave
+        earlyHp: 0.4, earlyDmg: 0.25, // extra health and damage on wave 1, fading out linearly
         weakSpendFrac: 0.4,          // "upgrade weakest" skips any upgrade costing more than this share of what you hold
         wallBonus: 50,               // extra walls allowed at every Town Hall level
     };

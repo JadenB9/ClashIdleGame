@@ -39,7 +39,7 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   remove it. Arrow keys nudge a building or group one tile. A mortar has a
   dead zone beside it, and selected buildings show their real footprint. Cannons and mortars hit ground only, Air Defense hits flyers only.
   The Town Hall allows 50 more walls per level than before (75 at level 1).
-- **Smarter raiders.** Ground raiders path around walls with a flow field and
+- **Smarter raiders.** The first raids hit a bit harder (up to +40% health, +25% damage, one extra raider) and ease back to normal by wave 15. Ground raiders path around walls with a flow field and
   only chew through when walking is much worse. Barbarians, Archers, Giants,
   Wall Breakers (blow holes in walls), Hog Riders (leap walls), Wizards,
   Balloons, Witches (raise skeleton minions) and the P.E.K.K.A join the
@@ -49,7 +49,7 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   defend non-stop, but collectors only run at half speed while you rest.
   **Repair** (K) mends everything for gems, or you feed gold into a repair
   fund that pays for the whole job the moment it covers the damage.
-  Upgrading a building also heals it fully.
+  Upgrading a building also heals it fully, and buildings slowly mend themselves (0.4% of their health a second) once nothing has hit them for six seconds.
 - **Clear from the first minute.** A goal card walks a new player through
   eight steps (tap a coin bubble, upgrade, build a cannon, survive a raid,
   pick a boon, the Upgrade tab, quests, the long-term goal), pointing at what

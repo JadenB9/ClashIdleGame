@@ -985,7 +985,7 @@
         // ---------- combat ----------
         buildQueue(n) {
             const table = waveTable(n);
-            const total = n === 1 ? 4 : n === 2 ? 6 : Math.min(4 + n * 2, 60);
+            const total = n === 1 ? 5 : n === 2 ? 7 : Math.min(4 + n * 2 + (n <= 8 ? 1 : 0), 60);
             const sum = table.reduce((s, e) => s + e.w, 0);
             const q = [];
             for (let i = 0; i < total; i++) {
@@ -1038,8 +1038,9 @@
             else if (edge === 2) { tx = randi(0, CFG.gridW); ty = CFG.gridH + OUT - 1; }
             else                 { tx = -OUT; ty = randi(0, CFG.gridH); }
             const wv = this.wave.number;
-            const hpScale = 1 + wv * 0.12 + wv * wv * 0.004;      // gentle early, steeper once defenses snowball
-            const dmgScale = 1 + wv * 0.03 + Math.max(0, wv - 10) * 0.02;
+            const early = Math.max(0, 1 - (wv - 1) / CFG.earlyWaves);          // 1 on wave 1, 0 from wave 15: the opening raids bite a little harder
+            const hpScale = (1 + wv * 0.12 + wv * wv * 0.004) * (1 + CFG.earlyHp * early);      // gentle early, steeper once defenses snowball
+            const dmgScale = (1 + wv * 0.03 + Math.max(0, wv - 10) * 0.02) * (1 + CFG.earlyDmg * early);
             const p = this.worldIso(tx + 0.5, ty + 0.5);
             const d = this.diff();
             this.enemies.push({
@@ -1273,7 +1274,7 @@
         damageBuilding(b, dmg, e) {
             if (BLD[b.type].decor || b.hp <= 0) return;
             b.hp -= dmg;
-            b.hurt = 0.25;
+            b.hurt = 0.25; b.lastHit = this.tnow;
             const c = this.centerOf(b);
             if (this.popups.length < 28 && (b.type !== 'wall' || Math.random() < 0.35)) this.popups.push({ x: c.x + rand(-8, 8), y: c.y - (b.type === 'wall' ? 18 : 30), text: `-${Math.floor(dmg)}`, color: '#ff6a5a', life: 0.9, max: 0.9, size: 13 });
             this.audio.hit();
@@ -1821,6 +1822,8 @@
                 if (b.evolve > 0) b.evolve = Math.max(0, b.evolve - dt * 0.75);
                 if (b.pop > 0) b.pop = Math.max(0, b.pop - dt * 5);
                 if (b.hurt > 0) b.hurt -= dt;
+                // slow self-repair, but only once the building has been left alone for a few seconds
+                if (b.hp < b.maxHp && b.hp > 0 && this.tnow - (b.lastHit ?? -99) > CFG.regenDelaySec && !BLD[b.type].decor) b.hp = Math.min(b.maxHp, b.hp + b.maxHp * CFG.regenPerSec * dt);
                 if (BLD[b.type].clickBonus && b.build >= 1) {
                     const sec = this.bubbleSec();
                     b.charge = Math.min(sec, (b.charge ?? rand(0, sec)) + dt * (this.boost.timeLeft > 0 ? 1.5 : 1) * this.restMult());
