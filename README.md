@@ -34,8 +34,10 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   statue) that add a little production each. The map is a 72x72 grid:
   buildings are 3x3 tiles, the Town Hall and Clan Castle 4x4, walls 1x1, and
   everything can sit side by side. Walls connect to each other, can be painted
-  by dragging, and the **wall eraser** (E) removes whole rows or boxes at
-  once. Cannons and mortars hit ground only, Air Defense hits flyers only.
+  by dragging. The **row tool** (E) picks whole rows, columns or boxes of
+  buildings: drag any picked one to move the group, or press Delete to
+  remove it. Arrow keys nudge a building or group one tile. A mortar has a
+  dead zone beside it, and selected buildings show their real footprint. Cannons and mortars hit ground only, Air Defense hits flyers only.
   The Town Hall allows 50 more walls per level than before (75 at level 1).
 - **Smarter raiders.** Ground raiders path around walls with a flow field and
   only chew through when walking is much worse. Barbarians, Archers, Giants,
@@ -78,7 +80,7 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
 - **Phones.** Pinch to zoom, one-finger pan, panels become a bottom sheet.
 
 Keyboard: Space collect, U upgrade, P pause, X speed, V camera, W War Cry,
-L lightning, F freeze, A auto-collect, R rally, Z rest, K repair, E wall eraser, M mute, T theme, 1–5 panels,
+L lightning, F freeze, A auto-collect, R rally, Z rest, K repair, E row tool, Del delete, arrows nudge, M mute, T theme, 1–5 panels,
 +/− zoom, 0 home, Esc cancel, ? or H how to play.
 
 ## Running it

@@ -135,9 +135,9 @@
         mortar: {
             name: 'Mortar', cat: 'defense', size: 3, maxLevel: 20, unlockLevel: 4,
             baseCost: { gold: 2200, elixir: 400 }, baseHP: 420, tone: '#585b74',
-            desc: 'Lobs heavy shells that burst on whole groups.',
+            desc: 'Lobs heavy shells that burst on whole groups. It cannot hit anything right next to it.',
             upgradeCost: (lv) => ({ gold: 2500 * Math.pow(1.55, lv - 1), elixir: 500 * Math.pow(1.5, lv - 1) }),
-            defense: (lv) => ({ range: 7, dmg: 60 + lv * 25, cd: 3.2, splash: 1.8 }),
+            defense: (lv) => ({ range: 7, minRange: 1.2, dmg: 60 + lv * 25, cd: 3.2, splash: 1.8 }),
         },
         airdef: {
             name: 'Air Defense', cat: 'defense', size: 3, maxLevel: 20, unlockLevel: 3,
@@ -200,7 +200,7 @@
             name: 'Wall', cat: 'defense', size: 1, maxLevel: 20, unlockLevel: 2,
             baseCost: { gold: 60 }, baseHP: 1800, tone: '#8a8a94', drag: true,
             tierFracs: [0.1, 0.2, 0.35, 0.55, 0.8],      // six looks: wood, stone, iron, obsidian, gilded, ember
-            desc: 'A one-tile rampart. Raiders must chew through it or walk around. Drag to build a line, or use the eraser to clear whole rows.',
+            desc: 'A one-tile rampart. Raiders must chew through it or walk around. Drag to build a line, or use the row tool (E) to pick, move or delete whole rows.',
             upgradeCost: (lv) => ({ gold: 80 * Math.pow(1.5, lv - 1) }),
             upgradeAlt: (lv) => ({ elixir: 40 * Math.pow(1.5, lv - 1) }),   // walls can be paid in gold or in elixir
         },

@@ -129,7 +129,9 @@
             this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, raidStart: 'auto', difficulty: 'normal' };
             this.speed = 1;
             this.repairFund = 0;                       // gold set aside; repairs everything once it covers the damage
-            this.eraseMode = false; this.eraseSel = null; this.eraseShape = 'line';
+            this.selectMode = false; this.selectDrag = null; this.selectShape = 'line'; this.selectAdd = false;
+            this.group = [];                           // buildings picked with the row tool
+            this.gmove = null;                         // a group being carried: { grab } while dragging, { follow: true } after the Move button
 
             this.cam = { x: 0, y: 0, zoom: 1 };
             this.input = { x: 0, y: 0, down: false, drag: false, downX: 0, downY: 0, lastX: 0, lastY: 0, downTarget: null, touch: false, paint: false, lastPaint: null, lastTapT: 0, lastTapB: null };
@@ -470,12 +472,20 @@
                 const p = getPos(e);
                 const I = this.input;
                 I.touch = !!touch; I.paintWarned = false;
-                I.down = true; I.drag = false; I.dragMove = false; I.paint = false; I.erase = false; I.lastPaint = null;
+                I.down = true; I.drag = false; I.dragMove = false; I.paint = false; I.sel = false; I.gdrag = false; I.gfollow = false; I.lastPaint = null;
                 I.downX = I.lastX = I.x = p.x; I.downY = I.lastY = I.y = p.y;
                 I.shift = !!e.shiftKey;
                 this.audio.ensure();
                 I.downTarget = null;
-                if (this.eraseMode) { const t = this.screenToTile(p.x, p.y); I.erase = true; this.eraseSel = { a: { tx: t.tx, ty: t.ty }, b: { tx: t.tx, ty: t.ty }, box: !!e.shiftKey }; this.updateHover(); return; }
+                if (this.gmove && this.gmove.follow) { I.gfollow = true; this.updateHover(); return; }      // the carried group lands where you let go
+                if (this.selectMode) {
+                    const t = this.screenToTile(p.x, p.y), o = this.buildingAt(t.tx, t.ty);
+                    // grabbing a picked building carries the whole group
+                    if (o && this.group.includes(o)) { this.gmove = { grab: { tx: t.tx, ty: t.ty } }; I.gdrag = true; this.updateHover(); return; }
+                    I.sel = true;
+                    this.selectDrag = { a: { tx: t.tx, ty: t.ty }, b: { tx: t.tx, ty: t.ty }, box: !!e.shiftKey, add: !!(e.ctrlKey || e.metaKey) || this.selectAdd };
+                    this.updateHover(); return;
+                }
                 if (this.buildMode && BLD[this.buildMode].drag) { I.paint = true; this.updateHover(); paintAt(p.x, p.y); return; }
                 if (this.buildMode || this.spellMode || this.moveMode) return;
                 if (goblinAt(p.x, p.y)) { I.downTarget = 'goblin'; return; }
@@ -493,7 +503,8 @@
                 if (I.down) {
                     const dist = Math.hypot(p.x - I.downX, p.y - I.downY);
                     if (I.paint) { this.updateHover(); paintAt(p.x, p.y); return; }
-                    if (I.erase && this.eraseSel) { const t = this.screenToTile(p.x, p.y); this.eraseSel.b = { tx: t.tx, ty: t.ty }; this.updateHover(); return; }
+                    if (I.gdrag || I.gfollow) { this.updateHover(); return; }
+                    if (I.sel && this.selectDrag) { const t = this.screenToTile(p.x, p.y); this.selectDrag.b = { tx: t.tx, ty: t.ty }; this.updateHover(); return; }
                     if (!I.drag && dist > DRAG) {
                         I.drag = true;
                         // Dragging the building you already selected picks it up; anything else pans
@@ -512,11 +523,12 @@
                 const I = this.input;
                 if (I.down) {
                     if (I.paint) { /* tiles were placed as the finger moved */ }
-                    else if (I.erase) this.commitErase();
+                    else if (I.sel) this.commitSelect();
+                    else if (I.gdrag || I.gfollow) this.commitGroupMove();
                     else if (I.dragMove) this.commitMove();
                     else if (!I.drag) this.handleTap(I.x, I.y, I.shift);
                 }
-                I.down = false; I.drag = false; I.dragMove = false; I.paint = false; I.erase = false; I.downBuilding = null; I.downTarget = null;
+                I.down = false; I.drag = false; I.dragMove = false; I.paint = false; I.sel = false; I.gdrag = false; I.gfollow = false; I.downBuilding = null; I.downTarget = null;
             };
 
             c.addEventListener('mousedown', (e) => onDown(e, false));
@@ -534,7 +546,7 @@
                 e.preventDefault();
                 if (e.touches.length === 2) {
                     if (this.input.dragMove) { this.moveMode = null; this.updateCanvasCursor(); }
-                    this.input.down = this.input.drag = this.input.dragMove = this.input.paint = this.input.erase = false; this.eraseSel = null;
+                    this.input.down = this.input.drag = this.input.dragMove = this.input.paint = this.input.sel = this.input.gdrag = this.input.gfollow = false; this.selectDrag = null; if (this.gmove && !this.gmove.follow) this.gmove = null;
                     pinch = tinfo(e).dist; return;
                 }
                 if (e.touches.length === 1) onDown(e, true);
@@ -549,7 +561,7 @@
 
             c.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                if (this.buildMode || this.moveMode || this.spellMode || this.eraseMode) { this.cancelModes(); return; }
+                if (this.buildMode || this.moveMode || this.spellMode || this.selectMode) { this.cancelModes(); return; }
                 const r = c.getBoundingClientRect();
                 const b = this.buildingAtScreen(e.clientX - r.left, e.clientY - r.top);
                 if (b) this.selectBuilding(b);
@@ -564,7 +576,8 @@
         }
 
         cancelModes() {
-            this.setBuildMode(null); this.moveMode = null; this.spellMode = false; this.eraseMode = false; this.eraseSel = null;
+            this.setBuildMode(null); this.moveMode = null; this.spellMode = false; this.selectMode = false; this.selectDrag = null; this.group = []; this.gmove = null;
+            this.updateGroupBar();
             this.updateCanvasCursor();
         }
 
@@ -578,12 +591,16 @@
             const k = e.key;
             if (e.repeat && 'frwulp xekz'.includes(k.toLowerCase()) && k !== 'Escape') return;
             if (k === 'Escape') {
-                if (this.buildMode || this.moveMode || this.spellMode || this.eraseMode) this.cancelModes();
+                if (this.gmove) { this.gmove = null; this.input.gdrag = this.input.gfollow = false; this.toast('Move cancelled', 'warn'); this.updateGroupBar(); }
+                else if (this.group.length) { this.group = []; this.updateGroupBar(); }
+                else if (this.buildMode || this.moveMode || this.spellMode || this.selectMode) this.cancelModes();
                 else if (document.getElementById('modal').classList.contains('open')) this.closeModal();
                 else if (this.selected) this.deselect();
                 else this.closePanel();
                 return;
             }
+            if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); this.deleteSelection(); return; }
+            if (k.startsWith('Arrow')) { e.preventDefault(); this.nudgeSelection(({ ArrowUp: [-1, -1], ArrowDown: [1, 1], ArrowLeft: [-1, 1], ArrowRight: [1, -1] })[k]); return; }
             if (k === ' ' && tag !== 'BUTTON') { e.preventDefault(); this.collectAll(); }
             else if (k === '+' || k === '=') this.zoomBy(1.15, this.vw / 2, this.vh / 2);
             else if (k === '-' || k === '_') this.zoomBy(1 / 1.15, this.vw / 2, this.vh / 2);
@@ -601,7 +618,7 @@
             else if (k === 'n' || k === 'N') this.callRaid();
             else if (k === 'z' || k === 'Z') this.toggleRest();
             else if (k === 'k' || k === 'K') this.openRepair();
-            else if (k === 'e' || k === 'E') this.toggleEraser();
+            else if (k === 'e' || k === 'E') this.toggleSelect();
             else if (k === 'v' || k === 'V') { const n = Object.keys(VIEWS); this.changeView(n[(n.indexOf(this.settings.view) + 1) % n.length]); }
             else if (k === '?' || k === 'h' || k === 'H') this.showHelp();
             else if (k >= '1' && k <= '5') this.openPanel(['build', 'upgrade', 'kingdom', 'coop', 'menu'][k - 1]);
@@ -613,7 +630,7 @@
             this.hoverTile = (t.tx >= 0 && t.tx < CFG.gridW && t.ty >= 0 && t.ty < CFG.gridH) ? { tx: t.tx, ty: t.ty } : null;
             const prev = this.hoverBuilding;
             // while carrying something, hovering buildings only gets in the way
-            this.hoverBuilding = (this.buildMode || this.spellMode || this.eraseMode || I.touch && !I.down) ? null : (this.moveMode && I.dragMove ? null : this.buildingAtScreen(I.x, I.y));
+            this.hoverBuilding = (this.buildMode || this.spellMode || this.selectMode || I.touch && !I.down) ? null : (this.moveMode && I.dragMove ? null : this.buildingAtScreen(I.x, I.y));
             if (prev !== this.hoverBuilding || (this.hoverBuilding && this._hoverLevel !== this.hoverBuilding.level)) this.rebuildHoverTip();
             this.positionHoverTip();
             this.updateCanvasCursor();
@@ -810,11 +827,11 @@
         // after a health boon: new maximums, keeping each building's share of health
         refreshMaxHp() { for (const b of this.buildings) { const f = b.hp / b.maxHp; b.maxHp = this.hpFor(b.type, b.level); b.hp = b.maxHp * f; } }
 
+        refundOf(b) { const r = {}, def = BLD[b.type]; for (const k in def.baseCost) r[k] = Math.floor(def.baseCost[k] * 0.5); return r; }
         sellBuilding(b) {
             const def = BLD[b.type];
             if (def.cat === 'core') return {};
-            const refund = {};
-            for (const k in def.baseCost) refund[k] = Math.floor(def.baseCost[k] * 0.5);
+            const refund = this.refundOf(b);
             for (const k in refund) this.addRes(k, refund[k]);
             this.removeBuilding(b);
             this.audio.coin();
@@ -822,10 +839,11 @@
             return refund;
         }
 
-        // Remove a batch of buildings with one grid rebuild (the wall eraser)
+        // Remove a batch of buildings with one grid rebuild (the row tool)
         removeMany(list) {
             const gone = new Set(list);
             this.buildings = this.buildings.filter(x => !gone.has(x));
+            this.group = this.group.filter(x => !gone.has(x)); this.updateGroupBar();
             this.touchGrid();
             for (const e of this.enemies) if (gone.has(e.target)) e.target = null;
             if (gone.has(this.hoverBuilding)) { this.hoverBuilding = null; this.rebuildHoverTip(); }
@@ -836,6 +854,7 @@
         }
         removeBuilding(b) {
             this.buildings = this.buildings.filter(x => x !== b);
+            if (this.group.includes(b)) { this.group = this.group.filter(x => x !== b); this.updateGroupBar(); }
             this.touchGrid();
             for (const e of this.enemies) if (e.target === b) e.target = null;
             if (this.input.downBuilding === b) { this.input.downBuilding = null; this.input.downTarget = null; }
@@ -1267,6 +1286,7 @@
                     if (e.flying && GROUND_ONLY.has(b.type)) continue;
                     if (!e.flying && AIR_ONLY.has(b.type)) continue;
                     const dd = Math.hypot(e.tx - c.x, e.ty - c.y);
+                    if (d.minRange && dd < d.minRange * S) continue;          // a mortar cannot hit what is right beside it
                     if (dd <= d.range * S && dd < best) { best = dd; target = e; }
                 }
                 b.hasT = !!target;
@@ -1873,13 +1893,14 @@
 
             A.world.drawMeadow(g, vx0, vy0, vx1, vy1);
             A.world.drawIsland(g);
-            const carrying = this.buildMode || this.moveMode || this.eraseMode;
+            const carrying = this.buildMode || this.moveMode || this.selectMode;
             if (carrying) this.drawGrid(g);
-            this.drawEraser(g);
+            this.drawSelect(g);
             if (this.buildMode && this.hoverTile) this.drawBuildGhost(g);
             if (this.moveMode && this.hoverTile) this.drawMoveGhost(g);
             if (this.spellMode && this.hoverTile) this.drawSpellGhost(g);
             this.drawRange(g);
+            this.drawFootprint(g);
 
             // everything that stands on the map, sorted back to front
             const draws = this._draws; draws.length = 0;
@@ -1972,50 +1993,130 @@
             g.restore();
         }
 
-        // The wall eraser: the tiles under the drag, and the walls among them
-        eraseTiles() {
-            const s = this.eraseSel; if (!s) return [];
-            let { a, b } = s;
-            const out = [];
-            if (s.box || this.eraseShape === 'box') {
+        // ---------- the row tool: pick buildings by dragging along a row, a column or a box ----------
+        // The tiles under the drag. Along a row or column by default; Shift (or the Box button) drags a rectangle.
+        selectTiles() {
+            const s = this.selectDrag; if (!s) return [];
+            const { a, b } = s, out = [];
+            if (s.box || this.selectShape === 'box') {
                 for (let y = Math.min(a.ty, b.ty); y <= Math.max(a.ty, b.ty); y++) for (let x = Math.min(a.tx, b.tx); x <= Math.max(a.tx, b.tx); x++) out.push({ tx: x, ty: y });
-            } else if (Math.abs(b.tx - a.tx) >= Math.abs(b.ty - a.ty)) {      // a straight row...
+            } else if (Math.abs(b.tx - a.tx) >= Math.abs(b.ty - a.ty)) {
                 for (let x = Math.min(a.tx, b.tx); x <= Math.max(a.tx, b.tx); x++) out.push({ tx: x, ty: a.ty });
-            } else {                                                          // ...or a straight column
+            } else {
                 for (let y = Math.min(a.ty, b.ty); y <= Math.max(a.ty, b.ty); y++) out.push({ tx: a.tx, ty: y });
             }
             return out.filter(t => t.tx >= 0 && t.ty >= 0 && t.tx < CFG.gridW && t.ty < CFG.gridH);
         }
-        eraseWalls() {
+        // every building the drag touches (the Town Hall stays put)
+        pickInSel() {
             if (this.occDirty) this.rebuildOcc();
             const set = new Set();
-            for (const t of this.eraseTiles()) { const o = this.cell(t.tx, t.ty); if (o && o.type === 'wall') set.add(o); }
+            for (const t of this.selectTiles()) { const o = this.cell(t.tx, t.ty); if (o && BLD[o.type].cat !== 'core') set.add(o); }
             return [...set];
         }
-        commitErase() {
-            const walls = this.eraseWalls();
-            this.eraseSel = null;
-            if (!walls.length) { this.toast('No walls there. Drag along a row of walls to select it.', 'warn'); return; }
-            const refund = walls.length * Math.floor(BLD.wall.baseCost.gold * 0.5);
-            const doIt = () => {
-                const live = walls.filter(w => this.buildings.includes(w));
-                this.removeMany(live);
-                this.addRes('gold', refund);
-                this.audio.coin();
-                this.toast(`Removed ${live.length} wall${live.length === 1 ? '' : 's'} (+${fmt(refund)} gold)`, 'success');
-                this.updateUI();
-            };
-            if (walls.length <= 6) doIt();
-            else this.showConfirm({ title: `Remove ${walls.length} walls?`, icon: 'trash', body: `You get back ${fmt(refund)} gold. Their upgrades are not refunded.`, yesText: 'Remove', noText: 'Keep them', danger: true, onYes: doIt });
+        commitSelect() {
+            const s = this.selectDrag, picks = this.pickInSel();
+            this.selectDrag = null;
+            if (s && s.add) { for (const b of picks) { const i = this.group.indexOf(b); if (i >= 0) this.group.splice(i, 1); else this.group.push(b); } }   // add mode toggles
+            else this.group = picks;
+            if (!this.group.length) this.toast('Nothing there. Drag along a row of walls or buildings.', 'warn');
+            else this.audio.click();
+            this.updateGroupBar();
         }
-        toggleEraser() {
-            if (!this.buildings.some(b => b.type === 'wall') && !this.eraseMode) { this.toast('You have no walls to remove yet', 'warn'); return; }
-            const on = !this.eraseMode;
+        toggleSelect(seed = null) {
+            const on = !this.selectMode || !!seed;
             this.cancelModes();
-            this.eraseMode = on; this.eraseSel = null;
-            this.deselect();
-            this.updateCanvasCursor();
-            if (on) this.toast('Drag along a row or column of walls to select it. Hold Shift for a box.', 'warn');
+            this.selectMode = on; this.selectDrag = null;
+            if (on) {
+                this.deselect();
+                if (seed) this.group = [seed];
+                this.toast('Row tool: drag along a row or column to pick it, then Move or Delete. Shift drags a box.', 'warn');
+            }
+            this.updateGroupBar(); this.updateCanvasCursor();
+        }
+        groupBox() {
+            let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+            for (const b of this.group) { const s = BLD[b.type].size; x0 = Math.min(x0, b.tx); y0 = Math.min(y0, b.ty); x1 = Math.max(x1, b.tx + s); y1 = Math.max(y1, b.ty + s); }
+            return { x0, y0, x1, y1 };
+        }
+        // where the carried group would sit relative to now: grabbed tile -> pointer, or its centre -> pointer
+        gmoveOffset() {
+            const h = this.hoverTile, m = this.gmove;
+            if (!h || !m) return null;
+            if (m.grab) return { dx: h.tx - m.grab.tx, dy: h.ty - m.grab.ty };
+            const bx = this.groupBox();
+            return { dx: h.tx - Math.round((bx.x0 + bx.x1) / 2), dy: h.ty - Math.round((bx.y0 + bx.y1) / 2) };
+        }
+        // can these buildings all shift by (dx,dy)? they may land on the spots they are leaving
+        canShift(items, dx, dy) {
+            if (this.occDirty) this.rebuildOcc();
+            const mine = new Set(items);
+            for (const b of items) {
+                const s = BLD[b.type].size;
+                for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+                    const tx = b.tx + dx + x, ty = b.ty + dy + y;
+                    if (tx < 0 || ty < 0 || tx >= CFG.gridW || ty >= CFG.gridH) return false;
+                    const o = this.cell(tx, ty);
+                    if (o && !mine.has(o)) return false;
+                }
+            }
+            return true;
+        }
+        shiftItems(items, dx, dy) {
+            for (const b of items) { b.tx += dx; b.ty += dy; }
+            this.touchGrid();
+            this.audio.build();
+            for (const b of items.slice(0, 8)) { const p = this.centerOf(b); for (let i = 0; i < 3 && this.particles.length < 300; i++) this.particles.push({ x: p.x + rand(-8, 8), y: p.y + rand(-3, 5), vx: rand(-30, 30), vy: rand(-45, -12), life: 0.5, max: 0.5, color: '#d8c8a0', size: rand(2, 4), kind: 'dust' }); }
+        }
+        startGroupMove() {
+            if (!this.group.length) return;
+            this.gmove = { follow: true };
+            this.updateGroupBar();
+            this.toast('Tap where it should go. Esc cancels. You can also just drag a picked building.', 'warn');
+        }
+        commitGroupMove() {
+            const off = this.gmoveOffset(), items = this.group.slice();
+            this.gmove = null; this.input.gdrag = this.input.gfollow = false;
+            this.updateGroupBar();
+            if (!off || !items.length || (!off.dx && !off.dy)) return;
+            if (!this.canShift(items, off.dx, off.dy)) { this.audio.error(); this.toast('Something is in the way there', 'warn'); return; }
+            this.shiftItems(items, off.dx, off.dy);
+            this.toast(`Moved ${items.length} building${items.length === 1 ? '' : 's'}`, 'success');
+        }
+        // arrow keys nudge the picked group, or the selected building, one tile (diagonal on screen)
+        nudgeSelection(d) {
+            const items = this.group.length ? this.group : (this.selected && BLD[this.selected.type].cat !== 'core' ? [this.selected] : []);
+            if (!d || !items.length) return;
+            if (!this.canShift(items, d[0], d[1])) { this.audio.error(); return; }
+            this.shiftItems(items, d[0], d[1]);
+            if (items === this.group) this.updateGroupBar(); else this.refreshSelection();
+        }
+        // Delete / Backspace: the picked group, or the selected building
+        deleteSelection() {
+            if (this.group.length) { this.confirmDeleteGroup(); return; }
+            const b = this.selected;
+            if (b && BLD[b.type].cat !== 'core') this.confirmSell(b);
+        }
+        confirmDeleteGroup() {
+            const items = this.group.slice(); if (!items.length) return;
+            const refund = {};
+            for (const b of items) for (const [k, v] of Object.entries(this.refundOf(b))) refund[k] = (refund[k] || 0) + v;
+            const str = Object.entries(refund).map(([k, v]) => `${fmt(v)} ${this.resSymbol(k).toLowerCase()}`).join(', ') || 'nothing';
+            const upg = items.filter(b => b.level > 1).length;
+            const kinds = {}; for (const b of items) kinds[BLD[b.type].name] = (kinds[BLD[b.type].name] || 0) + 1;
+            const what = Object.entries(kinds).map(([n, c]) => `${c} ${n}${c > 1 ? 's' : ''}`).join(', ');
+            this.showConfirm({
+                title: `Delete ${items.length} building${items.length === 1 ? '' : 's'}?`, icon: 'trash',
+                body: `${what}.<br>You get back ${str}.${upg ? '<br><br><span class="warn-text">Upgrades are not refunded.</span>' : ''}`, yesText: 'Delete', noText: 'Keep them', danger: true,
+                onYes: () => {
+                    const live = items.filter(b => this.buildings.includes(b));
+                    this.removeMany(live);
+                    for (const b of live) for (const [k, v] of Object.entries(this.refundOf(b))) this.addRes(k, v);
+                    this.audio.coin();
+                    this.toast(`Deleted ${live.length} (+${str})`, 'success');
+                    this.updateUI();
+                },
+            });
         }
         // 4-connected tiles from a to b: a quick drag still lays an unbroken wall, even on diagonals
         lineTiles(a, b) {
@@ -2028,24 +2129,47 @@
             }
             return out;
         }
-        drawEraser(g) {
-            if (!this.eraseMode) return;
-            const tiles = this.eraseTiles(), t = this.tnow;
-            const walls = new Set(this.eraseWalls().map(w => w.tx + ',' + w.ty));
-            if (this.hoverTile && !this.eraseSel) { this.tilePoly(g, this.hoverTile.tx, this.hoverTile.ty); g.strokeStyle = 'rgba(255,120,110,0.9)'; g.lineWidth = 2; g.stroke(); }
-            for (const p of tiles) {
-                const o = this.cell(p.tx, p.ty), hit = o && o.type === 'wall';
-                this.tilePoly(g, p.tx, p.ty);
-                g.fillStyle = hit ? `rgba(255,70,60,${0.5 + 0.15 * Math.sin(t * 8)})` : 'rgba(255,200,190,0.16)'; g.fill();
-                if (hit) { g.strokeStyle = 'rgba(255,230,220,0.95)'; g.lineWidth = 1.4; g.stroke(); }
-            }
-            if (this.eraseSel) {
-                const b = this.eraseSel.b, c = this.worldIso(b.tx + 0.5, b.ty + 0.5), n = this.eraseWalls().length;
+        footprint(g, b, fill, stroke, w = 1.6) {
+            const s = BLD[b.type].size;
+            this.tilePoly(g, b.tx, b.ty, s);
+            if (fill) { g.fillStyle = fill; g.fill(); }
+            g.strokeStyle = stroke; g.lineWidth = w; g.stroke();
+        }
+        drawSelect(g) {
+            const t = this.tnow;
+            if (this.selectMode && this.hoverTile && !this.selectDrag && !this.gmove) { this.tilePoly(g, this.hoverTile.tx, this.hoverTile.ty); g.strokeStyle = 'rgba(255,225,120,0.95)'; g.lineWidth = 2; g.stroke(); }
+            // the picked group, outlined in gold
+            for (const b of this.group) this.footprint(g, b, `rgba(255,210,80,${0.2 + 0.08 * Math.sin(t * 6)})`, 'rgba(255,226,120,0.95)', 1.4);
+            // the drag in progress
+            if (this.selectDrag) {
+                const tiles = this.selectTiles(), picks = new Set(this.pickInSel());
+                for (const p of tiles) { this.tilePoly(g, p.tx, p.ty); g.fillStyle = 'rgba(255,230,140,0.16)'; g.fill(); }
+                for (const b of picks) this.footprint(g, b, 'rgba(255,210,80,0.32)', 'rgba(255,240,170,0.95)', 1.6);
+                const e = this.selectDrag.b, c = this.worldIso(e.tx + 0.5, e.ty + 0.5), n = picks.size;
                 g.font = '700 15px "Lilita One", "Nunito", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-                const label = n ? `${n} wall${n === 1 ? '' : 's'}` : 'no walls';
-                g.lineWidth = 4; g.strokeStyle = 'rgba(20,6,6,0.9)'; g.strokeText(label, c.x, c.y - 28);
-                g.fillStyle = n ? '#ffd6ce' : '#c8c8d0'; g.fillText(label, c.x, c.y - 28);
+                const label = n ? `${n} picked` : 'nothing';
+                g.lineWidth = 4; g.strokeStyle = 'rgba(20,12,4,0.9)'; g.strokeText(label, c.x, c.y - 28);
+                g.fillStyle = n ? '#fff0b8' : '#c8c8d0'; g.fillText(label, c.x, c.y - 28);
             }
+            // a group being carried: every piece shown where it would land, blue if it all fits
+            if (this.gmove && this.group.length) {
+                const off = this.gmoveOffset();
+                if (off) {
+                    const ok = this.canShift(this.group, off.dx, off.dy);
+                    const fill = ok ? 'rgba(92,216,255,0.3)' : 'rgba(255,93,93,0.42)', edge = ok ? '#5cd8ff' : '#ff5d5d';
+                    const moved = this.group.slice().sort((a, b) => (a.tx + a.ty) - (b.tx + b.ty));
+                    for (const b of moved) { this.tilePoly(g, b.tx + off.dx, b.ty + off.dy, BLD[b.type].size); g.fillStyle = fill; g.fill(); g.strokeStyle = edge; g.lineWidth = 1.4; g.stroke(); }
+                    if (moved.length <= 40) for (const b of moved) { const s = BLD[b.type].size, c = this.worldIso(b.tx + off.dx + s / 2, b.ty + off.dy + s / 2); A.drawSprite(g, this.spriteOf(b), c.x, c.y, ok ? 0.75 : 0.4, false); }
+                }
+            }
+        }
+
+        // CoC-style: the tiles a selected or hovered building really covers
+        drawFootprint(g) {
+            if (this.buildMode || this.moveMode || this.selectMode) return;
+            const b = this.selected || this.hoverBuilding;
+            if (!b) return;
+            this.footprint(g, b, this.selected ? 'rgba(255,230,120,0.18)' : 'rgba(255,255,255,0.1)', this.selected ? 'rgba(255,226,120,0.9)' : 'rgba(255,255,255,0.55)', 1.5);
         }
 
         tilePoly(g, tx, ty, size = 1) {
@@ -2124,7 +2248,9 @@
             const def = BLD[b.type];
             if (!def.defense) return;
             const c = this.centerOf(b);
-            this.rangeRing(g, c.x, c.y, def.defense(b.level).range, 'rgba(255,224,130,0.85)');
+            const d = def.defense(b.level);
+            this.rangeRing(g, c.x, c.y, d.range, 'rgba(255,224,130,0.85)');
+            if (d.minRange) this.rangeRing(g, c.x, c.y, d.minRange, 'rgba(255,110,100,0.85)');      // the dead zone
         }
 
         drawBuilding(g, b, t, frect) {

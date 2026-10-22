@@ -43,7 +43,7 @@
                 dotUp: $('dotUpgrade'), dotKing: $('dotKingdom'),
                 alert: $('alertPanel'), veil: $('pauseVeil'), speedTag: $('speedTag'),
                 goal: $('goalCard'), hint: $('modeHint'), collect: $('actCollect'), collectDot: $('collectDot'), freeze: $('actFreeze'),
-                repair: $('actRepair'), repairDot: $('repairDot'),
+                repair: $('actRepair'), repairDot: $('repairDot'), groupBar: $('groupBar'),
             };
             this.panel = null;
             this.buildCat = 'economy';
@@ -99,7 +99,12 @@
             click('actFreeze', () => this.castFreeze());
             click('actRepair', () => this.openRepair());
             click('btnRest', () => this.toggleRest());
-            click('btnEraser', () => this.toggleEraser());
+            click('btnSelect', () => this.toggleSelect());
+            click('grpShape', () => { this.selectShape = this.selectShape === 'box' ? 'line' : 'box'; this.updateGroupBar(); });
+            click('grpAdd', () => { this.selectAdd = !this.selectAdd; this.updateGroupBar(); });
+            click('grpMove', () => this.startGroupMove());
+            click('grpDelete', () => this.deleteSelection());
+            click('grpDone', () => this.cancelModes());
             click('btnMenu', () => { this.audio.click(); this.openPanel('menu', true); });
             this.buildMenuHelp();
             const home = $('homeLink'); if (home && /(^|\.)j4den\.com$/.test(location.hostname)) home.hidden = false;
@@ -244,14 +249,26 @@
             }
             this.buildMode = type;
             this.moveMode = null; this.spellMode = false;
-            if (type) { this.eraseMode = false; this.eraseSel = null; }
+            if (type) { this.selectMode = false; this.selectDrag = null; }
             if (type) this.deselect();
             this.updateCanvasCursor();
             this.buildMenu();
         }
 
+        // the little bar that appears while the row tool is on
+        updateGroupBar() {
+            const bar = this.el && this.el.groupBar; if (!bar) return;
+            bar.hidden = !this.selectMode;
+            if (!this.selectMode) { this.updateHint && this.updateHint(); return; }
+            const n = this.group.length;
+            setText($('grpCount'), n ? `${n} picked` : 'Pick a row');
+            $('grpMove').disabled = !n || !!this.gmove; $('grpDelete').disabled = !n;
+            setText($('grpShape'), this.selectShape === 'box' ? 'Box' : 'Row');
+            $('grpAdd').classList.toggle('on', this.selectAdd);
+            this.updateHint();
+        }
         updateCanvasCursor() {
-            const busy = !!(this.buildMode || this.moveMode || this.spellMode || this.eraseMode);
+            const busy = !!(this.buildMode || this.moveMode || this.spellMode || this.selectMode);
             this.canvas.classList.toggle('building', busy);
             this.canvas.classList.toggle('pointing', !busy && !!this.hoverBuilding);
             this.el.cancel.hidden = !busy;
@@ -521,10 +538,11 @@
                     ${next && capped ? `<button class="btn upgrade th-locked" type="button" data-act="upgrade" id="selUpLock">${ico('lock')}Needs Town Hall ${thForLevel(b.type, b.level + 1)}</button>` : ''}
                     ${next && !capped ? `<button class="btn good upgrade" type="button" data-act="upgrade" id="selUp"><span class="up-label">${ico('up')}Upgrade</span><span class="up-cost" id="selUpCost">${this.upgradeChips(b)}</span></button>
                     <button class="btn small" type="button" data-act="max" title="Keep upgrading until you run out of money">Max</button>` : ''}
-                    ${b.type === 'wall' ? `<button class="btn small" type="button" data-act="erase" title="Select and remove whole rows of walls">Rows…</button>` : ''}
+                    ${b.type === 'wall' && this.sameLevelCount(b) > 1 && !max && !capped ? `<button class="btn small" type="button" data-act="upall" title="Upgrade every wall of this level">All ${this.sameLevelCount(b)}</button>` : ''}
+                    ${b.type === 'wall' ? `<button class="btn small" type="button" data-act="erase" title="Pick whole rows of walls to move or delete">Rows…</button>` : ''}
                     ${canMove ? `<button class="btn small" type="button" data-act="move" title="Move this building" aria-label="Move">${ico('move')}</button>` : ''}
                     <button class="btn small" type="button" data-act="info" title="Details" aria-label="Details">${ico('info')}</button>
-                    ${canMove ? `<button class="btn small danger" type="button" data-act="sell" title="Sell (50% back)" aria-label="Sell">${ico('trash')}</button>` : ''}
+                    ${canMove ? `<button class="btn small danger" type="button" data-act="sell" title="Sell (50% back) · Delete key" aria-label="Sell">${ico('trash')}</button>` : ''}
                 </div>`;
             sel._key = key;
             this.updateSelectionLive(true);
@@ -556,6 +574,7 @@
                 const cc = $('selUpCost'); if (cc) setHtml(cc, this.upgradeChips(b));
             }
         }
+        sameLevelCount(b) { let n = 0; for (const o of this.buildings) if (o.type === b.type && o.level === b.level) n++; return n; }
         onSelClick(e) {
             const btn = e.target.closest('[data-act]'); const b = this.selected;
             if (!btn || !b) return;
@@ -566,7 +585,8 @@
             else if (act === 'upgrade') this.upgradeBuilding(b);
             else if (act === 'max') this.upgradeMax(b);
             else if (act === 'move') this.startMove(b);
-            else if (act === 'erase') { this.toggleEraser(); }
+            else if (act === 'erase') { this.toggleSelect(b); }
+            else if (act === 'upall') this.upgradeGroup(b.type, b.level);
             else if (act === 'info') this.openBuildingModal(b);
             else if (act === 'sell') this.confirmSell(b);
         }
@@ -828,7 +848,8 @@
         updateHint() {
             const h = this.el.hint;
             let text = '';
-            if (this.eraseMode) text = 'Wall eraser: drag along a row or column of walls, then let go. Hold Shift for a box. Esc stops.';
+            if (this.gmove) text = 'Tap where the picked buildings should go (blue means they fit). Esc cancels.';
+            else if (this.selectMode) text = this.group.length ? `${this.group.length} picked. Drag one to move them all, or press Delete. Drag again for a new row.` : 'Row tool: drag along a row or column to pick it. Shift drags a box. Esc stops.';
             else if (this.buildMode) { const d = BLD[this.buildMode]; text = `Tap the grass to place the ${d.name}.${d.drag ? ' Drag to paint a line.' : ''} Esc cancels.`; }
             else if (this.moveMode) text = `Drop the ${BLD[this.moveMode.type].name} on an empty tile to move it, or on another building to swap places. Esc cancels.`;
             else if (this.spellMode) text = 'Tap the map to call down lightning. Esc cancels.';
@@ -845,7 +866,7 @@
                 ${row('sack', 'Collect', 'Mines and wells fill a coin bubble every few seconds. Tap it for a bonus. Tap several quickly for a combo. The <b>Collect</b> button (or Space) grabs every ready bubble.')}
                 ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
                 ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Buildings are 3x3 tiles, the Town Hall 4x4, walls 1x1, and they can touch. Walls and decorations can be painted by dragging. The <b>Town Hall</b> level limits how many of each you can have and how high they upgrade.')}
-                ${row('trash', 'Wall eraser', 'Press <b>E</b> (or <b>Rows…</b> on a selected wall), then drag along a row or column of walls to select it and let go to remove it. Hold Shift to drag a box.')}
+                ${row('move', 'Row tool', 'Press <b>E</b> (or <b>Rows…</b> on a selected wall). Drag along a row or column to pick everything on it (Shift drags a box, Ctrl/Cmd or the Add button adds to what you have). Then drag any picked building to move the whole group, press <b>Move</b> and tap a spot, or press <b>Delete</b>. Arrow keys nudge by one tile.')}
                 ${row('move', 'Move and swap', 'Select a building, then drag it. Drop it on empty grass to move it, or on another building to swap places.')}
                 ${row('sword', 'Defend', 'Raiders arrive when the raid timer (top left) runs out. Press <b>Start now</b> to call them early, or hit <b>Rest</b> to hold raids back while you build: nothing attacks, but your collectors only run at half speed until you call the next raid. Red arrows show which side they come from. Towers fire on their own. Cannons and mortars only hit ground raiders, Air Defense only hits flyers. Walls slow ground raiders.')}
                 ${row('heart', 'Repair', 'Damaged buildings smoke and burn. <b>Repair</b> (K) fixes everything for a few gems, or you can feed gold into the <b>repair fund</b>: the moment it covers the damage, everything is mended. Upgrading a building also heals it fully.')}
@@ -925,7 +946,7 @@
             this.pauseForModal();
             const rows = [
                 [['Space'], 'Collect every ready coin bubble'], [['F'], 'Freeze all raiders'], [['U'], 'Upgrade the selected building (or the cheapest one)'],
-                [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3 / x5'], [['N'], 'Start the next raid now'], [['Z'], 'Rest between raids (raids wait, collectors at half rate)'], [['K'], 'Repair everything'], [['E'], 'Wall eraser: drag along a row of walls'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
+                [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3 / x5'], [['N'], 'Start the next raid now'], [['Z'], 'Rest between raids (raids wait, collectors at half rate)'], [['K'], 'Repair everything'], [['E'], 'Row tool: pick a row or box, then move or delete it'], [['Delete'], 'Delete the selected building or picked group'], [['←', '↑', '↓', '→'], 'Nudge the selected building or group one tile'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
                 [['A'], 'Auto-collect on / off'], [['R'], 'Rally defenses'], [['M'], 'Sound on / off'], [['T'], 'Light / dark theme'],
                 [['V'], 'Cycle the camera angle'], [['1', '2', '3', '4', '5'], 'Build · Upgrade · Kingdom · Co-op · Menu'],
                 [['+', '−'], 'Zoom'], [['0'], 'Back to the Town Hall'], [['Esc'], 'Cancel, deselect, close'],
@@ -953,7 +974,7 @@
             if (def.maxLevel > 1) stats.push(['Level', `${b.level} / ${def.maxLevel}`]);
             if (!def.decor) stats.push(['Health', `${fmt(Math.ceil(b.hp))} / ${fmt(b.maxHp)}`]);
             for (const s of this.levelStats(b.type, b.level)) stats.push([s.label, s.f(s.v)]);
-            if (def.defense) { const d = def.defense(b.level); stats.push(['Cooldown', d.cd + 's']); if (d.splash) stats.push(['Splash radius', d.splash + ' tiles']); stats.push(['Targets', b.type === 'airdef' ? 'Flying only' : (b.type === 'cannon' || b.type === 'mortar' ? 'Ground only' : 'Ground and air')]); }
+            if (def.defense) { const d = def.defense(b.level); stats.push(['Cooldown', d.cd + 's']); if (d.splash) stats.push(['Splash radius', d.splash + ' tiles']); if (d.minRange) stats.push(['Dead zone', d.minRange + ' tiles']); stats.push(['Targets', b.type === 'airdef' ? 'Flying only' : (b.type === 'cannon' || b.type === 'mortar' ? 'Ground only' : 'Ground and air')]); }
             const tier = tierOf(b.type, b.level);
             this.openPlainModal(`<h2 id="modalTitle">${def.name}</h2><div class="subtitle">${def.desc}</div>
                 <div class="modal-pic"><img alt="" src="${this.thumbURL(b.type)}" width="96" height="96"></div>
