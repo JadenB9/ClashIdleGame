@@ -129,6 +129,7 @@
             document.querySelectorAll('#autoUpSeg .seg-btn').forEach(b => b.addEventListener('click', () => { this.audio.click(); this.settings.autoUpgrade = b.dataset.autoup; this.syncSettingsUI(); this.save(); this.toast(b.dataset.autoup === 'off' ? 'Auto-upgrade off' : `Auto-upgrade: ${b.textContent}`, 'success'); }));
             click('btnUpCheap', () => this.upgradeCheapest());
             click('btnUpAll', () => this.upgradeAll());
+            click('btnUpWeak', () => this.upgradeWeakest());
 
             click('btnSave', () => { this.save(); this.toast('Game saved', 'success'); });
             click('btnExport', () => this.exportSave());
@@ -175,6 +176,10 @@
                 this.syncToggles();
             });
 
+            // the layout is fixed-size: if anything ever scrolls it (focus into a sliding panel, a find-in-page), put it back
+            const unscroll = (el) => { if (el.scrollLeft || el.scrollTop) { el.scrollLeft = 0; el.scrollTop = 0; } };
+            for (const el of [document.documentElement, document.body, this.el.app, $('stage'), $('gameArea')]) if (el) el.addEventListener('scroll', () => unscroll(el), { passive: true });
+            window.addEventListener('scroll', () => window.scrollTo(0, 0), { passive: true });
             this.syncToggles();
             this.syncSettingsUI();
             this.drawWelcomeArt();
@@ -646,6 +651,13 @@
         }
         // The two big buttons say plainly whether they can do anything right now
         updateUpButtons(rows) {
+            const weak = $('btnUpWeak');
+            if (weak) {
+                const hurt = this.weakCandidates(0.9).length, ok = hurt ? this.weakUpgradable(0.9).length : 0;
+                weak.disabled = ok === 0;
+                const lab = ok ? `Upgrade weakest (${ok} damaged)` : (hurt ? 'Weakest cost too much now' : 'Nothing is damaged');
+                if (weak._lab !== lab) { weak._lab = lab; setHtml(weak, `${ico('heart')}${lab}`); }
+            }
             const ready = rows.filter(r => r.ok).reduce((n, r) => n + r.n, 0);
             const locked = rows.some(r => r.locked), open = rows.filter(r => !r.locked);
             const all = $('btnUpAll'), cheap = $('btnUpCheap'), note = $('upNote');
@@ -823,7 +835,7 @@
             modal.classList.remove('open');
             this.modalBuilding = null; this.repairOpen = false;
             if (this._modalPaused) { this._modalPaused = false; this.paused = false; this.lastTime = performance.now(); this.syncToggles(); }
-            if (this._modalReturnFocus && document.contains(this._modalReturnFocus)) this._modalReturnFocus.focus();
+            if (this._modalReturnFocus && document.contains(this._modalReturnFocus)) this._modalReturnFocus.focus({ preventScroll: true });
             this._modalReturnFocus = null;
         }
         // ---------- first-run goal card ----------
@@ -864,7 +876,7 @@
             const row = (icon, title, body) => `<div class="help-row">${ico(icon)}<div><b>${title}</b><span>${body}</span></div></div>`;
             setHtml(host, `
                 ${row('sack', 'Collect', 'Mines and wells fill a coin bubble every few seconds. Tap it for a bonus. Tap several quickly for a combo. The <b>Collect</b> button (or Space) grabs every ready bubble.')}
-                ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
+                ${row('up', 'Upgrade', 'Tap a building to select it, then press <b>Upgrade</b>. <b>Upgrade weakest</b> (Upgrade tab) spends on the most damaged buildings first, since an upgrade heals fully, and skips anything pricey; the <b>Weakest</b> auto-upgrade mode does it for you. Or tap the green arrow floating over anything you can afford. The Upgrade tab does many at once.')}
                 ${row('hammer', 'Build', 'Open <b>Build</b>, pick a card, tap the grass. Buildings are 3x3 tiles, the Town Hall 4x4, walls 1x1, and they can touch. Walls and decorations can be painted by dragging. The <b>Town Hall</b> level limits how many of each you can have and how high they upgrade.')}
                 ${row('move', 'Row tool', 'Press <b>E</b> (or <b>Rows…</b> on a selected wall). Drag along a row or column to pick everything on it (Shift drags a box, Ctrl/Cmd or the Add button adds to what you have). Then drag any picked building to move the whole group, press <b>Move</b> and tap a spot, or press <b>Delete</b>. Arrow keys nudge by one tile.')}
                 ${row('move', 'Move and swap', 'Select a building, then drag it. Drop it on empty grass to move it, or on another building to swap places.')}
@@ -1011,7 +1023,7 @@
             const close = () => {
                 this._confirmCleanup = null;
                 el.classList.remove('open');
-                if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
+                if (returnFocus && document.contains(returnFocus)) returnFocus.focus({ preventScroll: true });
                 yes.removeEventListener('click', onYes); no.removeEventListener('click', onNo); back.removeEventListener('click', onNo);
                 document.removeEventListener('keydown', onKey);
             };
@@ -1026,7 +1038,7 @@
             this._confirmCleanup = () => { this._confirmCleanup = null; yes.removeEventListener('click', onYes); no.removeEventListener('click', onNo); back.removeEventListener('click', onNo); document.removeEventListener('keydown', onKey); el.classList.remove('open'); };
             void el.offsetWidth;
             el.classList.add('open');
-            (opts.danger ? no : yes).focus();
+            (opts.danger ? no : yes).focus({ preventScroll: true });
         }
     }
 

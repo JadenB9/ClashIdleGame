@@ -823,7 +823,7 @@
             K.data.state.notation = NOTATIONS.includes(s.notation) ? s.notation : 'short';
             this.settings.view = Object.hasOwn(VIEWS, s.view) ? s.view : 'balanced';
             this.settings.xray = s.xray !== false;
-            this.settings.autoUpgrade = ['off', 'economy', 'defense', 'all'].includes(s.autoUpgrade) ? s.autoUpgrade : 'off';
+            this.settings.autoUpgrade = ['off', 'economy', 'defense', 'all', 'weakest'].includes(s.autoUpgrade) ? s.autoUpgrade : 'off';
             this.settings.levelTags = s.levelTags === 'hover' ? 'hover' : 'always';
             this.settings.hints = s.hints !== false;
             this.settings.raidStart = s.raidStart === 'manual' ? 'manual' : 'auto';

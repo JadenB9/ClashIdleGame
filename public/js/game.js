@@ -196,7 +196,7 @@
             const start = document.getElementById('welcomeStart');
             start.addEventListener('click', () => { welcome.classList.add('hidden'); this.audio.ensure(); this.audio.click(); this.welcomeOpen = false; this.paused = false; this.lastTime = performance.now(); this.syncToggles(); });
             if (this.hadSave) welcome.classList.add('hidden');
-            else { start.focus(); this.welcomeOpen = true; this.paused = true; }
+            else { start.focus({ preventScroll: true }); this.welcomeOpen = true; this.paused = true; }
             this.updateUI();
             this.refreshSelection();
         }
@@ -815,6 +815,33 @@
             }
             if (!quiet) this.toast('Nothing affordable to upgrade yet', 'warn');
             return false;
+        }
+        // ---- upgrade the weakest: an upgrade heals fully, so spend on whatever is closest to dying, at a fair price ----
+        // "fair" = no single upgrade costs more than weakSpendFrac of what you currently hold of each resource it needs
+        priceIsFair(cost) {
+            for (const k in cost) { if (k === 'gems') return false; if (cost[k] > (this.res[k] || 0) * CFG.weakSpendFrac) return false; }
+            return true;
+        }
+        weakCandidates(maxFrac = 0.9) {
+            return this.buildings.filter(b => {
+                const d = BLD[b.type];
+                return !d.decor && d.upgradeCost && b.level < d.maxLevel && !this.thCapped(b) && b.hp < b.maxHp * maxFrac;
+            }).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp);
+        }
+        weakUpgradable(maxFrac = 0.9) { return this.weakCandidates(maxFrac).filter(b => { const c = this.upgradeCostOf(b); return this.canAfford(c) && this.priceIsFair(c); }); }
+        upgradeWeakest(quiet = false, limit = 60, maxFrac = 0.9) {
+            let n = 0;
+            for (const b of this.weakCandidates(maxFrac)) {
+                if (n >= limit) break;
+                const c = this.upgradeCostOf(b);
+                if (!this.canAfford(c) || !this.priceIsFair(c)) continue;      // too dear for now: skip it, try the next weakest
+                if (this.upgradeBuilding(b, true)) n++;
+            }
+            if (!quiet) {
+                if (n) { this.toast(`Upgraded and healed ${n} building${n > 1 ? 's' : ''}, weakest first`, 'success'); this.audio.upgrade(); }
+                else this.toast(this.weakCandidates(maxFrac).length ? 'The damaged ones cost too much for now. Try Repair, or wait for more gold.' : 'Nothing is badly damaged', 'warn');
+            }
+            return n;
         }
         upgradeAll(cat = 'all') {
             let n = 0;
@@ -1865,7 +1892,7 @@
             if (this.autoCollect) { this._autoCollectAcc += dt; if (this._autoCollectAcc >= 5) { this._autoCollectAcc = 0; this.collectAll(true, CFG.autoCollectRate); } }
             if (this.settings.autoUpgrade !== 'off') {
                 this._autoUpAcc += dt;
-                if (this._autoUpAcc >= 1.5) { this._autoUpAcc = 0; this.upgradeCheapest(this.settings.autoUpgrade, true); }
+                if (this._autoUpAcc >= 1.5) { this._autoUpAcc = 0; if (this.settings.autoUpgrade === 'weakest') this.upgradeWeakest(true, 2, 0.6); else this.upgradeCheapest(this.settings.autoUpgrade, true); }
             }
 
             this._uiAcc = (this._uiAcc || 0) + dt;

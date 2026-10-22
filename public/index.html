@@ -30,7 +30,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261022c">
+    <link rel="stylesheet" href="css/style.css?v=20261022d">
 </head>
 <body>
     <!-- Icon sprite. Colour icons carry their own fills; the rest use currentColor. -->
@@ -225,6 +225,7 @@
                     <div class="up-actions">
                         <button class="btn good" id="btnUpCheap" type="button"><svg aria-hidden="true"><use href="#i-up"/></svg>Upgrade cheapest</button>
                         <button class="btn good" id="btnUpAll" type="button"><svg aria-hidden="true"><use href="#i-up"/></svg>Upgrade all you can</button>
+                        <button class="btn wide" id="btnUpWeak" type="button" title="Upgrade the most damaged buildings first. An upgrade heals fully. Skips anything that would cost more than 40% of what you hold."><svg aria-hidden="true"><use href="#i-heart"/></svg>Upgrade weakest (heals)</button>
                     </div>
                     <p class="hint up-note" id="upNote" hidden></p>
                     <div class="setting-row stacked">
@@ -234,6 +235,7 @@
                             <button class="seg-btn" type="button" data-autoup="economy" aria-pressed="false">Economy</button>
                             <button class="seg-btn" type="button" data-autoup="defense" aria-pressed="false">Defense</button>
                             <button class="seg-btn" type="button" data-autoup="all" aria-pressed="false">All</button>
+                            <button class="seg-btn" type="button" data-autoup="weakest" aria-pressed="false" title="Only upgrades badly damaged buildings, at a fair price, to keep them alive">Weakest</button>
                         </div>
                     </div>
                     <div id="upgradeList" class="up-list"></div>
@@ -397,16 +399,16 @@
     </div>
 
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
-    <script src="js/data.js?v=20261022c"></script>
-    <script src="js/art-core.js?v=20261022c"></script>
-    <script src="js/art-buildings-a.js?v=20261022c"></script>
-    <script src="js/art-buildings-b.js?v=20261022c"></script>
-    <script src="js/art-world.js?v=20261022c"></script>
-    <script src="js/art-units.js?v=20261022c"></script>
-    <script src="js/game.js?v=20261022c"></script>
-    <script src="js/ui.js?v=20261022c"></script>
-    <script src="js/features.js?v=20261022c"></script>
-    <script src="js/net.js?v=20261022c"></script>
-    <script src="js/boot.js?v=20261022c"></script>
+    <script src="js/data.js?v=20261022d"></script>
+    <script src="js/art-core.js?v=20261022d"></script>
+    <script src="js/art-buildings-a.js?v=20261022d"></script>
+    <script src="js/art-buildings-b.js?v=20261022d"></script>
+    <script src="js/art-world.js?v=20261022d"></script>
+    <script src="js/art-units.js?v=20261022d"></script>
+    <script src="js/game.js?v=20261022d"></script>
+    <script src="js/ui.js?v=20261022d"></script>
+    <script src="js/features.js?v=20261022d"></script>
+    <script src="js/net.js?v=20261022d"></script>
+    <script src="js/boot.js?v=20261022d"></script>
 </body>
 </html>

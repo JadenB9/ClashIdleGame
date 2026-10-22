@@ -42,6 +42,7 @@
         repairGoldPerFrac: 0.6,      // full repair of one building costs this share of its base price (grows with level)
         repairGemGold: 500,          // one gem covers this much repair gold (min 1 gem, max repairGemMax)
         repairGemMax: 12,
+        weakSpendFrac: 0.4,          // "upgrade weakest" skips any upgrade costing more than this share of what you hold
         wallBonus: 50,               // extra walls allowed at every Town Hall level
     };
     const S = CFG.tileDiv;
