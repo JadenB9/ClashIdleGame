@@ -2374,9 +2374,9 @@
             const tier = tierOf(b.type, b.level);
             const col = b.type === 'wall' ? ['#000', '#000', '#000', '#a080ff', '#ffd86a', '#ff8a3a'][tier - 1] : TIER_GLOW[tier - 1];
             if (!col || col === '#000' || alpha < 0.5 || def.decor) return;
-            const r = (b.type === 'wall' ? 1.6 : def.size * 0.62) * CFG.tileW, pulse = 0.55 + 0.45 * Math.sin(t * 2.2 + b.tx * 0.9 + b.ty * 0.5);
+            const r = (b.type === 'wall' ? 0.55 : def.size * 0.62) * CFG.tileW, pulse = 0.55 + 0.45 * Math.sin(t * 2.2 + b.tx * 0.9 + b.ty * 0.5);
             g.save(); g.globalCompositeOperation = 'lighter';
-            g.globalAlpha = (b.type === 'wall' ? 0.34 : 0.22 + 0.1 * (tier - 3)) * pulse * alpha;
+            g.globalAlpha = (b.type === 'wall' ? 0.1 : 0.22 + 0.1 * (tier - 3)) * pulse * alpha;
             g.drawImage(A.glowSprite(col), c.x - r * 1.15, c.y - r * 0.62, r * 2.3, r * 1.24);
             g.restore();
         }

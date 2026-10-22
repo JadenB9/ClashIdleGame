@@ -759,7 +759,7 @@
                 g.beginPath(); g.moveTo(dx - 1.5, topY); g.lineTo(dx - 0.8, topY - h * hk * 0.8); g.lineTo(dx, topY - h * hk); g.lineTo(dx + 1.4, topY - h * hk * 0.7); g.lineTo(dx + 1.5, topY); g.closePath(); g.fill(); g.stroke();
                 g.fillStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.moveTo(dx, topY - h * hk); g.lineTo(dx - 0.8, topY - h * hk * 0.8); g.lineTo(dx - 1.5, topY); g.lineTo(dx - 0.5, topY); g.closePath(); g.fill();
             }
-            geo.light(0, topY - 4, 13, '#a080ff');
+            geo.light(0, topY - 4, 5, '#a080ff');
         } else if (t === 4) {                   // gilded: crown finial with a ruby
             g.fillStyle = '#f0c040'; g.strokeStyle = 'rgba(60,34,4,0.9)'; g.lineWidth = 0.6;
             g.beginPath(); g.moveTo(-3.4, topY); g.lineTo(-3.4, topY - 3.6 * hk); g.lineTo(-1.7, topY - 2.2 * hk); g.lineTo(0, topY - 5.2 * hk); g.lineTo(1.7, topY - 2.2 * hk); g.lineTo(3.4, topY - 3.6 * hk); g.lineTo(3.4, topY); g.closePath(); g.fill(); g.stroke();
@@ -769,8 +769,8 @@
         } else {                                // ember: a brazier of live flame on every post
             g.fillStyle = '#1c1416'; g.strokeStyle = 'rgba(0,0,0,0.9)'; g.lineWidth = 0.6;
             g.beginPath(); g.moveTo(-3.6, topY - 1); g.lineTo(3.6, topY - 1); g.lineTo(2.2, topY + 1.2); g.lineTo(-2.2, topY + 1.2); g.closePath(); g.fill(); g.stroke();
-            geo.anchor('fire', 0, topY - 1, { s: 0.5 });
-            geo.light(0, topY - 4, 16, '#ff7a30');
+            geo.anchor('fire', 0, topY - 1, { s: 0.35 });
+            geo.light(0, topY - 4, 6, '#ff7a30');
         }
         if (mask & 1) arm(1, 0);
         if (mask & 2) arm(0, 1);
