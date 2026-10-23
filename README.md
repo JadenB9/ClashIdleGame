@@ -34,9 +34,11 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   statue) that add a little production each. The map is a 72x72 grid:
   buildings are 3x3 tiles, the Town Hall and Clan Castle 4x4, walls 1x1, and
   everything can sit side by side. Walls connect to each other, can be painted
-  by dragging. The **row tool** (E) picks whole rows, columns or boxes of
-  buildings: drag any picked one to move the group, or press Delete to
-  remove it. Arrow keys nudge a building or group one tile. A mortar has a
+  by dragging. The **row tool** (E) picks a whole row or column with one
+  click (or a dragged stretch or box): press Move, or drag any picked one, to
+  carry the group, or press Delete to remove it. **Walls only** (G) fades
+  everything else while you place, move or pick, and the **grid** (D) shows
+  open ground in green and taken ground in red. Arrow keys nudge a building or group one tile. A mortar has a
   dead zone beside it, and selected buildings show their real footprint. Cannons and mortars hit ground only, Air Defense hits flyers only.
   The Town Hall allows 50 more walls per level than before (75 at level 1).
 - **Smarter raiders.** The first raids hit a bit harder (up to +40% health, +25% damage, one extra raider) and ease back to normal by wave 15. Ground raiders path around walls with a flow field and
@@ -45,6 +47,10 @@ Play it at [j4den.com/clashidle](https://j4den.com/clashidle).
   Balloons, Witches (raise skeleton minions) and the P.E.K.K.A join the
   goblins, wolves, orcs, trolls, ogres, bats and dragons, and the Stone
   Golem boss comes every tenth wave. The raid card previews the next wave.
+- **Public scoreboard.** Menu → Scoreboard (B) lists every player who joined with
+  a name: best level, lifetime XP, furthest wave, crowns, kills, gold and more.
+  Figures are sent by the browser to api.j4den.com every couple of minutes;
+  "Remove me" deletes your row.
 - **Rest and repair.** **Rest** (Z) holds raids back so you never have to
   defend non-stop, but collectors only run at half speed while you rest.
   **Repair** (K) mends everything for gems, or you feed gold into a repair

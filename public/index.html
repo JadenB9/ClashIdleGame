@@ -30,7 +30,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261022f">
+    <link rel="stylesheet" href="css/style.css?v=20261022g">
 </head>
 <body>
     <!-- Icon sprite. Colour icons carry their own fills; the rest use currentColor. -->
@@ -162,6 +162,7 @@
             </div>
 
             <div class="mode-hint" id="modeHint" hidden role="status"></div>
+            <div class="grid-legend" id="gridLegend" hidden aria-hidden="true"><span class="lg open"></span>Open<span class="lg taken"></span>Taken</div>
             <div class="combo-label" id="comboLabel" aria-hidden="true">COMBO</div>
             <div id="alertPanel" class="alert-banner" role="status"></div>
             <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
@@ -174,7 +175,13 @@
             <section id="groupBar" class="group-bar" hidden aria-label="Picked buildings">
                 <div class="grp-count" id="grpCount">0 picked</div>
                 <div class="grp-btns">
-                    <button class="btn small" id="grpShape" type="button" title="Drag a straight row or column, or a box (Shift)">Row</button>
+                    <div class="seg grp-shapes" id="grpShapes" role="group" aria-label="What a click picks">
+                        <button class="seg-btn" type="button" data-shape="row" aria-pressed="true" title="Click picks the whole row of tiles through that spot (down-right)">Row</button>
+                        <button class="seg-btn" type="button" data-shape="col" aria-pressed="false" title="Click picks the whole column through that spot (down-left)">Column</button>
+                        <button class="seg-btn" type="button" data-shape="drag" aria-pressed="false" title="Drag along a stretch of a row or column">Stretch</button>
+                        <button class="seg-btn" type="button" data-shape="box" aria-pressed="false" title="Drag a rectangle (or hold Shift)">Box</button>
+                    </div>
+                    <button class="btn small" id="grpWalls" type="button" aria-pressed="false" title="Fade out everything but the walls, and pick only walls (G)"><svg aria-hidden="true"><use href="#i-eye"/></svg>Walls only</button>
                     <button class="btn small" id="grpAdd" type="button" title="Add to the picked group instead of replacing it (hold Ctrl/Cmd)">Add</button>
                     <button class="btn good" id="grpMove" type="button"><svg aria-hidden="true"><use href="#i-move"/></svg>Move</button>
                     <button class="btn danger" id="grpDelete" type="button" title="Delete the picked buildings (Delete)"><svg aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
@@ -191,6 +198,7 @@
                 <button class="ability" id="actSpell" type="button" aria-label="Lightning, 1 gem" title="1 gem: lightning strike (L)"><svg aria-hidden="true"><use href="#i-bolt"/></svg><span class="ab-name">Lightning</span></button>
                 <button class="ability" id="actFreeze" type="button" aria-label="Freeze, 2 gems" title="2 gems: freeze every raider for 4 seconds (F)"><svg aria-hidden="true"><use href="#i-snow"/></svg><span class="ab-name">Freeze</span></button>
                 <button class="ability" id="actWarCry" type="button" aria-label="War Cry" title="+50% tower damage for 15s, 90s cooldown (W)"><svg aria-hidden="true"><use href="#i-flag"/></svg><span class="ab-name" id="warCryLabel">War Cry</span><span class="cd" id="warCryCd"></span></button>
+                <button class="ability" id="actWallView" type="button" hidden aria-pressed="false" title="Fade out everything but the walls (G)"><svg aria-hidden="true"><use href="#i-eye"/></svg><span class="ab-name">Walls only</span></button>
                 <button class="ability cancel" id="actCancel" type="button" hidden aria-label="Cancel" title="Cancel (Esc)"><svg aria-hidden="true"><use href="#i-close"/></svg><span class="ab-name">Cancel</span></button>
             </div>
 
@@ -216,7 +224,7 @@
                 <section class="tab-content" data-tab="build" id="panel-build" role="region" aria-label="Build">
                     <div class="seg cat-seg" id="catSeg" role="group" aria-label="Category"></div>
                     <div id="buildMenu" class="build-grid"></div>
-                    <div class="tool-row"><button class="btn small" id="btnSelect" type="button" title="Pick whole rows of walls or buildings, then move or delete them (E)"><svg aria-hidden="true"><use href="#i-move"/></svg>Row tool</button><span>Pick a row, then Move or Delete it.</span></div>
+                    <div class="tool-row"><button class="btn small" id="btnSelect" type="button" title="Pick whole rows of walls or buildings, then move or delete them (E)"><svg aria-hidden="true"><use href="#i-move"/></svg>Row tool</button><button class="btn small" id="btnGrid" type="button" aria-pressed="false" title="Show which ground is open and which is taken (D)"><svg aria-hidden="true"><use href="#i-eye"/></svg>Grid</button><span>Click a row to pick it all, then Move or Delete.</span></div>
                     <p class="hint">Tap a card, then tap the grass. Buildings are 3x3 tiles and can sit side by side. Walls (1x1) and decorations can be painted by dragging.</p>
                 </section>
 
@@ -243,6 +251,7 @@
 
                 <!-- Kingdom -->
                 <section class="tab-content" data-tab="kingdom" id="panel-kingdom" role="region" aria-label="Kingdom">
+                    <button class="btn small board-open" id="btnBoardKingdom" type="button" title="See every player's best (B)"><svg aria-hidden="true"><use href="#i-trophy"/></svg>Scoreboard</button>
                     <div class="section-title">Quests</div>
                     <div id="questList" class="quest-list"></div>
                     <div class="section-title">Ascension</div>
@@ -298,6 +307,9 @@
                     <div class="section-title">How to play</div>
                     <div class="help-list" id="menuHelp"></div>
                     <a class="btn small home-link" id="homeLink" href="/" hidden>Back to j4den.com</a>
+
+                    <div class="section-title">Scoreboard</div>
+                    <div class="setting-row"><span class="setting-label">Public scoreboard</span><button class="btn small" id="btnBoardMenu" type="button" title="See every player's best, or join with a name (B)"><svg aria-hidden="true"><use href="#i-trophy"/></svg>Open</button></div>
 
                     <div class="section-title">Save</div>
                     <div class="save-row">
@@ -399,16 +411,17 @@
     </div>
 
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
-    <script src="js/data.js?v=20261022f"></script>
-    <script src="js/art-core.js?v=20261022f"></script>
-    <script src="js/art-buildings-a.js?v=20261022f"></script>
-    <script src="js/art-buildings-b.js?v=20261022f"></script>
-    <script src="js/art-world.js?v=20261022f"></script>
-    <script src="js/art-units.js?v=20261022f"></script>
-    <script src="js/game.js?v=20261022f"></script>
-    <script src="js/ui.js?v=20261022f"></script>
-    <script src="js/features.js?v=20261022f"></script>
-    <script src="js/net.js?v=20261022f"></script>
-    <script src="js/boot.js?v=20261022f"></script>
+    <script src="js/data.js?v=20261022g"></script>
+    <script src="js/art-core.js?v=20261022g"></script>
+    <script src="js/art-buildings-a.js?v=20261022g"></script>
+    <script src="js/art-buildings-b.js?v=20261022g"></script>
+    <script src="js/art-world.js?v=20261022g"></script>
+    <script src="js/art-units.js?v=20261022g"></script>
+    <script src="js/game.js?v=20261022g"></script>
+    <script src="js/ui.js?v=20261022g"></script>
+    <script src="js/features.js?v=20261022g"></script>
+    <script src="js/net.js?v=20261022g"></script>
+    <script src="js/scoreboard.js?v=20261022g"></script>
+    <script src="js/boot.js?v=20261022g"></script>
 </body>
 </html>

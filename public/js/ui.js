@@ -100,7 +100,13 @@
             click('actRepair', () => this.openRepair());
             click('btnRest', () => this.toggleRest());
             click('btnSelect', () => this.toggleSelect());
-            click('grpShape', () => { this.selectShape = this.selectShape === 'box' ? 'line' : 'box'; this.updateGroupBar(); });
+            click('actWallView', () => this.toggleWallView());
+            click('btnGrid', () => this.toggleGrid());
+            click('btnBoardKingdom', () => this.openBoard());
+            click('btnBoardMenu', () => this.openBoard());
+            const shapes = $('grpShapes');
+            if (shapes) shapes.addEventListener('click', (e) => { const b = e.target.closest('[data-shape]'); if (!b) return; this.audio.click(); this.selectShape = b.dataset.shape; this.updateGroupBar(); });
+            click('grpWalls', () => this.toggleWallView());
             click('grpAdd', () => { this.selectAdd = !this.selectAdd; this.updateGroupBar(); });
             click('grpMove', () => this.startGroupMove());
             click('grpDelete', () => this.deleteSelection());
@@ -268,7 +274,8 @@
             const n = this.group.length;
             setText($('grpCount'), n ? `${n} picked` : 'Pick a row');
             $('grpMove').disabled = !n || !!this.gmove; $('grpDelete').disabled = !n;
-            setText($('grpShape'), this.selectShape === 'box' ? 'Box' : 'Row');
+            document.querySelectorAll('#grpShapes [data-shape]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.shape === this.selectShape)));
+            $('grpWalls').classList.toggle('on', this.wallView); $('grpWalls').setAttribute('aria-pressed', String(this.wallView));
             $('grpAdd').classList.toggle('on', this.selectAdd);
             this.updateHint();
         }
@@ -277,6 +284,10 @@
             this.canvas.classList.toggle('building', busy);
             this.canvas.classList.toggle('pointing', !busy && !!this.hoverBuilding);
             this.el.cancel.hidden = !busy;
+            const wv = $('actWallView');
+            if (wv) { wv.hidden = !(this.buildMode || this.moveMode || this.selectMode); wv.classList.toggle('on', this.wallView); wv.setAttribute('aria-pressed', String(this.wallView)); }
+            const gl = $('gridLegend'); if (gl) gl.hidden = !(busy && !this.spellMode || this.showGrid);
+            const bg = $('btnGrid'); if (bg) { bg.classList.toggle('on', this.showGrid); bg.setAttribute('aria-pressed', String(this.showGrid)); }
             this.el.app.classList.toggle('carrying', busy);
             this.updateHint();
         }
@@ -713,7 +724,7 @@
             setHtml($('armyList'), rows.map(([l, v]) => `<div class="stat-row"><span>${l}</span><span class="val">${v}</span></div>`).join(''));
             setHtml($('achievementList'), ACHS.map(a => `<div class="achievement ${this.achievements[a.id] ? 'done' : ''}" title="${esc(a.desc)}">${ico(this.achievements[a.id] ? 'trophy' : 'lock')}<div class="achievement-body"><div class="achievement-name">${a.name}</div><div class="achievement-desc">${a.desc}</div></div></div>`).join(''));
             const S = this.stats;
-            const st = [['Buildings built', S.built], ['Upgrades', S.upgrades], ['Raiders slain', S.kills], ['Golems toppled', S.bosses], ['Collections', S.clicks], ['Treasure Goblins caught', S.goblins], ['Spells cast', S.spells], ['Best combo', 'x' + S.maxCombo], ['Gold earned', fmt(S.goldEarned)], ['Waves cleared', S.wavesCleared], ['Time played', fmtDuration(S.playTime)], ['Storage cap', fmt(this.cap())], ['Gold multiplier', `x${(this.goldMult * this.prodMult()).toFixed(2)}`], ['XP multiplier', `x${this.xpMult.toFixed(2)}`], ['Prosperity', `+${(this.prosperity * 100).toFixed(1)}%`]];
+            const st = [['Buildings built', S.built], ['Upgrades', S.upgrades], ['Raiders slain', S.kills], ['Golems toppled', S.bosses], ['Collections', S.clicks], ['Treasure Goblins caught', S.goblins], ['Spells cast', S.spells], ['Best combo', 'x' + S.maxCombo], ['Gold earned', fmt(S.goldEarned)], ['Waves cleared', S.wavesCleared], ['XP earned', fmt(S.xpEarned)], ['Highest level', this.best.level], ['Furthest wave', this.best.wave], ['Time played', fmtDuration(S.playTime)], ['Storage cap', fmt(this.cap())], ['Gold multiplier', `x${(this.goldMult * this.prodMult()).toFixed(2)}`], ['XP multiplier', `x${this.xpMult.toFixed(2)}`], ['Prosperity', `+${(this.prosperity * 100).toFixed(1)}%`]];
             setHtml($('statList'), st.map(([l, v]) => `<div class="stat-row"><span>${l}</span><span class="val">${v}</span></div>`).join(''));
         }
 
@@ -821,6 +832,7 @@
         // ---------- dialogs ----------
         openPlainModal(html) {
             const modal = this.el.modal;
+            modal.querySelector('.modal-panel').classList.remove('wide');
             if (!modal.classList.contains('open')) this._modalReturnFocus = document.activeElement;
             this.modalBuilding = null;
             this.el.modalBody.innerHTML = html;
@@ -833,6 +845,7 @@
             if (this.boonOpen) return;
             if (!modal.classList.contains('open')) return;
             modal.classList.remove('open');
+            modal.querySelector('.modal-panel').classList.remove('wide');
             this.modalBuilding = null; this.repairOpen = false;
             if (this._modalPaused) { this._modalPaused = false; this.paused = false; this.lastTime = performance.now(); this.syncToggles(); }
             if (this._modalReturnFocus && document.contains(this._modalReturnFocus)) this._modalReturnFocus.focus({ preventScroll: true });
@@ -861,7 +874,7 @@
             const h = this.el.hint;
             let text = '';
             if (this.gmove) text = 'Tap where the picked buildings should go (blue means they fit). Esc cancels.';
-            else if (this.selectMode) text = this.group.length ? `${this.group.length} picked. Drag one to move them all, or press Delete. Drag again for a new row.` : 'Row tool: drag along a row or column to pick it. Shift drags a box. Esc stops.';
+            else if (this.selectMode) text = this.group.length ? `${this.group.length} picked. Press Move, or drag one to carry them all. Click another row to pick again, Delete removes them.` : ({ row: 'Click anywhere to pick that whole row.', col: 'Click anywhere to pick that whole column.', drag: 'Drag along a row or column to pick that stretch.', box: 'Drag a box to pick everything inside it.' })[this.selectShape] + ' Esc stops.';
             else if (this.buildMode) { const d = BLD[this.buildMode]; text = `Tap the grass to place the ${d.name}.${d.drag ? ' Drag to paint a line.' : ''} Esc cancels.`; }
             else if (this.moveMode) text = `Drop the ${BLD[this.moveMode.type].name} on an empty tile to move it, or on another building to swap places. Esc cancels.`;
             else if (this.spellMode) text = 'Tap the map to call down lightning. Esc cancels.';
@@ -958,7 +971,7 @@
             this.pauseForModal();
             const rows = [
                 [['Space'], 'Collect every ready coin bubble'], [['F'], 'Freeze all raiders'], [['U'], 'Upgrade the selected building (or the cheapest one)'],
-                [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3 / x5'], [['N'], 'Start the next raid now'], [['Z'], 'Rest between raids (raids wait, collectors at half rate)'], [['K'], 'Repair everything'], [['E'], 'Row tool: pick a row or box, then move or delete it'], [['Delete'], 'Delete the selected building or picked group'], [['←', '↑', '↓', '→'], 'Nudge the selected building or group one tile'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
+                [['P'], 'Pause / resume'], [['X'], 'Game speed x1 / x2 / x3 / x5'], [['N'], 'Start the next raid now'], [['Z'], 'Rest between raids (raids wait, collectors at half rate)'], [['K'], 'Repair everything'], [['E'], 'Row tool: click a row or column to pick it all, then move or delete it'], [['G'], 'Show only walls while placing, moving or picking'], [['B'], 'Scoreboard'], [['Delete'], 'Delete the selected building or picked group'], [['←', '↑', '↓', '→'], 'Nudge the selected building or group one tile'], [['W'], 'War Cry'], [['L'], 'Lightning, then click the map'],
                 [['A'], 'Auto-collect on / off'], [['R'], 'Rally defenses'], [['M'], 'Sound on / off'], [['T'], 'Light / dark theme'],
                 [['V'], 'Cycle the camera angle'], [['1', '2', '3', '4', '5'], 'Build · Upgrade · Kingdom · Co-op · Menu'],
                 [['+', '−'], 'Zoom'], [['0'], 'Back to the Town Hall'], [['Esc'], 'Cancel, deselect, close'],

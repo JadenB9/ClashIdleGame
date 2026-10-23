@@ -4,6 +4,7 @@
     K.installMixin(K.Game, K.UI);
     K.installMixin(K.Game, K.Features);
     K.installMixin(K.Game, K.Net);
+    K.installMixin(K.Game, K.Scoreboard);
     window.addEventListener('DOMContentLoaded', () => {
         const game = new K.Game();
         game.init();

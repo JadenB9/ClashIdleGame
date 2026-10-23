@@ -643,6 +643,7 @@
         //   v7 — wave boons, tutorial progress, seen tips, difficulty
         //   v8 — the map is 72x72 small tiles: buildings 3x3, walls 1x1, Town Hall 4x4; repair fund
         snapshot() {
+            this.noteBest();
             // Sanitize wave timer on write so a stale game-over value never leaks into saves
             const sanitizedTimer = Math.max(5, Math.min(this.wave.timer || CFG.waveBaseSec, Math.max(CFG.waveBaseSec, 120)));
             return {
@@ -662,7 +663,7 @@
                     view: this.settings.view, xray: this.settings.xray, autoUpgrade: this.settings.autoUpgrade,
                     levelTags: this.settings.levelTags, hints: this.settings.hints, raidStart: this.settings.raidStart, difficulty: this.settings.difficulty,
                 },
-                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen, pending: this.pendingBoon, reignCrowns: this.reignCrowns, repairFund: Math.floor(this.repairFund), sides: this.wave.active ? this.wave.sides : this.wave.nextSides },
+                meta: { crowns: this.crowns, perks: this.perks, ascensions: this.ascensions, crownsEver: this.crownsEver, boons: this.boons, tut: this.tut, tips: this.tipsSeen, pending: this.pendingBoon, reignCrowns: this.reignCrowns, repairFund: Math.floor(this.repairFund), best: this.best, sides: this.wave.active ? this.wave.sides : this.wave.nextSides },
                 quests: this.quests.map(q => ({ kind: q.kind, target: q.target, start: q.start, gems: q.gems, done: !!q.done })),
                 // While the tab is hidden the game is frozen, so the clock for
                 // offline earnings starts when it was hidden, not when we saved
@@ -781,6 +782,7 @@
             for (const k in this.stats) this.stats[k] = 0;
             this.achievements = {};
             this.crowns = 0; this.crownsEver = 0; this.perks = {}; for (const k in PERKS) this.perks[k] = 0; this.ascensions = 0;
+            this.best = { level: 1, wave: 0 };
             this.reignCrowns = 1; this.pendingBoon = false;
             this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, raidStart: 'auto', difficulty: 'normal' };
             this.repairFund = 0;
@@ -833,6 +835,11 @@
             this.crowns = Math.floor(safeNum(m.crowns, 0, 0, 1e9));
             this.crownsEver = Math.floor(safeNum(m.crownsEver, this.crowns, 0, 1e9));
             this.ascensions = Math.floor(safeNum(m.ascensions, 0, 0, 1e6));
+            this.best = { level: Math.floor(safeNum(m.best && m.best.level, 1, 1, 999)), wave: Math.floor(safeNum(m.best && m.best.wave, 0, 0, 1e6)) };
+            // saves from before XP was counted: what the current level alone took to earn
+            let xpSoFar = this.player.xp; for (let l = 1; l < this.player.level; l++) xpSoFar += CFG.xpToLevel(l);
+            this.stats.xpEarned = Math.max(this.stats.xpEarned, xpSoFar);
+            this.noteBest();
             this.perks = {};
             for (const k in PERKS) this.perks[k] = Math.floor(safeNum(m.perks && m.perks[k], 0, 0, PERKS[k].max));
             this.boons = {};

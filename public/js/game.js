@@ -111,13 +111,14 @@
             this.beams = [];
             this.particles = [];
             this.popups = [];
-            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0, goblins: 0, bosses: 0, boons: 0, freezes: 0, collects: 0 };
+            this.stats = { built: 0, kills: 0, upgrades: 0, clicks: 0, goldEarned: 0, spells: 0, maxCombo: 0, playTime: 0, wavesCleared: 0, goblins: 0, bosses: 0, boons: 0, freezes: 0, collects: 0, xpEarned: 0 };
             this.achievements = {};
             this.dayTime = 0.25; this.dayCount = 1;
             this.wave = { number: 0, timer: 120, active: false, spawnLeft: 0, spawnCd: 0, queue: [], next: [] };
 
             // ascension and quests
             this.crowns = 0; this.crownsEver = 0; this.ascensions = 0;
+            this.best = { level: 1, wave: 0 };         // highest level and furthest wave of any reign (level and wave restart on ascension)
             this.perks = {}; for (const k in PERKS) this.perks[k] = 0;
             this.quests = [];
 
@@ -129,7 +130,9 @@
             this.settings = { view: 'balanced', xray: true, autoUpgrade: 'off', levelTags: 'always', hints: true, raidStart: 'auto', difficulty: 'normal' };
             this.speed = 1;
             this.repairFund = 0;                       // gold set aside; repairs everything once it covers the damage
-            this.selectMode = false; this.selectDrag = null; this.selectShape = 'line'; this.selectAdd = false;
+            this.selectMode = false; this.selectDrag = null; this.selectShape = 'row'; this.selectAdd = false;
+            this.wallView = false;                     // while placing, moving or picking: fade everything but the walls
+            this.showGrid = false;                     // the build grid (open ground vs taken) on demand
             this.group = [];                           // buildings picked with the row tool
             this.gmove = null;                         // a group being carried: { grab } while dragging, { follow: true } after the Move button
 
@@ -191,6 +194,7 @@
                 if (this.coop.connected) this.disconnectCoop();
             });
             this.initCoop();
+            this.initBoard();
 
             const welcome = document.getElementById('welcome');
             const start = document.getElementById('welcomeStart');
@@ -472,7 +476,7 @@
                 const p = getPos(e);
                 const I = this.input;
                 I.touch = !!touch; I.paintWarned = false;
-                I.down = true; I.drag = false; I.dragMove = false; I.paint = false; I.sel = false; I.gdrag = false; I.gfollow = false; I.lastPaint = null;
+                I.down = true; I.drag = false; I.dragMove = false; I.paint = false; I.sel = false; I.gdrag = false; I.gfollow = false; I.gpend = null; I.lastPaint = null;
                 I.downX = I.lastX = I.x = p.x; I.downY = I.lastY = I.y = p.y;
                 I.shift = !!e.shiftKey;
                 this.audio.ensure();
@@ -481,7 +485,7 @@
                 if (this.selectMode) {
                     const t = this.screenToTile(p.x, p.y), o = this.buildingAt(t.tx, t.ty);
                     // grabbing a picked building carries the whole group
-                    if (o && this.group.includes(o)) { this.gmove = { grab: { tx: t.tx, ty: t.ty } }; I.gdrag = true; this.updateHover(); return; }
+                    if (o && this.group.includes(o)) I.gpend = { tx: t.tx, ty: t.ty };      // a drag carries the group, a plain click picks again
                     I.sel = true;
                     this.selectDrag = { a: { tx: t.tx, ty: t.ty }, b: { tx: t.tx, ty: t.ty }, box: !!e.shiftKey, add: !!(e.ctrlKey || e.metaKey) || this.selectAdd };
                     this.updateHover(); return;
@@ -504,6 +508,7 @@
                     const dist = Math.hypot(p.x - I.downX, p.y - I.downY);
                     if (I.paint) { this.updateHover(); paintAt(p.x, p.y); return; }
                     if (I.gdrag || I.gfollow) { this.updateHover(); return; }
+                    if (I.gpend && dist > DRAG) { this.gmove = { grab: I.gpend }; I.gdrag = true; I.sel = false; I.gpend = null; this.selectDrag = null; this.updateHover(); return; }
                     if (I.sel && this.selectDrag) { const t = this.screenToTile(p.x, p.y); this.selectDrag.b = { tx: t.tx, ty: t.ty }; this.updateHover(); return; }
                     if (!I.drag && dist > DRAG) {
                         I.drag = true;
@@ -528,7 +533,7 @@
                     else if (I.dragMove) this.commitMove();
                     else if (!I.drag) this.handleTap(I.x, I.y, I.shift);
                 }
-                I.down = false; I.drag = false; I.dragMove = false; I.paint = false; I.sel = false; I.gdrag = false; I.gfollow = false; I.downBuilding = null; I.downTarget = null;
+                I.down = false; I.drag = false; I.dragMove = false; I.paint = false; I.sel = false; I.gdrag = false; I.gfollow = false; I.gpend = null; I.downBuilding = null; I.downTarget = null;
             };
 
             c.addEventListener('mousedown', (e) => onDown(e, false));
@@ -619,6 +624,9 @@
             else if (k === 'z' || k === 'Z') this.toggleRest();
             else if (k === 'k' || k === 'K') this.openRepair();
             else if (k === 'e' || k === 'E') this.toggleSelect();
+            else if (k === 'b' || k === 'B') this.openBoard();
+            else if (k === 'g' || k === 'G') this.toggleWallView();
+            else if (k === 'd' || k === 'D') this.toggleGrid();
             else if (k === 'v' || k === 'V') { const n = Object.keys(VIEWS); this.changeView(n[(n.indexOf(this.settings.view) + 1) % n.length]); }
             else if (k === '?' || k === 'h' || k === 'H') this.showHelp();
             else if (k >= '1' && k <= '5') this.openPanel(['build', 'upgrade', 'kingdom', 'coop', 'menu'][k - 1]);
@@ -1459,6 +1467,7 @@
         // ---------- xp / level ----------
         gainXp(amt) {
             this.player.xp += amt * this.xpMult;
+            this.stats.xpEarned += amt * this.xpMult;
             let leveled = false;
             while (this.player.xp >= CFG.xpToLevel(this.player.level)) {
                 this.player.xp -= CFG.xpToLevel(this.player.level);
@@ -1700,6 +1709,11 @@
         }
 
         // ---------- ascension ----------
+        // level and wave start over with each reign, so the best of every reign is kept on the side
+        noteBest() {
+            this.best.level = Math.max(this.best.level, this.player.level);
+            this.best.wave = Math.max(this.best.wave, this.wave.number);
+        }
         // waves you have actually beaten (the wave in progress does not count yet)
         wavesSurvived() { return Math.max(0, this.wave.active ? this.wave.number - 1 : this.wave.number); }
         ascendGain() {
@@ -1719,6 +1733,7 @@
         // skipGain: a fallen kingdom below the ascension threshold starts a new reign with no crowns,
         // but keeps everything permanent
         ascend(skipGain = false) {
+            this.noteBest();
             clearTimeout(this._boonTimer);
             this.cancelModes();
             this.combo = { count: 0, time: 0, mult: 1 };
@@ -1924,7 +1939,7 @@
             A.world.drawMeadow(g, vx0, vy0, vx1, vy1);
             A.world.drawIsland(g);
             const carrying = this.buildMode || this.moveMode || this.selectMode;
-            if (carrying) this.drawGrid(g);
+            if (carrying || this.showGrid) this.drawGrid(g);
             this.drawSelect(g);
             if (this.buildMode && this.hoverTile) this.drawBuildGhost(g);
             if (this.moveMode && this.hoverTile) this.drawMoveGhost(g);
@@ -1965,6 +1980,8 @@
             while (si < scn.length) A.world.drawSceneryItem(g, scn[si++], t);
             for (const e of this.enemies) A.drawEnemyBar(g, e);
 
+            if (this.buildMode || this.moveMode || this.selectMode || this.showGrid) this.drawTaken(g);
+            this.drawPickPreview(g);
             this.drawBeams(g, t);
             for (const p of this.projectiles) this.drawProjectile(g, p);
             this.drawParticles(g);
@@ -2015,9 +2032,10 @@
         drawGrid(g) {
             const gw = CFG.gridW, gh = CFG.gridH, z = this.cam.zoom, px = 1 / z;
             g.save();
-            this.tilePoly(g, 0, 0, gw); g.fillStyle = 'rgba(6,22,10,0.14)'; g.fill();
+            // open ground reads green, ground with something on it reads red
+            this.tilePoly(g, 0, 0, gw); g.fillStyle = 'rgba(60,215,110,0.22)'; g.fill();
             const fine = clamp((z - 0.8) / 1.2, 0, 1);              // the single-tile lines fade out when zoomed out; the 3x3 block lines always stay
-            g.fillStyle = 'rgba(255,255,255,0.06)';
+            g.fillStyle = 'rgba(255,255,255,0.07)';
             g.beginPath();
             for (let by = 0; by < gh / S; by++) for (let bx = 0; bx < gw / S; bx++) {
                 if ((bx + by) & 1) continue;
@@ -2025,14 +2043,6 @@
                 g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.closePath();
             }
             g.fill();
-            // what is already standing there
-            const carried = new Set(this.gmove ? this.group : (this.moveMode ? [this.moveMode] : []));
-            for (const b of this.buildings) {
-                if (carried.has(b) || BLD[b.type].decor && false) continue;
-                this.tilePoly(g, b.tx, b.ty, BLD[b.type].size);
-                g.fillStyle = 'rgba(30,14,0,0.26)'; g.fill();
-                g.strokeStyle = 'rgba(255,238,190,0.7)'; g.lineWidth = 1.4 * px; g.stroke();
-            }
             // lines: dark underline first, then bright; every third is a building edge
             for (const major of [false, true]) {
                 const path = () => {
@@ -2060,11 +2070,13 @@
         }
 
         // ---------- the row tool: pick buildings by dragging along a row, a column or a box ----------
-        // The tiles under the drag. Along a row or column by default; Shift (or the Box button) drags a rectangle.
-        selectTiles() {
-            const s = this.selectDrag; if (!s) return [];
-            const { a, b } = s, out = [];
-            if (s.box || this.selectShape === 'box') {
+        // The tiles a pick covers. Row and Column take the whole line through the tile under the pointer (no dragging
+        // needed); Drag picks along a stretch you sweep; Box (or Shift) a rectangle.
+        tilesFor(a, b, shape) {
+            const out = [];
+            if (shape === 'row') for (let x = 0; x < CFG.gridW; x++) out.push({ tx: x, ty: b.ty });
+            else if (shape === 'col') for (let y = 0; y < CFG.gridH; y++) out.push({ tx: b.tx, ty: y });
+            else if (shape === 'box') {
                 for (let y = Math.min(a.ty, b.ty); y <= Math.max(a.ty, b.ty); y++) for (let x = Math.min(a.tx, b.tx); x <= Math.max(a.tx, b.tx); x++) out.push({ tx: x, ty: y });
             } else if (Math.abs(b.tx - a.tx) >= Math.abs(b.ty - a.ty)) {
                 for (let x = Math.min(a.tx, b.tx); x <= Math.max(a.tx, b.tx); x++) out.push({ tx: x, ty: a.ty });
@@ -2073,21 +2085,39 @@
             }
             return out.filter(t => t.tx >= 0 && t.ty >= 0 && t.tx < CFG.gridW && t.ty < CFG.gridH);
         }
-        // every building the drag touches (the Town Hall stays put)
-        pickInSel() {
+        selectTiles() {
+            const s = this.selectDrag; if (!s) return [];
+            return this.tilesFor(s.a, s.b, s.box ? 'box' : this.selectShape);
+        }
+        // every building on those tiles (the Town Hall stays put; in the walls-only view only walls count)
+        pickOn(tiles) {
             if (this.occDirty) this.rebuildOcc();
             const set = new Set();
-            for (const t of this.selectTiles()) { const o = this.cell(t.tx, t.ty); if (o && BLD[o.type].cat !== 'core') set.add(o); }
+            for (const t of tiles) { const o = this.cell(t.tx, t.ty); if (o && BLD[o.type].cat !== 'core' && (!this.wallView || o.type === 'wall')) set.add(o); }
             return [...set];
         }
+        pickInSel() { return this.pickOn(this.selectTiles()); }
         commitSelect() {
             const s = this.selectDrag, picks = this.pickInSel();
             this.selectDrag = null;
             if (s && s.add) { for (const b of picks) { const i = this.group.indexOf(b); if (i >= 0) this.group.splice(i, 1); else this.group.push(b); } }   // add mode toggles
             else this.group = picks;
-            if (!this.group.length) this.toast('Nothing there. Drag along a row of walls or buildings.', 'warn');
+            if (!this.group.length) this.toast(this.wallView ? 'No walls there.' : 'Nothing there. Click a row of walls or buildings.', 'warn');
             else this.audio.click();
             this.updateGroupBar();
+        }
+        // faded to walls only while something is being placed, moved or picked
+        wallsOnlyNow() { return this.wallView && !!(this.buildMode || this.moveMode || this.selectMode); }
+        toggleWallView() {
+            this.wallView = !this.wallView;
+            this.audio.click();
+            this.toast(this.wallView ? 'Walls only: everything else is faded out' : 'Showing everything', 'success');
+            this.updateGroupBar(); this.updateCanvasCursor();
+        }
+        toggleGrid() {
+            this.showGrid = !this.showGrid;
+            this.audio.click();
+            this.updateCanvasCursor();
         }
         toggleSelect(seed = null) {
             const on = !this.selectMode || !!seed;
@@ -2096,7 +2126,7 @@
             if (on) {
                 this.deselect();
                 if (seed) this.group = [seed];
-                this.toast('Row tool: drag along a row or column to pick it, then Move or Delete. Shift drags a box.', 'warn');
+                this.toast('Row tool: click a row or column to pick all of it, then Move or Delete.', 'warn');
             }
             this.updateGroupBar(); this.updateCanvasCursor();
         }
@@ -2195,6 +2225,39 @@
             }
             return out;
         }
+        // ground with something on it, drawn over the buildings so it stays visible under tall sprites: a red wash and a pale edge.
+        // What is being carried leaves its spot open.
+        drawTaken(g) {
+            const px = 1 / this.cam.zoom, carried = new Set(this.gmove ? this.group : (this.moveMode ? [this.moveMode] : []));
+            g.save();
+            for (const b of this.buildings) {
+                if (carried.has(b)) continue;
+                this.tilePoly(g, b.tx, b.ty, BLD[b.type].size);
+                g.fillStyle = 'rgba(232,64,40,0.34)'; g.fill();
+                g.strokeStyle = 'rgba(255,220,196,0.95)'; g.lineWidth = 1.5 * px; g.stroke();
+            }
+            g.restore();
+        }
+        // the row or column a click would pick, drawn over the buildings, with the buildings it would take
+        drawPickPreview(g) {
+            if (!this.selectMode || this.gmove) return;
+            const lineShape = this.selectShape === 'row' || this.selectShape === 'col';
+            if (!lineShape) return;
+            const at = this.selectDrag ? this.selectDrag.b : (!this.input.touch ? this.hoverTile : null);
+            if (!at) return;
+            this.lineBand(g, this.selectShape, at);
+            for (const b of this.pickOn(this.tilesFor(at, at, this.selectShape))) this.footprint(g, b, 'rgba(255,210,80,0.3)', 'rgba(255,240,170,0.95)', 1.6);
+        }
+        // one pale strip across the whole row or column through a tile
+        lineBand(g, shape, t) {
+            const gw = CFG.gridW, gh = CFG.gridH;
+            const pts = shape === 'row' ? [[0, t.ty], [gw, t.ty], [gw, t.ty + 1], [0, t.ty + 1]] : [[t.tx, 0], [t.tx + 1, 0], [t.tx + 1, gh], [t.tx, gh]];
+            g.beginPath();
+            pts.forEach(([x, y], i) => { const p = this.worldIso(x, y); if (i) g.lineTo(p.x, p.y); else g.moveTo(p.x, p.y); });
+            g.closePath();
+            g.fillStyle = 'rgba(255,230,120,0.3)'; g.fill();
+            g.strokeStyle = 'rgba(255,240,170,0.95)'; g.lineWidth = 2.2 / this.cam.zoom; g.stroke();
+        }
         footprint(g, b, fill, stroke, w = 1.6) {
             const s = BLD[b.type].size;
             this.tilePoly(g, b.tx, b.ty, s);
@@ -2203,13 +2266,14 @@
         }
         drawSelect(g) {
             const t = this.tnow;
+            const lineShape = this.selectShape === 'row' || this.selectShape === 'col';
             if (this.selectMode && this.hoverTile && !this.selectDrag && !this.gmove) { this.tilePoly(g, this.hoverTile.tx, this.hoverTile.ty); g.strokeStyle = 'rgba(255,225,120,0.95)'; g.lineWidth = 2; g.stroke(); }
             // the picked group, outlined in gold
             for (const b of this.group) this.footprint(g, b, `rgba(255,210,80,${0.2 + 0.08 * Math.sin(t * 6)})`, 'rgba(255,226,120,0.95)', 1.4);
             // the drag in progress
             if (this.selectDrag) {
-                const tiles = this.selectTiles(), picks = new Set(this.pickInSel());
-                for (const p of tiles) { this.tilePoly(g, p.tx, p.ty); g.fillStyle = 'rgba(255,230,140,0.16)'; g.fill(); }
+                const picks = new Set(this.pickInSel());
+                if (!lineShape) for (const p of this.selectTiles()) { this.tilePoly(g, p.tx, p.ty); g.fillStyle = 'rgba(255,230,140,0.16)'; g.fill(); }
                 for (const b of picks) this.footprint(g, b, 'rgba(255,210,80,0.32)', 'rgba(255,240,170,0.95)', 1.6);
                 const e = this.selectDrag.b, c = this.worldIso(e.tx + 0.5, e.ty + 0.5), n = picks.size;
                 g.font = '700 15px "Lilita One", "Nunito", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
@@ -2328,6 +2392,7 @@
             }
             if (carriedAway) target = 0.15;
             else if (this.input.dragMove) target = Math.min(target, 0.45);
+            if (this.wallsOnlyNow() && b.type !== 'wall') target = Math.min(target, 0.1);
             b.fade = b.fade === undefined ? target : b.fade + (target - b.fade) * 0.25;
             const alpha = b.fade;
 
@@ -2412,7 +2477,9 @@
             }
             const arrowOn = (b) => arrowSet.has(b) || ((b === this.selected || b === this.hoverBuilding) && this.settings.hints && this.upgradeReady(b));
             const small = zoom < 0.9;
+            const wallsOnly = this.wallsOnlyNow();
             for (const b of this.buildings) {
+                if (wallsOnly && b.type !== 'wall') continue;
                 const def = BLD[b.type];
                 const sp = this.spriteOf(b);
                 const c = this.centerOf(b);

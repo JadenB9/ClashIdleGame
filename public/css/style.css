@@ -754,3 +754,34 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
 .chip-btn.on { color: #4a2800; background: linear-gradient(180deg, var(--gold-a), var(--gold-b)); border-color: var(--gold-edge); }
 .chip-btn:hover { filter: brightness(1.15); }
 @media (max-width: 560px) { .wave-actions .btn.small { padding: 3px 7px; font-size: 12px; } .chip-btn { padding: 3px 7px; font-size: 11px; } }
+
+/* ---- scoreboard, grid legend and the walls-only view ---- */
+.board-open { margin: 2px 0 6px; }
+.board-open svg, #btnBoardMenu svg, #btnGrid svg, #grpWalls svg { width: 15px; height: 15px; margin-right: 5px; vertical-align: -3px; }
+.modal-panel.wide { width: min(760px, 100%); }
+.board-me { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 8px; font-weight: 700; }
+.board-me span { margin-right: auto; }
+.board-name { flex: 1 1 160px; min-width: 0; padding: 8px 10px; border-radius: 10px; border: 2px solid var(--edge); background: var(--panel-2, rgba(0,0,0,0.25)); color: inherit; font: 700 15px var(--font-body, inherit); }
+.board-sorts { margin: 6px 0 8px; flex-wrap: wrap; }
+.board-scroll { overflow-x: auto; max-height: 52dvh; overflow-y: auto; border-radius: 12px; border: 2px solid var(--edge); }
+.board { width: 100%; border-collapse: collapse; font-size: 14px; font-weight: 700; }
+.board th { position: sticky; top: 0; z-index: 1; padding: 7px 8px; text-align: right; font: 13px var(--font-display); letter-spacing: 0.3px; background: var(--panel-3, #1b2440); white-space: nowrap; }
+.board th:nth-child(-n+2) { text-align: left; }
+.board td { padding: 6px 8px; text-align: right; border-top: 1px solid rgba(255,255,255,0.08); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.board td.rk { text-align: left; width: 32px; color: var(--muted, #9aa6c4); }
+.board td.nm { text-align: left; white-space: normal; min-width: 190px; }
+.board td.nm small { display: block; margin-top: 2px; font-size: 11px; font-weight: 600; color: var(--muted, #9aa6c4); }
+.board td.nm em { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #ffd34a; color: #4a2800; }
+.board th.on, .board td.on { color: #ffd34a; }
+.board tr.me td { background: rgba(255,211,74,0.12); }
+.board tbody tr:nth-child(-n+3) td.rk { color: #ffd34a; font-family: var(--font-display); font-size: 16px; }
+.board-note { margin-top: 8px; }
+.grid-legend { position: absolute; bottom: 110px; left: 16px; display: flex; align-items: center; gap: 6px; padding: 3px 12px; border-radius: 12px; font: 13px var(--font-display); color: #fff; background: rgba(14,20,38,0.85); border: 2px solid rgba(255,255,255,0.35); pointer-events: none; z-index: 4; }
+.grid-legend[hidden] { display: none; }
+.grid-legend .lg { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid rgba(255,255,255,0.8); margin-left: 8px; }
+.grid-legend .lg:first-child { margin-left: 0; }
+.grid-legend .lg.open { background: rgba(60,215,110,0.75); }
+.grid-legend .lg.taken { background: rgba(232,64,40,0.85); }
+@media (max-width: 880px) { .grid-legend { bottom: 190px; } }
+.grp-shapes { flex-wrap: nowrap; }
+#actWallView.on, #btnGrid.on, #grpWalls.on { background: linear-gradient(180deg, var(--gold-a, #ffd95a), var(--gold-b, #e8a92a)); color: #4a2800; }
