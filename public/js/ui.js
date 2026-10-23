@@ -102,6 +102,7 @@
             click('btnSelect', () => this.toggleSelect());
             click('actWallView', () => this.toggleWallView());
             click('btnGrid', () => this.toggleGrid());
+            click('btnBoardHud', () => this.openBoard());
             click('btnBoardKingdom', () => this.openBoard());
             click('btnBoardMenu', () => this.openBoard());
             const shapes = $('grpShapes');

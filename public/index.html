@@ -6,7 +6,7 @@
     <!-- Scripts: the game's own files, PeerJS from unpkg (SRI below), Cloudflare's analytics beacon,
          and the one inline theme script by hash (recompute the sha256 if that script changes).
          Styles are external only; everything the JS toggles goes through classes or the CSSOM. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://static.cloudflareinsights.com 'sha256-BCKkW2ZyLWRPps2oQLHtHWzG0qJ73cYKXYsw/CTK4nA='; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com https://static.cloudflareinsights.com https://cloudflareinsights.com; base-uri 'self'; form-action 'none'; object-src 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://static.cloudflareinsights.com 'sha256-BCKkW2ZyLWRPps2oQLHtHWzG0qJ73cYKXYsw/CTK4nA='; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.j4den.com https://0.peerjs.com wss://0.peerjs.com https://static.cloudflareinsights.com https://cloudflareinsights.com; base-uri 'self'; form-action 'none'; object-src 'none'">
     <meta name="color-scheme" content="light dark">
     <meta name="theme-color" content="#ece2cc" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#141b2e" media="(prefers-color-scheme: dark)">
@@ -30,7 +30,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261022g">
+    <link rel="stylesheet" href="css/style.css?v=20261022h">
 </head>
 <body>
     <!-- Icon sprite. Colour icons carry their own fills; the rest use currentColor. -->
@@ -141,6 +141,7 @@
             </header>
 
             <div class="hud-left">
+                <button class="btn gold hud-board" id="btnBoardHud" type="button" title="Every player's best (B)"><svg aria-hidden="true"><use href="#i-trophy"/></svg>Scoreboard</button>
                 <div class="wave-card" id="wavePanel">
                     <div class="wave-head"><svg class="hud-ico" aria-hidden="true"><use href="#i-sword"/></svg><span id="waveInfo">Wave 1</span></div>
                     <div class="wave-timer" id="waveTimer">–</div>
@@ -411,17 +412,17 @@
     </div>
 
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
-    <script src="js/data.js?v=20261022g"></script>
-    <script src="js/art-core.js?v=20261022g"></script>
-    <script src="js/art-buildings-a.js?v=20261022g"></script>
-    <script src="js/art-buildings-b.js?v=20261022g"></script>
-    <script src="js/art-world.js?v=20261022g"></script>
-    <script src="js/art-units.js?v=20261022g"></script>
-    <script src="js/game.js?v=20261022g"></script>
-    <script src="js/ui.js?v=20261022g"></script>
-    <script src="js/features.js?v=20261022g"></script>
-    <script src="js/net.js?v=20261022g"></script>
-    <script src="js/scoreboard.js?v=20261022g"></script>
-    <script src="js/boot.js?v=20261022g"></script>
+    <script src="js/data.js?v=20261022h"></script>
+    <script src="js/art-core.js?v=20261022h"></script>
+    <script src="js/art-buildings-a.js?v=20261022h"></script>
+    <script src="js/art-buildings-b.js?v=20261022h"></script>
+    <script src="js/art-world.js?v=20261022h"></script>
+    <script src="js/art-units.js?v=20261022h"></script>
+    <script src="js/game.js?v=20261022h"></script>
+    <script src="js/ui.js?v=20261022h"></script>
+    <script src="js/features.js?v=20261022h"></script>
+    <script src="js/net.js?v=20261022h"></script>
+    <script src="js/scoreboard.js?v=20261022h"></script>
+    <script src="js/boot.js?v=20261022h"></script>
 </body>
 </html>

@@ -785,3 +785,6 @@ kbd { display: inline-block; min-width: 24px; padding: 1px 7px; margin-right: 3p
 @media (max-width: 880px) { .grid-legend { bottom: 190px; } }
 .grp-shapes { flex-wrap: nowrap; }
 #actWallView.on, #btnGrid.on, #grpWalls.on { background: linear-gradient(180deg, var(--gold-a, #ffd95a), var(--gold-b, #e8a92a)); color: #4a2800; }
+
+.hud-board { width: 100%; justify-content: center; padding: 7px 10px; font-size: 15px; }
+.hud-board svg { width: 18px; height: 18px; margin-right: 6px; vertical-align: -4px; }
